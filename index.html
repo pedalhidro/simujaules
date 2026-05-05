@@ -55,14 +55,93 @@
     .point-display { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); }
     .point-display.set { color: var(--accent-2); }
     #status { font-size: 11px; color: var(--muted); margin-top: 8px; min-height: 1.4em; }
-    .legend { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); margin-top: 6px; }
-    .swatch { display: inline-block; width: 60px; height: 8px; border-radius: 2px; background: linear-gradient(to right, #000004, #51127c, #b73779, #fc8961, #fcfdbf); }
+    .legend { margin-top: 8px; }
+    .swatch {
+      display: block;
+      width: 100%;
+      height: 10px;
+      border-radius: 2px;
+      background: linear-gradient(to right, #440154, #3b528b, #21918c, #5ec962, #fde725);
+    }
+    .legend-ticks {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 3px;
+      font-size: 10px;
+      font-family: ui-monospace, monospace;
+      color: var(--muted);
+    }
+    .legend-ticks .v { color: var(--text); }
     .progress { width: 100%; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 8px; display: none; }
     .progress.active { display: block; }
     .progress > .bar { height: 100%; background: var(--accent-2); width: 0; transition: width 0.1s; }
     .meta { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.6; font-family: ui-monospace, monospace; }
     .meta .v { color: var(--text); }
     .leaflet-container { background: #0a0c10; }
+    .credit {
+      margin-top: 14px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+      font-size: 10px;
+      color: var(--muted);
+      text-align: center;
+      font-style: italic;
+      line-height: 1.5;
+    }
+    .examples {
+      margin-top: 8px;
+    }
+    .ex-link {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 6px;
+      margin-top: 3px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 11px;
+      background: transparent;
+    }
+    .ex-link:hover {
+      border-color: var(--accent-2);
+      color: var(--accent-2);
+    }
+    .ex-tag {
+      font-size: 10px;
+      color: var(--muted);
+      font-family: ui-monospace, monospace;
+    }
+    .ex-link:hover .ex-tag { color: var(--accent-2); }
+    .layer-block {
+      border-top: 1px solid var(--border);
+      padding-top: 8px;
+      margin-top: 8px;
+    }
+    .layer-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .layer-head input[type="range"] { flex: 1; }
+    .layer-toggle {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin: 0;
+      color: var(--text);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .layer-toggle input { margin: 0; }
+    .hint {
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 4px;
+      line-height: 1.4;
+    }
     .engine-tag {
       display: inline-block;
       font-size: 10px;
@@ -85,6 +164,18 @@
       <div class="group">
         <h2>1. Load DEM</h2>
         <input type="file" id="dem-file" accept=".tif,.tiff" />
+        <div class="examples">
+          <div class="hint" style="margin-bottom: 4px;">or download (locally) an example:</div>
+          <a href="#" class="ex-link" id="ex-aguapreta">
+            Entorno da Água Preta <span class="ex-tag">~2 MB · instantâneo</span>
+          </a>
+          <a href="#" class="ex-link" id="ex-centro">
+            Sampa Centro Expandido <span class="ex-tag">~34 MB · rápido</span>
+          </a>
+          <a href="#" class="ex-link" id="ex-geral">
+            Sampa Sítio Urbano <span class="ex-tag">~540 MB · lento</span>
+          </a>
+        </div>
         <div class="meta" id="dem-meta">No DEM loaded.</div>
       </div>
 
@@ -117,17 +208,127 @@
         </div>
         <label>η (downhill recovery, 0–1)</label>
         <input type="number" id="eta" value="0.1" step="0.05" min="0" max="1" />
+        <label style="margin-top: 12px; display: flex; align-items: center; gap: 6px;">
+          <input type="checkbox" id="want-passes" />
+          <span>Compute passes count (route density)</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 6px;">
+          <input type="checkbox" id="want-topn" />
+          <span>Compute top-N routes</span>
+        </label>
+        <div id="topn-extra" style="display: none;">
+          <div class="row">
+            <div>
+              <label>N (1–20)</label>
+              <input type="number" id="n-routes" value="3" min="1" max="20" step="1" />
+            </div>
+            <div>
+              <label>penalty / strength</label>
+              <input type="number" id="penalty" value="2.0" min="0" step="0.1" />
+            </div>
+          </div>
+          <label>Repulsion mode</label>
+          <select id="repulsion-mode">
+            <option value="per-cell">per-cell (penalty^used) — sharp</option>
+            <option value="linear">linear 1/(d+1) — soft, wide</option>
+            <option value="square">square 1/(d²+1) — soft, local</option>
+          </select>
+          <label>Routes colormap</label>
+          <select id="routes-colormap"></select>
+        </div>
+
+        <label>Field colormap</label>
+        <select id="colormap"></select>
       </div>
 
       <button id="run" disabled>Compute</button>
+      <div id="time-estimate" style="font-size: 10px; color: var(--muted); margin-top: 4px; text-align: center;"></div>
       <div class="progress" id="progress"><div class="bar"></div></div>
       <div id="status"></div>
 
       <div class="group" style="margin-top: 12px;">
         <h2>Result</h2>
         <div class="meta" id="result-meta">—</div>
-        <div class="legend"><span>low</span><span class="swatch"></span><span>high</span></div>
+        <div class="legend">
+          <div class="swatch"></div>
+          <div class="legend-ticks">
+            <span class="v" id="legend-lo">0</span>
+            <span class="v" id="legend-mid">—</span>
+            <span class="v" id="legend-hi">—</span>
+          </div>
+        </div>
+
+        <!-- rmsampa-v2 tilemap (XYZ tiles from telhas.pedalhidrografi.co) -->
+        <div class="layer-block">
+          <div class="layer-head">
+            <label class="layer-toggle">
+              <input type="checkbox" id="tile-visible" />
+              <span>rmsampa-v2 tiles</span>
+            </label>
+            <input type="range" id="tile-opacity" min="0" max="1" step="0.05" value="0.85" />
+          </div>
+          <div class="hint">
+            <a href="https://telhas.pedalhidrografi.co/rmsampa-v2/" target="_blank" rel="noopener" style="color: var(--accent-2);">XYZ tiles</a>
+            from pedalhidrografi.co.
+          </div>
+        </div>
+
+        <!-- Energy layer controls -->
+        <div class="layer-block">
+          <div class="layer-head">
+            <label class="layer-toggle">
+              <input type="checkbox" id="energy-visible" checked />
+              <span>Energy</span>
+            </label>
+            <input type="range" id="energy-opacity" min="0" max="1" step="0.05" value="0.85" />
+          </div>
+          <div class="row">
+            <div>
+              <label>min</label>
+              <input type="number" id="vmin" placeholder="auto" step="any" />
+            </div>
+            <div>
+              <label>max</label>
+              <input type="number" id="vmax" placeholder="auto" step="any" />
+            </div>
+          </div>
+          <div class="hint">Auto = sqrt-stretched; pin either bound for linear with clamping.</div>
+        </div>
+
+        <!-- Passes layer controls (overlaid above energy) -->
+        <div class="layer-block" id="passes-row" style="display: none;">
+          <div class="layer-head">
+            <label class="layer-toggle">
+              <input type="checkbox" id="passes-visible" checked />
+              <span>Passes (overlay)</span>
+            </label>
+            <input type="range" id="passes-opacity" min="0" max="1" step="0.05" value="0.7" />
+          </div>
+          <div class="row">
+            <div>
+              <label>min</label>
+              <input type="number" id="passes-vmin" placeholder="auto" step="any" />
+            </div>
+            <div>
+              <label>max</label>
+              <input type="number" id="passes-vmax" placeholder="auto" step="any" />
+            </div>
+          </div>
+          <label>Blend</label>
+          <select id="passes-blend">
+            <option value="plus-lighter">add (plus-lighter)</option>
+            <option value="normal">normal</option>
+            <option value="screen">screen</option>
+            <option value="multiply">multiply</option>
+            <option value="overlay">overlay</option>
+          </select>
+          <div class="hint">Greyscale ramp; with "add" mode high-pass cells brighten the energy field beneath. Same auto / pinned-range behaviour as Energy.</div>
+        </div>
+
+        <button class="secondary" id="range-reset" style="margin-top: 6px;">Reset ranges to auto</button>
       </div>
+
+      <div class="credit">feito por Claúdio e dirigido pelos neogeógrafos geomorfológicos</div>
     </aside>
     <div id="map"></div>
   </div>

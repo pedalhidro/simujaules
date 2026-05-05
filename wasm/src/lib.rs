@@ -24,6 +24,7 @@ pub struct EnergySolver {
     mask: Vec<u8>,
     energy: Vec<f32>,
     parents: Vec<i32>,
+    settled: Vec<u8>,
 }
 
 #[wasm_bindgen]
@@ -40,6 +41,7 @@ impl EnergySolver {
             mask: vec![0_u8; n],
             energy: vec![f32::INFINITY; n],
             parents: vec![-1_i32; n],
+            settled: vec![0_u8; n],
         }
     }
 
@@ -88,6 +90,9 @@ impl EnergySolver {
         // Reset state. parents only need clearing if we're going to read them.
         for v in self.energy.iter_mut() {
             *v = f32::INFINITY;
+        }
+        for v in self.settled.iter_mut() {
+            *v = 0;
         }
         if track_parents {
             for v in self.parents.iter_mut() {
@@ -157,10 +162,17 @@ impl EnergySolver {
                 }
             }
 
-            // Stale heap entry: a better path was found after this was pushed.
-            if g > self.energy[idx] {
+            // Filter stale heap entries via a per-cell `settled` flag rather
+            // than `g > self.energy[idx]`. Strict-greater-than is fragile in
+            // the presence of equal-priority duplicates (and matches the JS
+            // worker's bug-fix shape, so the two implementations stay in
+            // structural lockstep).
+            if self.settled[idx] != 0 {
                 continue;
             }
+            self.settled[idx] = 1;
+            // Drop the unused `g` warning while we're here.
+            let _ = g;
 
             let r = idx / w;
             let c = idx % w;
@@ -174,6 +186,12 @@ impl EnergySolver {
                 }
                 let n_idx = (nr as usize) * w + (nc as usize);
                 if self.mask[n_idx] == 0 {
+                    continue;
+                }
+                // Skip already-settled neighbours. Symmetric to the settled-
+                // flag staleness check; required for parents-tracking modes
+                // (passes count) where a stray relax can corrupt the tree.
+                if self.settled[n_idx] != 0 {
                     continue;
                 }
 

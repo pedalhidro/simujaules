@@ -31,9 +31,24 @@ It's a static site. From the project directory:
 Then open <http://localhost:8000>. (Workers need to be served over HTTP,
 not opened from `file://`.)
 
-For deployment, drop the static files onto any static host: GitHub
-Pages, Cloudflare Pages, S3 + CloudFront, Netlify, etc. No backend, no
-API keys (unless you swap in a paid basemap).
+For deployment to the production target (GCS + Cloud CDN behind
+`telhas.pedalhidrografi.co/simujoules/`):
+
+    ./deploy.sh
+
+The script builds the wasm bundle, stages just the deployable files
+(skipping Rust source, the QGIS plugins, and test harnesses), rsyncs
+to `gs://telhas/simujoules/`, sets `Content-Type`
+on the `.wasm` and `Cache-Control` on everything, then invalidates
+the Cloud CDN cache for `/simujoules/*`. Set the URL-map name in the
+`URL_MAP` env var if the default guess in the script is wrong (find
+candidates with `gcloud compute url-maps list`). Drop `--skip-wasm`
+into the args if you only changed HTML/JS and the existing
+`wasm/pkg/` is still fresh.
+
+For any other static host (GitHub Pages, Cloudflare Pages, S3 +
+CloudFront, Netlify, etc.) drop the same set of files manually. No
+backend, no API keys (unless you swap in a paid basemap).
 
 ## Building the wasm engine
 
@@ -60,22 +75,41 @@ engines produce identical results. If you change the cost model in one,
 mirror it in the other or you'll get inconsistent answers depending on
 which engine is loaded.
 
-## Prototype scope
+## Features
 
-This is intentionally minimal — it covers the energy-field algorithm in
-three modes (from / to / round trip) plus optional point-to-point path
-visualisation. Not yet ported:
+By default the worker computes only the energy field. Two extra features
+ported from the QGIS plugins are available behind toggles in the
+Parameters panel:
 
-- **Passes count** (route density). Same algorithm in the worker plus a
-  subtree-accumulation pass; ~50 lines.
-- **Top-N routes** with distance repulsion. Needs a Euclidean distance
-  transform; either port `distance_transform_edt` (the two-pass method
-  is short) or use a simple BFS-based approximation.
+- **Passes count** (route density / shortest-path-tree subtree size at
+  each cell). Adds a parent + settle-order tracking pass to Dijkstra and
+  a reverse-walk subtree accumulation. After computing, a "Display:
+  Energy / Passes" radio appears in the Result panel; switching is a
+  pure re-render with no recompute. Round-trip mode sums the outbound
+  and return passes, matching the QGIS plugin.
+
+- **Top-N routes** between source and destination via iterative
+  penalisation. Each iteration runs A\* with `mult = penalty^used` on
+  the alpha\*dist component for already-traversed cells, so subsequent
+  routes deviate. Default penalty = 2.0 doubles the baseline cost per
+  prior pass; raise it for more spatially distinct alternatives,
+  lower it for closer-to-optimal twins. Routes are drawn as coloured
+  polylines on the map and listed in the Result panel with energy,
+  length, and shared-cell count.
+
+The wasm worker doesn't yet implement either; when you tick passes or
+top-N the app automatically falls back to the JS worker for that
+compute and the engine tag will show `js` until you turn the toggles
+back off.
+
+Still not ported from the QGIS plugins:
+
 - **Network constraint** (rasterised line layer). Needs a way to read
   vector data — easiest is a GeoJSON drag-and-drop, then a JS line
   rasteriser, then AND with the mask.
-- **Energy / distance budgets** (constrained reachability). Single-resource
-  case (energy budget only) is just a cutoff in the worker; ~3 extra lines.
+- **Energy / distance budgets** (constrained reachability). Single-
+  resource case (energy budget only) is just a cutoff in the worker;
+  ~3 extra lines.
 
 ## Known limitations
 
