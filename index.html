@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Asymmetric Energy Field</title>
+  <title>Simulador bici-geo-energético</title>
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -30,7 +30,18 @@
       overflow-y: auto;
     }
     #map { height: 100vh; }
-    h1 { font-size: 16px; font-weight: 600; margin: 0 0 12px 0; }
+    h1 {
+      font-size: 15px;
+      font-weight: 600;
+      margin: 0 0 6px 0;
+      line-height: 1.25;
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0 0 12px 0;
+    }
     .group { border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 12px; }
     .group h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 8px 0; font-weight: 500; }
     label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; margin-top: 8px; }
@@ -150,23 +161,155 @@
       line-height: 1.4;
     }
     .engine-tag {
-      display: inline-block;
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      /* override the universal `button { width: 100% }` rule */
+      width: auto;
+      height: 18px;
+      min-width: 26px; /* slightly wider than the 18 px ? button */
+      padding: 0 6px;
       font-size: 10px;
       font-family: ui-monospace, monospace;
       letter-spacing: 0.05em;
+      line-height: 1;
       color: var(--muted);
+      background: transparent;
       border: 1px solid var(--border);
-      border-radius: 3px;
-      padding: 1px 5px;
-      margin-left: 6px;
+      border-radius: 9px; /* full pill */
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+    .engine-tag:hover:not(:disabled) {
+      color: var(--accent-2);
+      border-color: var(--accent-2);
+    }
+    .engine-tag:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+    .help-button {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      width: 18px !important; /* override the universal button:width:100% */
+      height: 18px;
+      font-size: 12px;
+      font-family: ui-monospace, monospace;
+      font-weight: 700;
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      padding: 0;
+      cursor: pointer;
       vertical-align: middle;
+      line-height: 1;
+    }
+    .help-button:hover {
+      border-color: var(--accent-2);
+      color: var(--accent-2);
+    }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .modal-backdrop.active { display: flex; }
+    .modal {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      width: min(960px, 100%);
+      max-height: 86vh;
+      overflow-y: auto;
+      padding: 24px 28px;
+      position: relative;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+    }
+    .modal-close {
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+    .modal-close:hover { color: var(--text); background: var(--border); }
+    .modal-pages {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 28px;
+    }
+    @media (max-width: 720px) {
+      .modal-pages { grid-template-columns: 1fr; }
+    }
+    .modal-page h3 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      color: var(--accent-2);
+      letter-spacing: 0.02em;
+    }
+    .modal-page h4 {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 14px 0 4px;
+    }
+    .modal-page p, .modal-page li {
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--text);
+      margin: 6px 0;
+    }
+    .modal-page ol, .modal-page ul {
+      padding-left: 20px;
+      margin: 4px 0;
+    }
+    .modal-page code {
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      background: var(--bg);
+      padding: 1px 4px;
+      border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+    .modal-page .formula {
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      background: var(--bg);
+      padding: 6px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      margin: 6px 0;
+      white-space: pre;
+      overflow-x: auto;
     }
   </style>
 </head>
 <body>
   <div id="app">
     <aside id="panel">
-      <h1>Asymmetric Energy Field<span class="engine-tag" id="engine-tag" title="Compute engine in use">…</span></h1>
+      <h1>Simulador bici-geo-energético</h1>
+      <div class="header-actions">
+        <button type="button" class="engine-tag" id="engine-tag" title="Compute engine — click to toggle">js</button>
+        <button type="button" class="help-button" id="help-btn" aria-label="Help" title="How it works">?</button>
+      </div>
 
       <div class="group">
         <h2>1. Load DEM</h2>
@@ -174,7 +317,7 @@
         <div class="examples">
           <div class="hint" style="margin-bottom: 4px;">or download (locally) an example:</div>
           <a href="#" class="ex-link" id="ex-aguapreta">
-            Entorno da Água Preta <span class="ex-tag">~2 MB · instantâneo</span>
+            Entorno da Água Preta <span class="ex-tag">~2 MB · imediato</span>
           </a>
           <a href="#" class="ex-link" id="ex-centro">
             Sampa Centro Expandido <span class="ex-tag">~34 MB · rápido</span>
@@ -190,8 +333,39 @@
         <input type="file" id="bundle-file" accept=".zip,.jsonld,.json" style="margin-top: 4px;" />
       </div>
 
+      <div class="group">
+        <h2>1b. Optional vector network (.gpkg)</h2>
+        <input type="file" id="vector-file" accept=".gpkg" />
+        <div class="row" style="margin-top: 8px;">
+          <div>
+            <label>line width (cells)</label>
+            <input type="number" id="vec-width" value="1" min="1" max="10" step="1" />
+          </div>
+          <div>
+            <label>snap radius (cells)</label>
+            <input type="number" id="vec-snap" value="10" min="0" max="200" step="1" />
+          </div>
+        </div>
+        <button type="button" class="secondary" id="vec-clear" style="margin-top: 6px;">Clear network</button>
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--text);">
+          <input type="checkbox" id="net-interp" checked />
+          <span>Interpolate energy across non-network cells</span>
+        </label>
+        <div class="row" style="margin-top: 4px;">
+          <div>
+            <label>max distance (cells)</label>
+            <input type="number" id="net-interp-max-dist" value="50" min="1" max="500" step="1" />
+          </div>
+          <div>
+            <label>smoothing iters</label>
+            <input type="number" id="net-interp-smoothing" value="0" min="0" max="20" step="1" />
+          </div>
+        </div>
+        <div class="meta" id="vec-meta">No network loaded.</div>
+      </div>
+
       <div class="group" id="pick-points-group">
-        <h2>2. Pick points (click on map)</h2>
+        <h2>2. Pick points</h2>
         <label>Source</label>
         <div class="point-display" id="src-display">— click map to set —</div>
         <label>Destination (optional)</label>
@@ -287,7 +461,6 @@
       <div class="group" style="margin-top: 12px;">
         <h2>Result</h2>
         <button type="button" id="refresh-style" class="secondary" style="margin-bottom: 8px;">Refresh style</button>
-        <div class="hint" style="margin: -4px 0 8px;">Colormap, range, gamma, mean filter and blend changes apply on click.</div>
         <div class="meta" id="result-meta">—</div>
         <div class="legend">
           <div class="swatch"></div>
@@ -361,7 +534,7 @@
             </div>
             <div>
               <label>mean filter N</label>
-              <input type="number" id="passes-mean-window" value="10" min="1" max="200" step="1" />
+              <input type="number" id="passes-mean-window" value="5" min="1" max="200" step="1" />
             </div>
           </div>
           <label>Blend</label>
@@ -391,6 +564,75 @@
   ></script>
   <script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.0/dist/proj4.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
   <script type="module" src="./app.js"></script>
+
+  <div class="modal-backdrop" id="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-modal-title">
+    <div class="modal">
+      <button type="button" class="modal-close" id="help-close" aria-label="Close">×</button>
+      <h2 id="help-modal-title" style="margin: 0 0 16px; font-size: 16px;">Simulador bici-geo-energético</h2>
+      <div class="modal-pages">
+        <div class="modal-page">
+          <h3>Como usar</h3>
+
+          <h4>1 · Carregar um DEM</h4>
+          <p>Use o seletor de arquivo para abrir um GeoTIFF local, ou clique em um dos exemplos hospedados (imediato / rápido / lento). O DEM é mostrado por um retângulo tracejado e o mapa centra automaticamente.</p>
+
+          <h4>2 · Marcar pontos</h4>
+          <p><strong>Modo padrão:</strong> clique no mapa para o ponto-fonte (<code>src</code>). Um segundo clique marca o destino (<code>dst</code>) — necessário para "to destination", "round trip" e "top-N rotas".</p>
+          <p><strong>Modo densidade multi-referência:</strong> ative <em>Compute multi-reference density</em>. Os cliques agora adicionam pontos de referência (numerados). Use "Place random" para uma amostra aleatória ou ajuste <em>N references</em>. A política é FIFO: ao exceder N o mais antigo é descartado.</p>
+
+          <h4>3 · Parâmetros</h4>
+          <p><code>α</code> custo por metro horizontal · <code>β</code> custo por metro de subida · <code>η</code> fração da subida recuperada na descida (0–1) · <em>Energy budget</em> para podar caminhos acima de um limiar (≤0 = sem orçamento).</p>
+
+          <h4>4 · Computar</h4>
+          <p>Clique em <em>Compute</em>. O botão fica habilitado quando há fonte (modo padrão) ou pelo menos uma referência (modo densidade). Uma estimativa de tempo aparece antes da execução; durante o processo, a barra de progresso mostra o tempo restante.</p>
+
+          <h4>5 · Visualização</h4>
+          <p>As camadas <em>Energy</em> e <em>Passes</em> têm visibilidade, opacidade e blend independentes. Mudanças em colormap, range, gamma, mean filter e blend ficam pendentes até <em>Refresh style</em> — evita re-renderizar a cada digitação em DEMs grandes.</p>
+
+          <h4>6 · Salvar / restaurar</h4>
+          <p><em>Download bundle (.zip)</em> empacota um <code>metadata.jsonld</code> com todos os parâmetros mais os arrays binários (energy.bin, passes.bin) e GeoJSON das rotas. Para reproduzir um cálculo: carregue o mesmo DEM, depois use o seletor abaixo para ler o JSON-LD ou o ZIP.</p>
+        </div>
+
+        <div class="modal-page">
+          <h3>O que estamos fazendo</h3>
+
+          <h4>Modelo de custo assimétrico</h4>
+          <p>Cada movimento entre células adjacentes (4 cardinais + 4 diagonais) tem um custo em "joules normalizados". Com <code>Δh = h_v − h_u</code>:</p>
+          <div class="formula">subida (Δh ≥ 0):  α·dist + β·Δh
+descida (Δh &lt; 0): max(0, α·dist − η·β·|Δh|)</div>
+          <p>Padrão <code>α = 0.008</code> (8 mJ/m horizontal), <code>β = 1</code> (1 J/m de subida), <code>η = 0.1</code> (10% da descida vira recuperação). É um modelo grosseiro de ciclista: andar no plano custa pouco, subir custa muito, descer pode até <em>devolver</em> energia até zero.</p>
+
+          <h4>Campo de energia</h4>
+          <p>Dijkstra sobre todas as células passáveis a partir do ponto-fonte (ou para o ponto-destino, com arestas reversas) dá o custo mínimo de chegar a cada célula. É isso que a camada <em>Energy</em> renderiza.</p>
+
+          <h4>Modos</h4>
+          <p><em>From source</em>: campo direto a partir de <code>src</code>. <em>To destination</em>: campo reverso para <code>dst</code> — útil em terreno assimétrico (subir é mais caro que descer). <em>Round trip</em>: soma ida + volta, dando o custo total de "ir e voltar" passando por cada célula.</p>
+
+          <h4>Contagem de passagens</h4>
+          <p>Para cada célula <code>c</code>, quantos caminhos ótimos passam por <code>c</code>. É o tamanho da subárvore enraizada em <code>c</code> na árvore de caminhos mínimos. Destaca corredores naturais ("autoestradas") da paisagem energética.</p>
+
+          <h4>Top-N rotas</h4>
+          <p>A* com penalização iterativa: encontre a rota ótima, multiplique o termo <code>α·dist</code> em suas células por uma penalidade, repita N vezes. Modos de repulsão: <em>per-cell</em> (penaliza só células reusadas, bordas duras), <em>linear</em> (1/(d+1), repulsão suave e ampla), <em>square</em> (1/(d²+1), suave e local).</p>
+
+          <h4>Densidade multi-referência</h4>
+          <p>Para K pontos de referência: para cada um, computa as passagens, normaliza por <code>H·W</code>, soma; depois divide por <code>H·W</code> de novo. O resultado destaca corredores comuns entre múltiplas origens — útil para mapear "onde a topografia força a passagem". A camada de energia neste modo é a média por célula sobre as referências que conseguem alcançá-la.</p>
+
+          <h4>Restrição por rede vetorial (.gpkg)</h4>
+          <p>Quando um arquivo de linhas vetoriais é carregado, toda a análise fica restrita às células tocadas por essas linhas — Dijkstra ignora qualquer célula fora da rede, e cliques no mapa "agarram" para a célula de rede mais próxima dentro do raio de snap configurado.</p>
+          <p><strong>Largura da linha</strong> (em células) controla a espessura do carimbo durante a rasterização. <strong>Raio de snap</strong> é a distância máxima (em células) que o clique procura uma célula de rede antes de desistir. As coordenadas das linhas são reprojetadas via <code>proj4js</code> para o CRS do DEM antes da rasterização.</p>
+
+          <h4>Interpolação fora da rede</h4>
+          <p>Visualização opcional: preenche as células fora da rede com uma média dos valores da rede em redor, usando o mesmo algoritmo do GDAL <code>fillnodata</code>. Para cada célula vazia, busca em 8 direções até encontrar uma célula de rede dentro de <strong>max distance</strong> (em células); calcula a média ponderada por <code>1/d²</code> dos (até 8) acertos. Em seguida, aplica <strong>smoothing iters</strong> passes de média 3×3 sobre o preenchimento — preservando os valores originais da rede.</p>
+          <p>Apenas para visualização; a análise (Dijkstra, top-N, densidade) continua estritamente sobre a rede.</p>
+
+          <h4>Implementação</h4>
+          <p>Dois engines: JS (Dijkstra com heap binário sobre <code>Float64Array</code>) e Wasm (Rust compilado, mesmo algoritmo, ~3–5× mais rápido). O Wasm cobre só o caminho energy-only; passes / top-N / densidade / orçamento ainda rodam no JS.</p>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

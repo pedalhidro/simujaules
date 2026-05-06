@@ -396,6 +396,105 @@ function chamferDistanceTransform(seedMask, H, W) {
   return dist;
 }
 
+// GDAL-style fillnodata: for each non-network cell within demMask, walk
+// outward in 8 directions until a network cell with a finite energy is
+// found (up to maxDistance cells per direction). The cell's filled value
+// is the inverse-squared-distance-weighted mean of those (up to 8) hits.
+// Cells with no hits stay Infinity.
+//
+// Optional 3×3 box smoothing afterwards — network cells are preserved so
+// smoothing only shifts the fill values.
+//
+//   E:           Float32Array; energies from the constrained Dijkstra.
+//   networkMask: 1 on network cells.
+//   demMask:     1 on every cell that should be filled.
+//   maxDistance: ray search cap, in cells.
+//   smoothing:   number of 3×3 box-smooth passes over the fill (0 = none).
+function fillAcrossNetwork(E, networkMask, demMask, H, W, dx, dy, maxDistance, smoothing) {
+  const out = idwFill(E, networkMask, demMask, H, W, dx, dy, maxDistance);
+  let buf = out;
+  for (let s = 0; s < smoothing; s++) {
+    buf = boxSmoothPreserveNetwork(buf, networkMask, demMask, H, W);
+  }
+  return buf;
+}
+
+function idwFill(E, networkMask, demMask, H, W, dx, dy, maxDistance) {
+  const N = H * W;
+  const out = new Float32Array(E);
+  const dDiag = Math.hypot(dx, dy);
+  // Eight rays: dr, dc, per-step Euclidean cost.
+  const dirs = [
+    [-1,  0, dy],
+    [-1,  1, dDiag],
+    [ 0,  1, dx],
+    [ 1,  1, dDiag],
+    [ 1,  0, dy],
+    [ 1, -1, dDiag],
+    [ 0, -1, dx],
+    [-1, -1, dDiag],
+  ];
+  const max = Math.max(1, maxDistance | 0);
+
+  for (let r = 0; r < H; r++) {
+    for (let c = 0; c < W; c++) {
+      const idx = r * W + c;
+      if (!demMask[idx]) continue;
+      // Network cells with finite E are the seeds — leave them alone.
+      if (networkMask[idx] && Number.isFinite(E[idx])) continue;
+
+      let weighted = 0;
+      let weightSum = 0;
+      for (let k = 0; k < 8; k++) {
+        const dr = dirs[k][0], dc = dirs[k][1], step = dirs[k][2];
+        let nr = r, nc = c, dist = 0;
+        for (let s = 0; s < max; s++) {
+          nr += dr; nc += dc; dist += step;
+          if (nr < 0 || nr >= H || nc < 0 || nc >= W) break;
+          const ni = nr * W + nc;
+          // Walk over any cells (network or not) but only contribute when we
+          // hit a network cell with a finite seed value. The loop terminates
+          // at the first such hit per direction.
+          if (networkMask[ni] && Number.isFinite(E[ni])) {
+            const w = 1 / (dist * dist);
+            weighted += E[ni] * w;
+            weightSum += w;
+            break;
+          }
+        }
+      }
+      out[idx] = weightSum > 0 ? weighted / weightSum : Infinity;
+    }
+  }
+  return out;
+}
+
+// 3×3 average over cells within demMask. Network cells keep their input
+// value (we never want smoothing to leak into the actual analysis output);
+// other cells get the mean of any finite neighbours, which softens the
+// IDW fill's directional artefacts.
+function boxSmoothPreserveNetwork(E, networkMask, demMask, H, W) {
+  const out = new Float32Array(E);
+  for (let r = 0; r < H; r++) {
+    for (let c = 0; c < W; c++) {
+      const idx = r * W + c;
+      if (!demMask[idx] || networkMask[idx] || !Number.isFinite(E[idx])) continue;
+      let sum = 0, n = 0;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          const nr = r + dr, nc = c + dc;
+          if (nr < 0 || nr >= H || nc < 0 || nc >= W) continue;
+          const ni = nr * W + nc;
+          if (!demMask[ni] || !Number.isFinite(E[ni])) continue;
+          sum += E[ni]; n++;
+        }
+      }
+      if (n > 0) out[idx] = sum / n;
+    }
+  }
+  return out;
+}
+
 // Reconstruct a path from the parents array; returns flat indices.
 function reconstructPath(parents, goalIdx) {
   const path = [];
@@ -429,11 +528,24 @@ self.onmessage = (ev) => {
     wantDensity = false,                                  // multi-ref passes density
     refPoints = null,                                     // [[r0,c0],[r1,c1], …]
     densityMode = "from",                                 // mode for each ref's Dijkstra
+    networkMask = null,                                   // optional binary mask over the DEM grid
+    wantNetworkInterp = false,                            // fill non-network cells via IDW from network seeds
+    interpMaxDistance = 50,                               // ray search cap, in cells
+    interpSmoothing = 0,                                  // number of 3×3 smoothing passes
   } = msg;
 
   const wantPath = goalR >= 0 && goalC >= 0;
   const goalIdx = wantPath ? goalR * W + goalC : -1;
   const N = H * W;
+
+  // When a network mask is supplied, Dijkstra runs on the AND of the DEM
+  // mask and the network mask. We keep `mask` (the full DEM mask) around
+  // so the post-compute interpolation step can fill non-network cells.
+  let effMask = mask;
+  if (networkMask) {
+    effMask = new Uint8Array(N);
+    for (let i = 0; i < N; i++) effMask[i] = (mask[i] && networkMask[i]) ? 1 : 0;
+  }
 
   let energy;
   let passes = null;
@@ -455,9 +567,96 @@ self.onmessage = (ev) => {
   }
 
   try {
-    if (mode === "from") {
+    if (wantDensity && Array.isArray(refPoints) && refPoints.length > 0) {
+      // Density path. Mutually exclusive with the regular from/to/round
+      // branches — running one of those before this would double-count the
+      // first ref and add a bogus extra cycle to the progress bar.
+      //
+      // For each reference point, run a Dijkstra (with passes), normalise
+      // by H*W, sum across references, normalise by H*W again. The energy
+      // layer is the per-cell mean of all refs' energy fields (counting
+      // only refs from which the cell is reachable). Cells unreachable
+      // from every ref stay Infinity (rendered transparent).
+      const density = new Float64Array(N);
+      const energySum = new Float64Array(N);
+      const energyCount = new Int32Array(N);
+      const dmode = densityMode || "from";
+      const K = refPoints.length;
+      const slice = 1 / K;
+      for (let k = 0; k < K; k++) {
+        const [refR, refC] = refPoints[k];
+        if (refR < 0 || refR >= H || refC < 0 || refC >= W) continue;
+        if (!mask[refR * W + refC]) continue;
+
+        const base = k / K;
+
+        let perRefPasses, perRefEnergy;
+        if (dmode === "round") {
+          // Forward + reverse share this ref's slice equally.
+          const f = dijkstra({
+            height, mask: effMask, H, W,
+            seedR: refR, seedC: refC,
+            alpha, beta, eta, dx, dy,
+            reverse: false, trackParents: false,
+            wantPasses: true, eMax,
+            progressBase: base, progressScale: slice * 0.5,
+          });
+          const b = dijkstra({
+            height, mask: effMask, H, W,
+            seedR: refR, seedC: refC,
+            alpha, beta, eta, dx, dy,
+            reverse: true, trackParents: false,
+            wantPasses: true, eMax,
+            progressBase: base + slice * 0.5, progressScale: slice * 0.5,
+          });
+          perRefPasses = new Float64Array(N);
+          perRefEnergy = new Float32Array(N);
+          for (let i = 0; i < N; i++) {
+            perRefPasses[i] = f.passes[i] + b.passes[i];
+            const fi = f.E[i], bi = b.E[i];
+            perRefEnergy[i] = Number.isFinite(fi) && Number.isFinite(bi) ? fi + bi : Infinity;
+          }
+        } else {
+          const r = dijkstra({
+            height, mask: effMask, H, W,
+            seedR: refR, seedC: refC,
+            alpha, beta, eta, dx, dy,
+            reverse: dmode === "to", trackParents: false,
+            wantPasses: true, eMax,
+            progressBase: base, progressScale: slice,
+          });
+          perRefPasses = r.passes;
+          perRefEnergy = r.E;
+        }
+        // First normalisation: each reference's count becomes a density
+        // (passes per cell over the grid).
+        for (let i = 0; i < N; i++) {
+          density[i] += perRefPasses[i] / N;
+          if (Number.isFinite(perRefEnergy[i])) {
+            energySum[i] += perRefEnergy[i];
+            energyCount[i] += 1;
+          }
+        }
+        // Snap progress to the slice boundary at end of each ref so the
+        // bar lines up with the "ref X/K" status text the main thread
+        // shows. The per-cell ticks above already cover the slice
+        // monotonically; this is just a clean checkpoint.
+        postMessage({ kind: "progress", progress: (k + 1) / K });
+      }
+      // Second density normalisation.
+      for (let i = 0; i < N; i++) density[i] /= N;
+
+      // Average energy: sum / count, Infinity where no ref reached.
+      const avgE = new Float32Array(N);
+      for (let i = 0; i < N; i++) {
+        avgE[i] = energyCount[i] > 0 ? energySum[i] / energyCount[i] : Infinity;
+      }
+
+      passes = density;
+      energy = avgE;
+    } else if (mode === "from") {
       const r = dijkstra({
-        height, mask, H, W,
+        height, mask: effMask, H, W,
         seedR, seedC,
         alpha, beta, eta, dx, dy,
         reverse: false, trackParents: wantPath,
@@ -471,7 +670,7 @@ self.onmessage = (ev) => {
       }
     } else if (mode === "to") {
       const r = dijkstra({
-        height, mask, H, W,
+        height, mask: effMask, H, W,
         seedR, seedC,
         alpha, beta, eta, dx, dy,
         reverse: true, trackParents: wantPath,
@@ -486,14 +685,14 @@ self.onmessage = (ev) => {
     } else {
       // round trip: forward + reverse, sum
       const f = dijkstra({
-        height, mask, H, W,
+        height, mask: effMask, H, W,
         seedR, seedC,
         alpha, beta, eta, dx, dy,
         reverse: false, trackParents: wantPath,
         wantPasses, eMax,
       });
       const b = dijkstra({
-        height, mask, H, W,
+        height, mask: effMask, H, W,
         seedR, seedC,
         alpha, beta, eta, dx, dy,
         reverse: true, trackParents: false,
@@ -515,76 +714,6 @@ self.onmessage = (ev) => {
         path = reconstructPath(f.parents, goalIdx);
         pathEnergy = energy[goalIdx];
       }
-    }
-
-    // Multi-reference passes density. For each reference point, run a Dijkstra
-    // (with passes), normalise by H*W, sum across references, normalise by
-    // H*W again. Replaces the regular `passes` output. The first reference's
-    // energy field also goes back as `energy` (so the energy layer still has
-    // something to render); subsequent references' energy fields are not
-    // returned individually.
-    if (wantDensity && Array.isArray(refPoints) && refPoints.length > 0) {
-      const density = new Float64Array(N);
-      let firstEnergy = null;
-      const dmode = densityMode || "from";
-      const K = refPoints.length;
-      const slice = 1 / K;
-      for (let k = 0; k < K; k++) {
-        const [refR, refC] = refPoints[k];
-        if (refR < 0 || refR >= H || refC < 0 || refC >= W) continue;
-        if (!mask[refR * W + refC]) continue;
-
-        const base = k / K;
-
-        let perRefPasses;
-        if (dmode === "round") {
-          // Forward + reverse share this ref's slice equally.
-          const f = dijkstra({
-            height, mask, H, W,
-            seedR: refR, seedC: refC,
-            alpha, beta, eta, dx, dy,
-            reverse: false, trackParents: false,
-            wantPasses: true, eMax,
-            progressBase: base, progressScale: slice * 0.5,
-          });
-          const b = dijkstra({
-            height, mask, H, W,
-            seedR: refR, seedC: refC,
-            alpha, beta, eta, dx, dy,
-            reverse: true, trackParents: false,
-            wantPasses: true, eMax,
-            progressBase: base + slice * 0.5, progressScale: slice * 0.5,
-          });
-          perRefPasses = new Float64Array(N);
-          for (let i = 0; i < N; i++) perRefPasses[i] = f.passes[i] + b.passes[i];
-          if (k === 0) firstEnergy = f.E;
-        } else {
-          const r = dijkstra({
-            height, mask, H, W,
-            seedR: refR, seedC: refC,
-            alpha, beta, eta, dx, dy,
-            reverse: dmode === "to", trackParents: false,
-            wantPasses: true, eMax,
-            progressBase: base, progressScale: slice,
-          });
-          perRefPasses = r.passes;
-          if (k === 0) firstEnergy = r.E;
-        }
-        // First normalisation: each reference's count becomes a density
-        // (passes per cell over the grid).
-        for (let i = 0; i < N; i++) density[i] += perRefPasses[i] / N;
-        // Snap progress to the slice boundary at end of each ref so the
-        // bar lines up with the "ref X/K" status text the main thread
-        // shows. The per-cell ticks above already cover the slice
-        // monotonically; this is just a clean checkpoint.
-        postMessage({ kind: "progress", progress: (k + 1) / K });
-      }
-      // Second normalisation: divide the accumulated density by H*W again,
-      // matching the user-specified definition.
-      for (let i = 0; i < N; i++) density[i] /= N;
-
-      passes = density;
-      if (firstEnergy) energy = firstEnergy;
     }
 
     // Top-N: iterative penalization on top of the energy field. We keep the
@@ -610,7 +739,7 @@ self.onmessage = (ev) => {
           distUsed = chamferDistanceTransform(usedMask, H, W);
         }
         const res = astar({
-          height, mask, H, W,
+          height, mask: effMask, H, W,
           startR: seedR, startC: seedC,
           goalR, goalC,
           alpha, beta, eta, dx, dy,
@@ -640,6 +769,17 @@ self.onmessage = (ev) => {
 
     // Path length for the single non-top-N output
     if (path) pathLengthCells = pathLength(path);
+
+    // Optional: GDAL-style IDW fill of non-network cells. 8-ray search to
+    // network seeds capped at interpMaxDistance, 1/d² weighting, then up
+    // to interpSmoothing 3×3 box passes (network cells preserved).
+    // Visualisation only — the analysis output stays constrained.
+    if (wantNetworkInterp && networkMask && energy) {
+      energy = fillAcrossNetwork(
+        energy, networkMask, mask, H, W, dx, dy,
+        interpMaxDistance, interpSmoothing,
+      );
+    }
 
     const t1 = performance.now();
     const out = {

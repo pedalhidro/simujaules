@@ -12,25 +12,25 @@
 // glue. Browsers that don't support module workers will fail to construct
 // this worker, in which case app.js silently falls back to energy-worker.js.
 
-let wasm = null;          // exports object from wasm-pack init()
+// `wasm` holds the instantiated exports object (has `.memory`). `mod`
+// holds the ES module namespace (has the bindgen-generated `EnergySolver`
+// class). These are two different objects in newer wasm-pack output and
+// in modern bundlers — don't try to merge them, the exports object is
+// frozen and assignment throws "Object is not extensible".
+let wasm = null;
+let mod = null;
 let initError = null;
 let initPromise = null;
 
 async function ensureWasm() {
-  if (wasm) return wasm;
+  if (wasm && mod) return;
   if (initError) throw initError;
   if (!initPromise) {
     initPromise = (async () => {
-      const mod = await import("./wasm/pkg/energy_wasm.js");
+      mod = await import("./wasm/pkg/energy_wasm.js");
       // wasm-pack `--target web` resolves the .wasm URL relative to its
       // own JS file via import.meta.url, which works inside workers.
       wasm = await mod.default();
-      // `wasm` is the exports object from the instantiated module; it has
-      // `.memory` and the bindgen-generated class/function exports.
-      // Pull the constructor off the namespace too — `wasm` is not always
-      // the same reference, depending on bindgen version.
-      wasm.EnergySolver = mod.EnergySolver;
-      return wasm;
     })().catch((e) => {
       initError = e;
       throw e;
@@ -72,7 +72,7 @@ self.onmessage = async (ev) => {
   let solver = null;
   try {
     const N = H * W;
-    solver = new wasm.EnergySolver(H, W);
+    solver = new mod.EnergySolver(H, W);
 
     // Copy DEM into wasm memory. Re-fetch buffer each time because wasm
     // memory growth (during Vec allocation) detaches earlier views.

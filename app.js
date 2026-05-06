@@ -89,11 +89,28 @@ function clearStyleDirty() {
   }
 }
 
-// Surface engine choice in the UI once the probe resolves.
+// Engine selection.
+//  - state.enginePreference: user's choice ("js" or "wasm"). Initialised
+//    in the state object below; defaults to "js" even when wasm is
+//    available since wasm is energy-only. The button toggles it.
+//  - state.engine: which engine the LAST compute actually ran on. Set by
+//    the run handler after deciding wasm vs JS based on preference + the
+//    feature toggles (passes/topN/density/budget force JS).
 wasmAvailable.then((ok) => {
+  state.wasmAvailable = ok;
   const el = document.getElementById("engine-tag");
-  if (el) el.textContent = ok ? "wasm" : "js";
-  state.engine = ok ? "wasm" : "js";
+  if (!el) return;
+  el.textContent = state.enginePreference;
+  el.disabled = !ok;
+  el.title = ok
+    ? "Compute engine — click to toggle JS / wasm"
+    : "Wasm not built — JS only. Run wasm/build.sh and reload.";
+  el.addEventListener("click", () => {
+    if (!state.wasmAvailable) return;
+    state.enginePreference = state.enginePreference === "wasm" ? "js" : "wasm";
+    el.textContent = state.enginePreference;
+    estimateRunTime();
+  });
   estimateRunTime();
 });
 
@@ -262,19 +279,9 @@ document.addEventListener("DOMContentLoaded", () => {
         if (dstDisp && !state.dst) dstDisp.textContent = "— click again to set —";
       }
 
-      // Hide and DISABLE the energy layer controls in density mode — the
-      // user wants only the density (passes) view. The renderer also
-      // skips applying the energy overlay when density is on, so toggling
-      // density off later restores both control and rendering.
-      const eVis = document.getElementById("energy-visible");
-      const eOp  = document.getElementById("energy-opacity");
-      const eBlock = eVis?.closest(".layer-block");
-      if (eVis) eVis.disabled = on;
-      if (eOp)  eOp.disabled  = on;
-      if (eBlock) {
-        eBlock.style.opacity = on ? "0.45" : "1";
-        eBlock.style.pointerEvents = on ? "none" : "";
-      }
+      // Energy layer stays available in density mode — when refs > 0 the
+      // worker returns the per-cell mean energy across all refs, so the
+      // user can read the average as well as the density.
       applyLayerControls();
       // Re-render any cached result (so a leftover energy overlay clears).
       rerenderCachedResult();
@@ -305,6 +312,26 @@ document.addEventListener("DOMContentLoaded", () => {
       loadDemFromUrl(ex.url, ex.label);
     });
   }
+  // Vector-network upload + clear.
+  const vecFile = document.getElementById("vector-file");
+  if (vecFile) {
+    vecFile.addEventListener("change", async (ev) => {
+      const f = ev.target.files[0];
+      if (!f) return;
+      try {
+        await loadVectorNetwork(f);
+      } catch (err) {
+        console.error(err);
+        progress.classList.remove("active");
+        status.innerHTML = `<span style="color:#ff6b6b">.gpkg load failed: ${err.message}</span>`;
+      }
+      // Reset the input so re-picking the same file fires `change` again.
+      ev.target.value = "";
+    });
+  }
+  const vecClearBtn = document.getElementById("vec-clear");
+  if (vecClearBtn) vecClearBtn.addEventListener("click", clearVectorNetwork);
+
   // Bundle download / reload
   const dlBtn = document.getElementById("download-bundle");
   if (dlBtn) dlBtn.addEventListener("click", downloadBundle);
@@ -321,6 +348,24 @@ document.addEventListener("DOMContentLoaded", () => {
   // Apply initial layer controls so the rmsampa-v2 tile layer (default ON)
   // gets added to the map without waiting for a Compute.
   applyLayerControls();
+
+  // Help modal: open via the "?" button, close via × / backdrop click /
+  // Escape key. Body scroll-lock isn't needed since the panel doesn't
+  // scroll behind the modal.
+  const helpBtn = document.getElementById("help-btn");
+  const helpModal = document.getElementById("help-modal");
+  const helpClose = document.getElementById("help-close");
+  const openHelp  = () => helpModal?.classList.add("active");
+  const closeHelp = () => helpModal?.classList.remove("active");
+  helpBtn?.addEventListener("click", openHelp);
+  helpClose?.addEventListener("click", closeHelp);
+  helpModal?.addEventListener("click", (e) => {
+    // Click on the backdrop (not on the modal body itself) closes.
+    if (e.target === helpModal) closeHelp();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && helpModal?.classList.contains("active")) closeHelp();
+  });
 });
 
 const map = L.map("map", { preferCanvas: true }).setView([-23.55, -46.63], 12);
@@ -349,8 +394,18 @@ const state = {
   dstMarker: null,
   // Optional XYZ tile overlay (rmsampa-v2). Initialised below.
   tileOverlayActive: false,
+  // Engine preference (user-toggleable via the title-bar chip). Default
+  // is JS so users without wasm built still get a working app.
+  enginePreference: "js",
+  wasmAvailable: false,
   // Outline rectangle drawn to show the loaded DEM's extent.
   demRect: null,
+  // Optional rasterised vector network. When non-null, AND'd with the
+  // DEM mask before every compute so analysis is constrained to network
+  // cells. networkSrsId stamps the source CRS so we can warn on DEM swap.
+  networkMask: null,
+  networkSrsId: null,
+  networkFeatureCount: 0,
   // Multi-reference density: list of [r, c] pixel coords plus their map markers.
   refPoints: [],
   refMarkers: [],
@@ -536,6 +591,318 @@ async function loadDemFromArrayBuffer(buf, label) {
   estimateRunTime();
 }
 
+// ------- Vector network loader (GeoPackage) -------
+// Reads a .gpkg via sql.js, finds the (first) geometry table, reprojects
+// LineString features into the DEM CRS via proj4js, and rasterises them
+// with Bresenham into a binary network mask. The mask is AND'd with the
+// DEM mask before each compute so analysis is constrained to the lines.
+
+let _sqlPromise = null;
+function getSQL() {
+  if (!_sqlPromise) {
+    if (typeof initSqlJs !== "function") {
+      return Promise.reject(new Error("sql.js didn't load (CDN blocked?)"));
+    }
+    _sqlPromise = initSqlJs({
+      locateFile: (f) => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}`,
+    });
+  }
+  return _sqlPromise;
+}
+
+// Parse a GeoPackage StandardGeoPackageBinary blob into an array of
+// [x, y] coordinates, or null when the geometry isn't a (Multi)LineString.
+// Header layout per OGC GeoPackage 1.4 §2.1.3.
+function parseGpkgGeom(blob) {
+  if (!(blob instanceof Uint8Array) || blob.length < 8) return null;
+  if (blob[0] !== 0x47 || blob[1] !== 0x50) return null; // "GP"
+  const flags = blob[3];
+  const envelopeType = (flags >> 1) & 0x07;
+  const envBytes = [0, 32, 48, 48, 64, 0, 0, 0][envelopeType] || 0;
+  const wkbStart = 8 + envBytes;
+  if (blob.length < wkbStart + 9) return null;
+
+  const view = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
+  return parseWKB(view, wkbStart);
+}
+
+function parseWKB(view, off) {
+  const le = view.getUint8(off) === 1;
+  off += 1;
+  const t = view.getUint32(off, le);
+  off += 4;
+  const baseType = t & 0x0fff;            // strip Z/M flags
+  const hasZ = (t & 0x80000000) || (t & 0x1000) || baseType !== t && (Math.floor(t / 1000) === 1 || Math.floor(t / 1000) === 3);
+  const hasM = (t & 0x40000000) || (t & 0x2000) || baseType !== t && (Math.floor(t / 1000) === 2 || Math.floor(t / 1000) === 3);
+  const stride = 16 + (hasZ ? 8 : 0) + (hasM ? 8 : 0);
+
+  if (baseType === 2) {
+    // LineString
+    const n = view.getUint32(off, le); off += 4;
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) {
+      out[i] = [view.getFloat64(off, le), view.getFloat64(off + 8, le)];
+      off += stride;
+    }
+    return [out];
+  }
+  if (baseType === 5) {
+    // MultiLineString — skip outer header per child too
+    const k = view.getUint32(off, le); off += 4;
+    const lines = [];
+    for (let j = 0; j < k; j++) {
+      const subLE = view.getUint8(off) === 1; off += 1;
+      const subT = view.getUint32(off, subLE); off += 4;
+      const subBase = subT & 0x0fff;
+      if (subBase !== 2) return null;
+      const subStride = 16
+        + ((subT & 0x80000000 || Math.floor(subT / 1000) === 1 || Math.floor(subT / 1000) === 3) ? 8 : 0)
+        + ((subT & 0x40000000 || Math.floor(subT / 1000) === 2 || Math.floor(subT / 1000) === 3) ? 8 : 0);
+      const n = view.getUint32(off, subLE); off += 4;
+      const ln = new Array(n);
+      for (let i = 0; i < n; i++) {
+        ln[i] = [view.getFloat64(off, subLE), view.getFloat64(off + 8, subLE)];
+        off += subStride;
+      }
+      lines.push(ln);
+    }
+    return lines;
+  }
+  return null;
+}
+
+// Bresenham 8-connected line draw onto a 1D row-major mask. Plots a
+// "stamp" of (2*halfWidth + 1) cells for line widths > 1.
+function rasterLine(r0, c0, r1, c1, mask, W, H, halfWidth) {
+  const dr = Math.abs(r1 - r0);
+  const dc = Math.abs(c1 - c0);
+  const sr = r0 < r1 ? 1 : -1;
+  const sc = c0 < c1 ? 1 : -1;
+  let err = dc - dr;
+  let r = r0, c = c0;
+  while (true) {
+    for (let pdr = -halfWidth; pdr <= halfWidth; pdr++) {
+      const rr = r + pdr;
+      if (rr < 0 || rr >= H) continue;
+      const rowOff = rr * W;
+      for (let pdc = -halfWidth; pdc <= halfWidth; pdc++) {
+        const cc = c + pdc;
+        if (cc < 0 || cc >= W) continue;
+        mask[rowOff + cc] = 1;
+      }
+    }
+    if (r === r1 && c === c1) break;
+    const e2 = 2 * err;
+    if (e2 > -dr) { err -= dr; c += sc; }
+    if (e2 <  dc) { err += dc; r += sr; }
+  }
+}
+
+function readFileWithProgress(file, onFrac) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(fr.error || new Error("FileReader error"));
+    fr.onprogress = (e) => {
+      if (e.lengthComputable) onFrac(e.loaded / e.total);
+    };
+    fr.readAsArrayBuffer(file);
+  });
+}
+
+async function loadVectorNetwork(file) {
+  if (!state.dem) {
+    status.innerHTML = '<span style="color:#ff6b6b">Load a DEM first.</span>';
+    return;
+  }
+
+  // Reuse the compute progress bar. File-read phase fills 0–40 %, sql.js
+  // init 40–50 %, rasterise 50–100 %.
+  progress.classList.add("active");
+  progressBar.style.width = "0%";
+  status.textContent = `Reading ${file.name} (${(file.size / 1024 / 1024).toFixed(0)} MB)…`;
+  const buf = await readFileWithProgress(file, (frac) => {
+    progressBar.style.width = `${(frac * 40).toFixed(1)}%`;
+  });
+  progressBar.style.width = "40%";
+
+  status.textContent = "Initializing sql.js…";
+  const SQL = await getSQL();
+  const db = new SQL.Database(new Uint8Array(buf));
+  progressBar.style.width = "50%";
+
+  try {
+    const cont = db.exec("SELECT table_name, srs_id FROM gpkg_geometry_columns LIMIT 1");
+    if (!cont.length) throw new Error("No gpkg_geometry_columns entry — not a valid .gpkg?");
+    const tableName = cont[0].values[0][0];
+    const srsId     = cont[0].values[0][1];
+
+    // Resolve source CRS for proj4. WGS84 is built in; everything else
+    // uses the WKT/PROJ string from gpkg_spatial_ref_sys.
+    const isSrcWgs = srsId === 4326 || srsId === 0 || srsId === -1;
+    if (!isSrcWgs) {
+      const srsRes = db.exec(
+        `SELECT definition FROM gpkg_spatial_ref_sys WHERE srs_id = ${srsId}`,
+      );
+      if (!srsRes.length || !srsRes[0].values[0][0]) {
+        throw new Error(`Source SRS ${srsId} has no definition in gpkg_spatial_ref_sys`);
+      }
+      proj4.defs(`EPSG:${srsId}`, srsRes[0].values[0][0]);
+    }
+
+    // DEM bounds in source CRS for the rtree filter — keeps us from
+    // burning every line in a country-scale .gpkg when the DEM is small.
+    const { originX, originY, H, W, dx, dy } = state.dem;
+    const south = originY - H * dy, north = originY;
+    const west  = originX,         east  = originX + W * dx;
+    let xmin, xmax, ymin, ymax;
+    if (isSrcWgs) {
+      xmin = west;  xmax = east;
+      ymin = south; ymax = north;
+    } else {
+      const corners = [
+        [west, south], [east, south], [east, north], [west, north],
+      ].map(([x, y]) => proj4("EPSG:4326", `EPSG:${srsId}`, [x, y]));
+      xmin = Math.min(...corners.map((p) => p[0]));
+      xmax = Math.max(...corners.map((p) => p[0]));
+      ymin = Math.min(...corners.map((p) => p[1]));
+      ymax = Math.max(...corners.map((p) => p[1]));
+    }
+
+    // Try the rtree-filtered query first; fall back to a full scan if the
+    // table isn't there.
+    const rtree = `rtree_${tableName}_geom`;
+    let stmt, totalFeatures = 0, useRtree = true;
+    try {
+      // Pre-count for the progress bar.
+      const cnt = db.prepare(
+        `SELECT COUNT(*) FROM "${rtree}" WHERE minx <= ? AND maxx >= ? AND miny <= ? AND maxy >= ?`,
+      );
+      cnt.bind([xmax, xmin, ymax, ymin]);
+      cnt.step();
+      totalFeatures = cnt.get()[0] | 0;
+      cnt.free();
+      stmt = db.prepare(`
+        SELECT t.geom FROM "${tableName}" t
+        WHERE t.fid IN (
+          SELECT id FROM "${rtree}"
+          WHERE minx <= ? AND maxx >= ? AND miny <= ? AND maxy >= ?
+        )
+      `);
+      stmt.bind([xmax, xmin, ymax, ymin]);
+    } catch (e) {
+      console.info("[gpkg] no rtree, full scan:", e.message);
+      useRtree = false;
+      try {
+        const cnt = db.prepare(`SELECT COUNT(*) FROM "${tableName}"`);
+        cnt.step();
+        totalFeatures = cnt.get()[0] | 0;
+        cnt.free();
+      } catch {}
+      stmt = db.prepare(`SELECT geom FROM "${tableName}"`);
+    }
+
+    const lineWidth = Math.max(1, parseInt(document.getElementById("vec-width")?.value, 10) || 1);
+    const halfWidth = (lineWidth - 1) >> 1;
+    const networkMask = new Uint8Array(W * H);
+
+    const project = isSrcWgs ? (xy) => xy : (xy) => proj4(`EPSG:${srsId}`, "EPSG:4326", xy);
+
+    let scanned = 0, rasterised = 0;
+    while (stmt.step()) {
+      const row = stmt.get();
+      const blob = row[0];
+      scanned++;
+      const lines = parseGpkgGeom(blob);
+      if (!lines) continue;
+      for (const coords of lines) {
+        let prevR = null, prevC = null;
+        for (const xy of coords) {
+          const [lng, lat] = project(xy);
+          const c = Math.floor((lng - originX) / dx);
+          const r = Math.floor((originY - lat) / dy);
+          if (prevR !== null) {
+            // Clip wildly-out-of-bounds lines fast — we do per-pixel
+            // bounds checks inside rasterLine but skipping segments that
+            // are entirely outside saves a lot of pixel iterations.
+            if (!(
+              (prevR < 0 && r < 0) || (prevR >= H && r >= H) ||
+              (prevC < 0 && c < 0) || (prevC >= W && c >= W)
+            )) {
+              rasterLine(prevR, prevC, r, c, networkMask, W, H, halfWidth);
+            }
+          }
+          prevR = r; prevC = c;
+        }
+        rasterised++;
+      }
+      if (scanned % 2000 === 0) {
+        const frac = totalFeatures > 0 ? scanned / totalFeatures : 0;
+        progressBar.style.width = `${(50 + frac * 50).toFixed(1)}%`;
+        status.textContent = totalFeatures > 0
+          ? `Rasterising… ${scanned}/${totalFeatures} (${rasterised} drawn)`
+          : `Rasterising… ${scanned} scanned, ${rasterised} drawn`;
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    }
+    stmt.free();
+    progressBar.style.width = "100%";
+
+    let networkCells = 0;
+    for (let i = 0; i < networkMask.length; i++) if (networkMask[i]) networkCells++;
+
+    state.networkMask = networkMask;
+    state.networkSrsId = srsId;
+    state.networkFeatureCount = rasterised;
+    document.getElementById("vec-meta").innerHTML =
+      `EPSG:${srsId} · <span class="v">${rasterised}</span> lines drawn<br/>` +
+      `<span class="v">${networkCells.toLocaleString()}</span> network cells (${(100 * networkCells / (W * H)).toFixed(1)}% of grid)`;
+    status.textContent = "Network loaded.";
+    state.lastResult = null; // previous compute used the un-constrained mask
+  } finally {
+    db.close();
+    progress.classList.remove("active");
+  }
+}
+
+function clearVectorNetwork() {
+  state.networkMask = null;
+  state.networkSrsId = null;
+  state.networkFeatureCount = 0;
+  const meta = document.getElementById("vec-meta");
+  if (meta) meta.innerHTML = "No network loaded.";
+  const inp = document.getElementById("vector-file");
+  if (inp) inp.value = "";
+}
+
+// Snap a (row, col) pixel to the nearest network cell within radius (in
+// cell units). Returns the original RC if the network is off, the radius
+// is 0, or no network cell exists in the search box.
+function snapToNetwork(rc) {
+  if (!state.networkMask || !state.dem) return rc;
+  const radius = Math.max(0, parseInt(document.getElementById("vec-snap")?.value, 10) || 0);
+  if (radius === 0) return rc;
+  const [r, c] = rc;
+  const { W, H, mask } = state.dem;
+  if (r < 0 || r >= H || c < 0 || c >= W) return rc;
+  if (state.networkMask[r * W + c]) return rc;
+  let bestD2 = Infinity, bestRC = null;
+  for (let dr = -radius; dr <= radius; dr++) {
+    const rr = r + dr;
+    if (rr < 0 || rr >= H) continue;
+    for (let dc = -radius; dc <= radius; dc++) {
+      const cc = c + dc;
+      if (cc < 0 || cc >= W) continue;
+      const i = rr * W + cc;
+      if (state.networkMask[i] && mask[i]) {
+        const d2 = dr * dr + dc * dc;
+        if (d2 < bestD2) { bestD2 = d2; bestRC = [rr, cc]; }
+      }
+    }
+  }
+  return bestRC || rc;
+}
+
 // ------- Map clicks: set points -------
 // Convert lat/lon to DEM pixel coords. For a UTM DEM this needs proj4; for
 // the prototype we accept WGS84 DEMs OR provide a small UTM helper.
@@ -573,14 +940,21 @@ map.on("click", (e) => {
     status.textContent = "Load a DEM first.";
     return;
   }
-  const px = latLngToPixel(e.latlng);
-  if (!px) {
+  const rawPx = latLngToPixel(e.latlng);
+  if (!rawPx) {
     status.innerHTML = '<span style="color:#ff6b6b">Click is outside the DEM, or DEM is in a non-geographic CRS (this prototype supports EPSG:4326 DEMs only — see notes).</span>';
     return;
   }
+  // When a vector network is loaded, click points are snapped to the
+  // nearest passable network cell within the configured radius.
+  const px = snapToNetwork(rawPx);
   const [r, c] = px;
   if (!state.dem.mask[r * state.dem.W + c]) {
     status.textContent = "Clicked cell is nodata.";
+    return;
+  }
+  if (state.networkMask && !state.networkMask[r * state.dem.W + c]) {
+    status.innerHTML = '<span style="color:#ff6b6b">No network cell within snap radius — increase the radius or click closer to a line.</span>';
     return;
   }
   // Density mode in "click" placement: every click adds a reference point.
@@ -780,9 +1154,12 @@ runBtn.addEventListener("click", async () => {
   if (state.worker) state.worker.terminate();
 
   // Wasm worker doesn't yet implement passes / top-N / density / budget.
-  // Force JS for those; the energy-only fast path still uses wasm.
+  // Force JS for those; the energy-only fast path uses wasm only when
+  // the user has flipped the engine chip to "wasm".
   const wasmOk = await wasmAvailable;
-  const useWasm = wasmOk && !wantPasses && !wantTopN && !wantDensity && eMax === 0;
+  const wantsWasm = state.enginePreference === "wasm";
+  const useWasm =
+    wantsWasm && wasmOk && !wantPasses && !wantTopN && !wantDensity && eMax === 0;
   state.worker = useWasm
     ? new Worker(WASM_WORKER_URL, { type: "module" })
     : new Worker(JS_WORKER_URL);
@@ -841,6 +1218,13 @@ runBtn.addEventListener("click", async () => {
   // For very large DEMs you'd transfer ownership and re-load on each run.
   const heightCopy = new Float32Array(state.dem.height);
   const maskCopy = new Uint8Array(state.dem.mask);
+  // Send the network mask separately. The worker AND's it with the DEM
+  // mask for Dijkstra, but keeps the original DEM mask available for
+  // post-Dijkstra interpolation across non-network cells.
+  const networkMaskCopy = state.networkMask ? new Uint8Array(state.networkMask) : null;
+  const wantNetworkInterp = !!document.getElementById("net-interp")?.checked;
+  const interpMaxDistance = Math.max(1, parseInt(document.getElementById("net-interp-max-dist")?.value, 10) || 50);
+  const interpSmoothing   = Math.max(0, parseInt(document.getElementById("net-interp-smoothing")?.value, 10) || 0);
 
   state.worker.postMessage(
     {
@@ -860,8 +1244,12 @@ runBtn.addEventListener("click", async () => {
       wantDensity,
       refPoints: wantDensity ? state.refPoints.slice() : null,
       densityMode,
+      networkMask: networkMaskCopy,
+      wantNetworkInterp,
+      interpMaxDistance,
+      interpSmoothing,
     },
-    [heightCopy.buffer, maskCopy.buffer]
+    [heightCopy.buffer, maskCopy.buffer, ...(networkMaskCopy ? [networkMaskCopy.buffer] : [])]
   );
 });
 
@@ -870,43 +1258,10 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
   // Cache for live re-render on colormap / view / range changes.
   state.lastResult = { energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs };
 
-  // Compute energy auto range (one pass) — skip if energy is null (a
-  // density-only run could omit it, though the worker currently always
-  // returns the first ref's energy field).
-  let autoMin = Infinity, autoMax = 0;
-  if (energy) {
-    for (let i = 0; i < energy.length; i++) {
-      const v = energy[i];
-      if (Number.isFinite(v)) {
-        if (v < autoMin) autoMin = v;
-        if (v > autoMax) autoMax = v;
-      }
-    }
-  }
-  if (!Number.isFinite(autoMin)) autoMin = 0;
-  if (autoMax <= autoMin) autoMax = autoMin + 1;
-  state.lastAutoMin = autoMin;
-  state.lastAutoMax = autoMax;
-
-  // Compute passes auto range over settled (non-zero) cells. Passes counts
-  // are integer-valued and long-tailed; auto + sqrt stretch in the renderer
-  // handles the long tail without needing a separate percentile path.
-  let passesMin = Infinity, passesMax = 0;
-  if (passes) {
-    for (let i = 0; i < passes.length; i++) {
-      const v = passes[i];
-      if (v > 0 && Number.isFinite(v)) {
-        if (v < passesMin) passesMin = v;
-        if (v > passesMax) passesMax = v;
-      }
-    }
-    if (!Number.isFinite(passesMin)) passesMin = 0;
-    state.lastPassesAutoMin = passesMin;
-    state.lastPassesAutoMax = passesMax;
-  } else {
-    state.lastPassesAutoMin = 0;
-    state.lastPassesAutoMax = 0;
-  }
+  // Auto bounds (state.lastAutoMin/Max and lastPassesAutoMin/Max) are
+  // populated by renderFieldToDataURL during rerenderCachedResult below
+  // — both layers use percentile clipping by default and the resolved
+  // bounds come back from the renderer.
 
   // Show/hide the passes layer controls based on whether passes was computed
   const passesRow = document.getElementById("passes-row");
@@ -946,18 +1301,24 @@ function rerenderCachedResult() {
   const { energy, passes, path, routes } = r;
   const { H, W, originX, originY, dx, dy, isGeographic } = state.dem;
 
-  // -- Energy layer (rendered unless density mode is on, in which case
-  // the user wants the density view alone). --
-  const densityOn = !!document.getElementById("want-density")?.checked;
-  if (energy && !densityOn) {
-    state.energyDataUrl = renderFieldToDataURL(energy, W, H, {
-      autoMin: state.lastAutoMin ?? 0,
-      autoMax: state.lastAutoMax ?? 1,
+  // -- Energy layer. In density mode this is the per-cell mean energy
+  // across reference points (Infinity where unreachable from every ref);
+  // otherwise it's the regular src/dst Dijkstra output. Default range
+  // is percentile-clipped at p1/p80 — the long tail of "very far from
+  // src" cells dominated the raw min/max stretch and washed everything
+  // else into the bottom of the colormap.
+  if (energy) {
+    const out = renderFieldToDataURL(energy, W, H, {
+      usePercentileBounds: true,
+      percentiles: [1, 80],
       userMin: readRangeInput("vmin", null),
       userMax: readRangeInput("vmax", null),
       useGreyscale: false,
       treatZeroAsTransparent: false,
     });
+    state.energyDataUrl = out.url;
+    state.lastAutoMin = out.lo;
+    state.lastAutoMax = out.hi;
   } else {
     state.energyDataUrl = null;
   }
@@ -967,17 +1328,15 @@ function rerenderCachedResult() {
   // brightens "highway" cells without imposing its own hue. When blend
   // mode is "normal" the renderer paints with full alpha so dim cells
   // read as solid black instead of transparent.
-  let passesDU = null;
   if (passes) {
     const blend = document.getElementById("passes-blend")?.value || "plus-lighter";
     const gamma = parseFloat(document.getElementById("passes-gamma")?.value);
     const win = parseInt(document.getElementById("passes-mean-window")?.value, 10);
-    passesDU = renderFieldToDataURL(passes, W, H, {
-      // Auto bounds (when user hasn't pinned vmin/vmax) come from p10/p90
-      // rather than min/max — passes counts are heavily long-tailed and the
-      // raw min/max maps the dynamic range mostly to a couple of highway
-      // cells, leaving everything else flat.
+    const out = renderFieldToDataURL(passes, W, H, {
+      // p10/p90 default; passes counts are heavily long-tailed and a few
+      // "highway" cells would otherwise dominate the stretch.
       usePercentileBounds: true,
+      percentiles: [10, 90],
       userMin: readRangeInput("passes-vmin", null),
       userMax: readRangeInput("passes-vmax", null),
       gamma: Number.isFinite(gamma) ? gamma : 1,
@@ -986,7 +1345,9 @@ function rerenderCachedResult() {
       solidAlpha: blend === "normal",
       treatZeroAsTransparent: true,
     });
-    state.passesDataUrl = passesDU;
+    state.passesDataUrl = out.url;
+    state.lastPassesAutoMin = out.lo;
+    state.lastPassesAutoMax = out.hi;
   } else {
     state.passesDataUrl = null;
   }
@@ -1087,9 +1448,11 @@ function boxBlur2D(field, W, H, win) {
 
 // Render a 2D scalar field to a base64 dataURL.
 // Range: vmin/vmax in real units. When both blank → auto. Auto-bounds use
-// percentiles (p10/p90) when `usePercentileBounds` is set, else min/max.
-// Stretch: linear when bounds are pinned or percentile-based; sqrt for the
-// raw min/max auto path (long-tail friendly).
+// `opts.percentiles` (default [10, 90]) when `usePercentileBounds` is
+// set, else min/max. Stretch: linear when bounds are pinned or
+// percentile-based; sqrt for the raw min/max auto path (long-tail).
+// Returns { url, lo, hi } so the caller can record the resolved bounds
+// for the legend / placeholder display.
 // `useGreyscale: true` paints a black→white ramp instead of the active
 // colormap — used for the passes layer.
 // `meanWindow > 1` applies a separable box-blur prefilter (treats unsettled
@@ -1109,6 +1472,7 @@ function renderFieldToDataURL(field, W, H, opts) {
   // Resolve bounds.
   let autoLo = Infinity, autoHi = 0;
   if (opts.usePercentileBounds) {
+    const [pLo, pHi] = opts.percentiles || [10, 90];
     const samples = [];
     for (let i = 0; i < N; i++) {
       const v = work[i];
@@ -1116,8 +1480,8 @@ function renderFieldToDataURL(field, W, H, opts) {
     }
     samples.sort((a, b) => a - b);
     if (samples.length) {
-      autoLo = samples[Math.floor(samples.length * 0.10)];
-      autoHi = samples[Math.floor(samples.length * 0.90)];
+      autoLo = samples[Math.floor(samples.length * pLo / 100)];
+      autoHi = samples[Math.floor(samples.length * pHi / 100)];
     }
   } else {
     for (let i = 0; i < N; i++) {
@@ -1190,7 +1554,7 @@ function renderFieldToDataURL(field, W, H, opts) {
     img.data[4 * i + 3] = a2;
   }
   ctx.putImageData(img, 0, 0);
-  return canvas.toDataURL();
+  return { url: canvas.toDataURL(), lo, hi };
 }
 
 // Linearly interpolate the p-th percentile (0..100) from a sorted ascending
@@ -1264,28 +1628,20 @@ function applyLayerControls() {
 }
 
 function updateLegendTicks() {
-  // The legend reflects the energy layer's mapping (passes uses percentile
-  // bounds, which are in 0–100 space and meaningless on the swatch).
+  // Legend reflects the energy layer's mapping. Default auto = p1/p80
+  // linear; user-pinned overrides either bound. Mid is the linear
+  // midpoint of the value range (close-enough for any reasonable gamma).
   const lo = document.getElementById("legend-lo");
   const mid = document.getElementById("legend-mid");
   const hi = document.getElementById("legend-hi");
   if (!lo || !mid || !hi) return;
   const userMin = readRangeInput("vmin", null);
   const userMax = readRangeInput("vmax", null);
-  if (userMin != null || userMax != null) {
-    // Linear mapping: midpoint of swatch ↔ midpoint of value range.
-    const a = userMin != null ? userMin : (state.lastAutoMin ?? 0);
-    const b = userMax != null ? userMax : (state.lastAutoMax ?? 1);
-    lo.textContent = formatEnergy(a);
-    mid.textContent = formatEnergy(0.5 * (a + b));
-    hi.textContent = formatEnergy(b);
-  } else {
-    // sqrt stretch: visible swatch midpoint ↔ v = maxE/4, not maxE/2.
-    const maxE = state.lastAutoMax ?? 0;
-    lo.textContent = "0";
-    mid.textContent = formatEnergy(maxE * 0.25);
-    hi.textContent = formatEnergy(maxE);
-  }
+  const a = userMin != null ? userMin : (state.lastAutoMin ?? 0);
+  const b = userMax != null ? userMax : (state.lastAutoMax ?? 1);
+  lo.textContent = formatEnergy(a);
+  mid.textContent = formatEnergy(0.5 * (a + b));
+  hi.textContent = formatEnergy(b);
 }
 
 function readRangeInput(id, fallback) {
@@ -1334,13 +1690,15 @@ function estimateRunTime() {
   if (!state.dem) { out.textContent = ""; return; }
 
   const N = state.dem.H * state.dem.W;
-  // We don't await wasmAvailable here (this fires from input events that
-  // are synchronous). Use the last-known engine; default to JS estimate.
-  const useWasm = state.engine === "wasm";
+  // Estimate uses the user's engine preference, modulated by feature
+  // toggles (any of them forces JS).
   const wantPasses = !!document.getElementById("want-passes")?.checked;
   const wantTopN   = !!document.getElementById("want-topn")?.checked;
-  // Wasm worker doesn't yet implement passes/top-N → forced JS path.
-  const eff = (useWasm && !wantPasses && !wantTopN) ? "wasm" : "js";
+  const wantDensity = !!document.getElementById("want-density")?.checked;
+  const eMaxRaw = parseFloat(document.getElementById("e-max")?.value);
+  const hasBudget = Number.isFinite(eMaxRaw) && eMaxRaw > 0;
+  const wantsWasm = state.enginePreference === "wasm" && state.wasmAvailable;
+  const eff = (wantsWasm && !wantPasses && !wantTopN && !wantDensity && !hasBudget) ? "wasm" : "js";
   const rate = eff === "wasm" ? RATE_CELLS_PER_MS_WASM : RATE_CELLS_PER_MS_JS;
 
   let ms = N / rate;
@@ -1356,7 +1714,6 @@ function estimateRunTime() {
   }
   // Multi-reference density runs one (or two for round-trip) Dijkstras per
   // reference, each with passes tracking.
-  const wantDensity = !!document.getElementById("want-density")?.checked;
   if (wantDensity) {
     const refs = state.refPoints?.length || 0;
     // Density direction now follows the global mode select.
