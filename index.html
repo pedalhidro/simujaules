@@ -125,7 +125,14 @@
       gap: 8px;
       margin-bottom: 4px;
     }
-    .layer-head input[type="range"] { flex: 1; }
+    .layer-head input[type="range"] {
+      /* min-width: 0 lets the slider shrink below its UA min-content
+         width — without it long labels (e.g. "rmsampa-v2 tiles") push
+         the row past the 320 px panel edge and clip downstream UI. */
+      flex: 1 1 0;
+      min-width: 0;
+      width: 100%;
+    }
     .layer-toggle {
       display: flex;
       align-items: center;
@@ -177,9 +184,13 @@
           </a>
         </div>
         <div class="meta" id="dem-meta">No DEM loaded.</div>
+        <div class="hint" style="margin-top: 10px;">
+          Reload a saved bundle (.zip) or parameter set (.jsonld):
+        </div>
+        <input type="file" id="bundle-file" accept=".zip,.jsonld,.json" style="margin-top: 4px;" />
       </div>
 
-      <div class="group">
+      <div class="group" id="pick-points-group">
         <h2>2. Pick points (click on map)</h2>
         <label>Source</label>
         <div class="point-display" id="src-display">— click map to set —</div>
@@ -208,6 +219,8 @@
         </div>
         <label>η (downhill recovery, 0–1)</label>
         <input type="number" id="eta" value="0.1" step="0.05" min="0" max="1" />
+        <label>Energy budget (≤0 = none)</label>
+        <input type="number" id="e-max" value="0" step="any" />
         <label style="margin-top: 12px; display: flex; align-items: center; gap: 6px;">
           <input type="checkbox" id="want-passes" />
           <span>Compute passes count (route density)</span>
@@ -216,6 +229,31 @@
           <input type="checkbox" id="want-topn" />
           <span>Compute top-N routes</span>
         </label>
+        <label style="display: flex; align-items: center; gap: 6px;">
+          <input type="checkbox" id="want-density" />
+          <span>Compute multi-reference density</span>
+        </label>
+        <div id="density-extra" style="display: none;">
+          <div class="row">
+            <div>
+              <label>N references</label>
+              <input type="number" id="n-refs" value="10" min="1" max="2000" step="1" />
+            </div>
+            <div>
+              <label>Reference source</label>
+              <select id="ref-source">
+                <option value="click">click on map</option>
+                <option value="random">random</option>
+              </select>
+            </div>
+          </div>
+          <div class="hint" style="margin-top: 4px;">Direction follows the global Mode setting above.</div>
+          <div class="row" style="margin-top: 6px;">
+            <button type="button" class="secondary" id="ref-place-random">Place random</button>
+            <button type="button" class="secondary" id="ref-clear">Clear refs</button>
+          </div>
+          <div class="hint" id="ref-display" style="margin-top: 4px;">no references placed</div>
+        </div>
         <div id="topn-extra" style="display: none;">
           <div class="row">
             <div>
@@ -248,6 +286,8 @@
 
       <div class="group" style="margin-top: 12px;">
         <h2>Result</h2>
+        <button type="button" id="refresh-style" class="secondary" style="margin-bottom: 8px;">Refresh style</button>
+        <div class="hint" style="margin: -4px 0 8px;">Colormap, range, gamma, mean filter and blend changes apply on click.</div>
         <div class="meta" id="result-meta">—</div>
         <div class="legend">
           <div class="swatch"></div>
@@ -262,7 +302,7 @@
         <div class="layer-block">
           <div class="layer-head">
             <label class="layer-toggle">
-              <input type="checkbox" id="tile-visible" />
+              <input type="checkbox" id="tile-visible" checked />
               <span>rmsampa-v2 tiles</span>
             </label>
             <input type="range" id="tile-opacity" min="0" max="1" step="0.05" value="0.85" />
@@ -306,12 +346,22 @@
           </div>
           <div class="row">
             <div>
-              <label>min</label>
-              <input type="number" id="passes-vmin" placeholder="auto" step="any" />
+              <label>min (auto = p10)</label>
+              <input type="number" id="passes-vmin" placeholder="p10" step="any" />
             </div>
             <div>
-              <label>max</label>
-              <input type="number" id="passes-vmax" placeholder="auto" step="any" />
+              <label>max (auto = p90)</label>
+              <input type="number" id="passes-vmax" placeholder="p90" step="any" />
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label>γ gamma (1 = no change)</label>
+              <input type="number" id="passes-gamma" value="1" min="0.01" step="0.05" />
+            </div>
+            <div>
+              <label>mean filter N</label>
+              <input type="number" id="passes-mean-window" value="10" min="1" max="200" step="1" />
             </div>
           </div>
           <label>Blend</label>
@@ -326,6 +376,7 @@
         </div>
 
         <button class="secondary" id="range-reset" style="margin-top: 6px;">Reset ranges to auto</button>
+        <button type="button" id="download-bundle" style="margin-top: 6px;">Download bundle (.zip)</button>
       </div>
 
       <div class="credit">feito por Claúdio e dirigido pelos neogeógrafos geomorfológicos</div>
@@ -339,6 +390,7 @@
     crossorigin=""
   ></script>
   <script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>

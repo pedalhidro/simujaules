@@ -82,6 +82,7 @@ impl EnergySolver {
         eta: f32,
         reverse: bool,
         track_parents: bool,
+        e_max: f32, // 0 = no budget; >0 = stop expanding past this
     ) {
         let h = self.h;
         let w = self.w;
@@ -211,6 +212,10 @@ impl EnergySolver {
                 };
 
                 let tentative = g + edge;
+                // Energy budget. With e_max <= 0, no budget is enforced.
+                if e_max > 0.0 && tentative > e_max {
+                    continue;
+                }
                 if tentative < self.energy[n_idx] {
                     self.energy[n_idx] = tentative;
                     if track_parents {

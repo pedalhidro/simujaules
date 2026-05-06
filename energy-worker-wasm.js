@@ -63,6 +63,7 @@ self.onmessage = async (ev) => {
     goalR, goalC,
     mode,
     alpha, beta, eta,
+    eMax = 0,
   } = msg;
 
   const wantPath = goalR >= 0 && goalC >= 0;
@@ -88,7 +89,7 @@ self.onmessage = async (ev) => {
 
     if (mode === "from" || mode === "to") {
       const reverse = mode === "to";
-      solver.run(seedR, seedC, dx, dy, alpha, beta, eta, reverse, wantPath);
+      solver.run(seedR, seedC, dx, dy, alpha, beta, eta, reverse, wantPath, eMax);
 
       // Copy energy out (so we own a buffer we can transfer back to main).
       const eView = new Float32Array(wasm.memory.buffer, solver.energy_ptr(), N);
@@ -101,7 +102,7 @@ self.onmessage = async (ev) => {
       }
     } else {
       // round trip = forward + reverse, summed
-      solver.run(seedR, seedC, dx, dy, alpha, beta, eta, false, wantPath);
+      solver.run(seedR, seedC, dx, dy, alpha, beta, eta, false, wantPath, eMax);
       const eFwd = new Float32Array(
         new Float32Array(wasm.memory.buffer, solver.energy_ptr(), N),
       );
@@ -112,7 +113,7 @@ self.onmessage = async (ev) => {
         );
       }
 
-      solver.run(seedR, seedC, dx, dy, alpha, beta, eta, true, false);
+      solver.run(seedR, seedC, dx, dy, alpha, beta, eta, true, false, eMax);
       const eBwd = new Float32Array(wasm.memory.buffer, solver.energy_ptr(), N);
 
       energy = new Float32Array(N);

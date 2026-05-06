@@ -48,6 +48,47 @@ function probeWasmEngine() {
 }
 
 // ------- Map setup -------
+// "Refresh style" dirty bookkeeping.
+//
+// Why a snapshot rather than a plain dirty flag: in some browsers the
+// blur-fired `change` event on a focused input fires AFTER a click event
+// on a different element. With a plain flag, that ordering re-marks the
+// state dirty *after* the Refresh handler cleared it, leading to the
+// "needs a second click" symptom. With a snapshot, markStyleDirty
+// compares current values against what was last rendered — if nothing
+// actually differs it stays clean, regardless of event ordering.
+function styleSnapshot() {
+  return JSON.stringify({
+    cm:  activeColormap,
+    rcm: document.getElementById("routes-colormap")?.value || "",
+    vm:  document.getElementById("vmin")?.value || "",
+    vM:  document.getElementById("vmax")?.value || "",
+    pvm: document.getElementById("passes-vmin")?.value || "",
+    pvM: document.getElementById("passes-vmax")?.value || "",
+    g:   document.getElementById("passes-gamma")?.value || "",
+    w:   document.getElementById("passes-mean-window")?.value || "",
+    b:   document.getElementById("passes-blend")?.value || "",
+  });
+}
+function markStyleDirty() {
+  // Skip if nothing actually changed since the last render — guards
+  // against late blur/change events re-marking after a refresh click.
+  if (state.lastStyleSnapshot === styleSnapshot()) return;
+  const btn = document.getElementById("refresh-style");
+  if (btn) {
+    btn.dataset.dirty = "1";
+    btn.textContent = "Refresh style ●";
+  }
+}
+function clearStyleDirty() {
+  state.lastStyleSnapshot = styleSnapshot();
+  const btn = document.getElementById("refresh-style");
+  if (btn) {
+    btn.dataset.dirty = "";
+    btn.textContent = "Refresh style";
+  }
+}
+
 // Surface engine choice in the UI once the probe resolves.
 wasmAvailable.then((ok) => {
   const el = document.getElementById("engine-tag");
@@ -76,15 +117,42 @@ document.addEventListener("DOMContentLoaded", () => {
       sel.appendChild(og);
     }
     sel.value = activeColormap;
+    // Live-update the swatch (cheap CSS) but DEFER the canvas re-render to
+    // the explicit Refresh-style button — re-rendering on every keystroke
+    // gets laggy on large DEMs.
     sel.addEventListener("change", () => {
       activeColormap = sel.value;
       applyColormapToLegend();
-      rerenderCachedResult();
+      markStyleDirty();
     });
   }
-  for (const id of ["vmin", "vmax", "passes-vmin", "passes-vmax"]) {
+  // Numeric range / gamma / mean-window inputs only mark "dirty"; the
+  // canvas redraws on Refresh-style click.
+  for (const id of [
+    "vmin", "vmax",
+    "passes-vmin", "passes-vmax",
+    "passes-gamma", "passes-mean-window",
+    "passes-blend",
+  ]) {
     const el = document.getElementById(id);
-    if (el) el.addEventListener("input", rerenderCachedResult);
+    if (!el) continue;
+    el.addEventListener("input", markStyleDirty);
+    el.addEventListener("change", markStyleDirty);
+  }
+  // Refresh-style commits whatever's marked dirty. We force-blur any
+  // focused input first so the input's blur-fired `change` event (which
+  // calls markStyleDirty) runs BEFORE we render+clear, not after — that
+  // ordering quirk previously left the dirty bullet on after a single
+  // click and made it look like a second click was needed.
+  const refreshBtn = document.getElementById("refresh-style");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", () => {
+      if (document.activeElement && document.activeElement.blur) {
+        document.activeElement.blur();
+      }
+      rerenderCachedResult();
+      clearStyleDirty();
+    });
   }
   const reset = document.getElementById("range-reset");
   if (reset) {
@@ -94,20 +162,25 @@ document.addEventListener("DOMContentLoaded", () => {
         if (el) el.value = "";
       }
       rerenderCachedResult();
+      clearStyleDirty();
     });
   }
-  // Per-layer visibility / opacity / blend controls (live update — no
-  // canvas re-render needed).
+  // Per-layer visibility / opacity controls — pure live updates (no
+  // canvas re-render).
   for (const id of [
     "tile-visible", "tile-opacity",
     "energy-visible", "energy-opacity",
-    "passes-visible", "passes-opacity", "passes-blend",
+    "passes-visible", "passes-opacity",
   ]) {
     const el = document.getElementById(id);
     if (!el) continue;
     el.addEventListener("input", applyLayerControls);
     el.addEventListener("change", applyLayerControls);
   }
+  // (Passes blend mode used to fire its own re-render here; that path
+  // is now folded into the Refresh-style button along with all the
+  // other heavy controls. The dirty-marker loop above already wires
+  // passes-blend to markStyleDirty, so changes show up on next refresh.)
   // Routes-colormap selector — populate from CET maps and re-draw routes
   // (without recomputing) on change.
   const routesSel = document.getElementById("routes-colormap");
@@ -136,8 +209,90 @@ document.addEventListener("DOMContentLoaded", () => {
     topnCheck.addEventListener("change", sync);
     sync();
   }
+  // Density toggle reveals the multi-ref controls and locks out the
+  // single-source toggles (wantPasses / wantTopN) that don't compose
+  // with multi-reference density.
+  const densCheck = document.getElementById("want-density");
+  const densExtra = document.getElementById("density-extra");
+  if (densCheck && densExtra) {
+    const sync = () => {
+      const on = densCheck.checked;
+      densExtra.style.display = on ? "" : "none";
+
+      const passesCheck = document.getElementById("want-passes");
+      const passesLabel = passesCheck?.closest("label");
+      if (passesCheck) {
+        if (on) { passesCheck.checked = false; passesCheck.disabled = true; }
+        else passesCheck.disabled = false;
+      }
+      if (passesLabel) passesLabel.style.opacity = on ? "0.5" : "1";
+
+      const topnCheck = document.getElementById("want-topn");
+      const topnLabel = topnCheck?.closest("label");
+      const topnExtra = document.getElementById("topn-extra");
+      if (topnCheck) {
+        if (on) { topnCheck.checked = false; topnCheck.disabled = true; }
+        else topnCheck.disabled = false;
+      }
+      if (topnLabel) topnLabel.style.opacity = on ? "0.5" : "1";
+      if (on && topnExtra) topnExtra.style.display = "none";
+
+      // Drop any source/destination state when entering density mode —
+      // it's not used and the leftover markers / UI labels are confusing.
+      // Also fade the "Pick points" group so it's clearly inactive.
+      const pickGroup = document.getElementById("pick-points-group");
+      if (pickGroup) {
+        pickGroup.style.opacity = on ? "0.45" : "1";
+        pickGroup.style.pointerEvents = on ? "none" : "";
+      }
+      if (on) {
+        state.src = null;
+        state.dst = null;
+        if (state.srcMarker) { state.srcMarker.remove(); state.srcMarker = null; }
+        if (state.dstMarker) { state.dstMarker.remove(); state.dstMarker = null; }
+        if (state.pathLine)  { state.pathLine.remove();  state.pathLine = null; }
+        const srcDisp = document.getElementById("src-display");
+        const dstDisp = document.getElementById("dst-display");
+        if (srcDisp) { srcDisp.textContent = "— disabled in density mode —"; srcDisp.classList.remove("set"); }
+        if (dstDisp) { dstDisp.textContent = "— disabled in density mode —"; dstDisp.classList.remove("set"); }
+      } else {
+        const srcDisp = document.getElementById("src-display");
+        const dstDisp = document.getElementById("dst-display");
+        if (srcDisp && !state.src) srcDisp.textContent = "— click map to set —";
+        if (dstDisp && !state.dst) dstDisp.textContent = "— click again to set —";
+      }
+
+      // Hide and DISABLE the energy layer controls in density mode — the
+      // user wants only the density (passes) view. The renderer also
+      // skips applying the energy overlay when density is on, so toggling
+      // density off later restores both control and rendering.
+      const eVis = document.getElementById("energy-visible");
+      const eOp  = document.getElementById("energy-opacity");
+      const eBlock = eVis?.closest(".layer-block");
+      if (eVis) eVis.disabled = on;
+      if (eOp)  eOp.disabled  = on;
+      if (eBlock) {
+        eBlock.style.opacity = on ? "0.45" : "1";
+        eBlock.style.pointerEvents = on ? "none" : "";
+      }
+      applyLayerControls();
+      // Re-render any cached result (so a leftover energy overlay clears).
+      rerenderCachedResult();
+
+      // Compute button gate flips between src-required and refs-required.
+      updateRunButtonState();
+      estimateRunTime();
+    };
+    densCheck.addEventListener("change", sync);
+    sync();
+  }
+  document.getElementById("ref-place-random")?.addEventListener("click", () => {
+    const n = parseInt(document.getElementById("n-refs")?.value, 10) || 10;
+    placeRandomRefPoints(n);
+  });
+  document.getElementById("ref-clear")?.addEventListener("click", clearRefPoints);
   // Anything that affects the time estimate
-  for (const id of ["mode", "want-passes", "want-topn", "n-routes"]) {
+  for (const id of ["mode", "want-passes", "want-topn", "n-routes", "want-density", "n-refs", "e-max"]) {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", estimateRunTime);
   }
@@ -150,7 +305,22 @@ document.addEventListener("DOMContentLoaded", () => {
       loadDemFromUrl(ex.url, ex.label);
     });
   }
+  // Bundle download / reload
+  const dlBtn = document.getElementById("download-bundle");
+  if (dlBtn) dlBtn.addEventListener("click", downloadBundle);
+  const reloadInput = document.getElementById("bundle-file");
+  if (reloadInput) {
+    reloadInput.addEventListener("change", (ev) => {
+      const f = ev.target.files[0];
+      if (f) loadBundleFile(f);
+      // Reset the input so the same filename re-triggers `change` if picked again.
+      ev.target.value = "";
+    });
+  }
   applyColormapToLegend();
+  // Apply initial layer controls so the rmsampa-v2 tile layer (default ON)
+  // gets added to the map without waiting for a Compute.
+  applyLayerControls();
 });
 
 const map = L.map("map", { preferCanvas: true }).setView([-23.55, -46.63], 12);
@@ -181,6 +351,9 @@ const state = {
   tileOverlayActive: false,
   // Outline rectangle drawn to show the loaded DEM's extent.
   demRect: null,
+  // Multi-reference density: list of [r, c] pixel coords plus their map markers.
+  refPoints: [],
+  refMarkers: [],
   // Live-ETA bookkeeping (set on Compute, cleared on done/error).
   computeStartedAt: 0,
   estimatedTotalMs: 0,
@@ -211,6 +384,7 @@ demFile.addEventListener("change", async (e) => {
   status.textContent = "Loading DEM…";
   try {
     const buf = await file.arrayBuffer();
+    state.demSourceUrl = null;
     await loadDemFromArrayBuffer(buf, file.name);
   } catch (err) {
     console.error(err);
@@ -234,6 +408,7 @@ async function loadDemFromUrl(url, label) {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${url}`);
     const buf = await resp.arrayBuffer();
+    state.demSourceUrl = url;
     await loadDemFromArrayBuffer(buf, label);
   } catch (err) {
     console.error(err);
@@ -298,6 +473,7 @@ async function loadDemFromArrayBuffer(buf, label) {
     bbox: { xmin: originX, ymin: originY - H * dy, xmax: originX + W * dx, ymax: originY },
     isGeographic: isProbablyGeographic,
   };
+  state.demLabel = label;
 
   // Draw a rectangle around the DEM extent (so the user sees what cells
   // they're working with) and pan/zoom the map to fit.
@@ -326,9 +502,15 @@ async function loadDemFromArrayBuffer(buf, label) {
   if (state.routeLines)    { for (const ln of state.routeLines) ln.remove(); state.routeLines = []; }
   if (state.srcMarker)     { state.srcMarker.remove();     state.srcMarker = null; }
   if (state.dstMarker)     { state.dstMarker.remove();     state.dstMarker = null; }
+  if (state.refMarkers && state.refMarkers.length) {
+    for (const m of state.refMarkers) m.remove();
+  }
+  state.refMarkers = [];
+  state.refPoints = [];
   state.src = null;
   state.dst = null;
   state.lastResult = null;
+  syncRefDisplay();
   document.getElementById("src-display").textContent = "— click map to set —";
   document.getElementById("dst-display").textContent = "— click again to set —";
   document.getElementById("src-display").classList.remove("set");
@@ -350,7 +532,7 @@ async function loadDemFromArrayBuffer(buf, label) {
     ${coverLabel}
   `;
   status.textContent = `${label} loaded. Click on the map to set source point.`;
-  runBtn.disabled = true; // re-enabled once a source point is set
+  updateRunButtonState();
   estimateRunTime();
 }
 
@@ -401,22 +583,28 @@ map.on("click", (e) => {
     status.textContent = "Clicked cell is nodata.";
     return;
   }
+  // Density mode in "click" placement: every click adds a reference point.
+  // src/dst are left alone in this mode.
+  const densityOn = !!document.getElementById("want-density")?.checked;
+  const densityClick = (document.getElementById("ref-source")?.value || "click") === "click";
+  if (densityOn && densityClick) {
+    addRefPoint([r, c]);
+    return;
+  }
   if (!state.src) {
     state.src = px;
     if (state.srcMarker) state.srcMarker.remove();
-    state.srcMarker = L.circleMarker(e.latlng, {
-      radius: 8, color: "#4cc9f0", fillColor: "#4cc9f0", fillOpacity: 1,
-    }).addTo(map).bindTooltip("Source");
+    state.srcMarker = L.marker(e.latlng, { icon: makeSrcDstIcon("src") })
+      .addTo(map).bindTooltip("Source");
     document.getElementById("src-display").textContent = `r=${r}, c=${c}`;
     document.getElementById("src-display").classList.add("set");
     status.textContent = "Source set. Click again to set destination, or run.";
-    runBtn.disabled = false;
+    updateRunButtonState();
   } else if (!state.dst) {
     state.dst = px;
     if (state.dstMarker) state.dstMarker.remove();
-    state.dstMarker = L.circleMarker(e.latlng, {
-      radius: 8, color: "#ff8c42", fillColor: "#ff8c42", fillOpacity: 1,
-    }).addTo(map).bindTooltip("Destination");
+    state.dstMarker = L.marker(e.latlng, { icon: makeSrcDstIcon("dst") })
+      .addTo(map).bindTooltip("Destination");
     document.getElementById("dst-display").textContent = `r=${r}, c=${c}`;
     document.getElementById("dst-display").classList.add("set");
     status.textContent = "Both points set. Run to compute.";
@@ -426,9 +614,8 @@ map.on("click", (e) => {
     state.dst = null;
     if (state.srcMarker) state.srcMarker.remove();
     if (state.dstMarker) state.dstMarker.remove();
-    state.srcMarker = L.circleMarker(e.latlng, {
-      radius: 8, color: "#4cc9f0", fillColor: "#4cc9f0", fillOpacity: 1,
-    }).addTo(map).bindTooltip("Source");
+    state.srcMarker = L.marker(e.latlng, { icon: makeSrcDstIcon("src") })
+      .addTo(map).bindTooltip("Source");
     state.dstMarker = null;
     document.getElementById("src-display").textContent = `r=${r}, c=${c}`;
     document.getElementById("dst-display").textContent = "— click again to set —";
@@ -447,17 +634,132 @@ document.getElementById("clear-points").addEventListener("click", () => {
   document.getElementById("dst-display").textContent = "— click again to set —";
   document.getElementById("src-display").classList.remove("set");
   document.getElementById("dst-display").classList.remove("set");
-  runBtn.disabled = true;
+  updateRunButtonState();
 });
+
+// ------- Marker icons -------
+// Source / destination / reference points all share a white-disc-with-
+// black-border style. Tiny label text inside (`src` / `dst` / a 1-based
+// order number for refs).
+function makeLabelIcon(label, size, fontSize) {
+  const html = `<div style="
+    width:${size}px;height:${size}px;
+    background:#fff;border:2px solid #000;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-family:ui-monospace,monospace;font-weight:700;color:#000;
+    font-size:${fontSize}px;line-height:1;box-sizing:border-box;
+    white-space:nowrap;
+  ">${label}</div>`;
+  return L.divIcon({
+    html,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    className: "",
+  });
+}
+const ICON_SRCDST_SIZE = 28, ICON_SRCDST_FONT = 9;
+const ICON_REF_SIZE    = 20, ICON_REF_FONT    = 10;
+const makeSrcDstIcon = (label) => makeLabelIcon(label, ICON_SRCDST_SIZE, ICON_SRCDST_FONT);
+const makeRefIcon    = (idx)   => makeLabelIcon(String(idx), ICON_REF_SIZE, ICON_REF_FONT);
+
+// ------- Multi-reference density helpers -------
+// FIFO buffer: state.refPoints / state.refMarkers are kept in arrival order.
+// Once the population exceeds the `N references` cap, the oldest entries are
+// dropped from the front. Applies to single clicks AND to "Place random".
+function addRefPoint(rc) {
+  if (!state.dem) return;
+  const [r, c] = rc;
+  if (!state.dem.mask[r * state.dem.W + c]) return;
+  state.refPoints.push([r, c]);
+  const { originX, originY, dx, dy } = state.dem;
+  const latlng = L.latLng(originY - (r + 0.5) * dy, originX + (c + 0.5) * dx);
+  const idx = state.refPoints.length;
+  const m = L.marker(latlng, { icon: makeRefIcon(idx) })
+    .addTo(map).bindTooltip(`ref ${idx} · r=${r}, c=${c}`);
+  state.refMarkers.push(m);
+  enforceRefCap();
+  syncRefDisplay();
+}
+
+function enforceRefCap() {
+  const cap = Math.max(1, parseInt(document.getElementById("n-refs")?.value, 10) || 10);
+  while (state.refPoints.length > cap) {
+    state.refPoints.shift();
+    const oldest = state.refMarkers.shift();
+    if (oldest) oldest.remove();
+  }
+  // After a FIFO trim the surviving refs need their numbered icons
+  // refreshed so what's drawn matches the (now reset) order.
+  for (let i = 0; i < state.refMarkers.length; i++) {
+    const marker = state.refMarkers[i];
+    const [r, c] = state.refPoints[i];
+    marker.setIcon(makeRefIcon(i + 1));
+    marker.unbindTooltip().bindTooltip(`ref ${i + 1} · r=${r}, c=${c}`);
+  }
+}
+
+function clearRefPoints() {
+  for (const m of state.refMarkers) m.remove();
+  state.refMarkers = [];
+  state.refPoints = [];
+  syncRefDisplay();
+}
+
+function placeRandomRefPoints(n) {
+  if (!state.dem) return;
+  const { mask, H, W } = state.dem;
+  // Reservoir of valid cell indices is too big to enumerate for huge DEMs;
+  // rejection sampling is fine for typical mask densities (~99% valid).
+  const want = Math.max(1, Math.min(2000, n | 0));
+  let attempts = 0;
+  const cap = want * 200;
+  const placed = [];
+  while (placed.length < want && attempts++ < cap) {
+    const r = (Math.random() * H) | 0;
+    const c = (Math.random() * W) | 0;
+    if (mask[r * W + c]) placed.push([r, c]);
+  }
+  for (const rc of placed) addRefPoint(rc);
+}
+
+function syncRefDisplay() {
+  const el = document.getElementById("ref-display");
+  if (el) el.textContent = state.refPoints.length
+    ? `${state.refPoints.length} reference${state.refPoints.length === 1 ? "" : "s"} placed`
+    : "no references placed";
+  updateRunButtonState();
+  estimateRunTime();
+}
+
+// Unified gate for the Compute button. In density mode it unlocks once at
+// least one reference point exists; otherwise it follows the src/dst rules.
+function updateRunButtonState() {
+  if (!state.dem) { runBtn.disabled = true; return; }
+  const densityOn = !!document.getElementById("want-density")?.checked;
+  if (densityOn) {
+    runBtn.disabled = !(state.refPoints && state.refPoints.length > 0);
+  } else {
+    runBtn.disabled = !state.src;
+  }
+}
 
 // ------- Run -------
 runBtn.addEventListener("click", async () => {
-  if (!state.dem || !state.src) return;
+  const wantDensity = !!document.getElementById("want-density")?.checked;
+  // Density mode runs from refPoints, not src — relax the src-required guard.
+  if (!state.dem) return;
+  if (!wantDensity && !state.src) return;
+  if (wantDensity && (!state.refPoints || state.refPoints.length === 0)) {
+    status.innerHTML = '<span style="color:#ff6b6b">Density mode needs at least one reference point — click on the map or use "Place random".</span>';
+    return;
+  }
 
   const mode = document.getElementById("mode").value;
   const alpha = parseFloat(document.getElementById("alpha").value);
   const beta = parseFloat(document.getElementById("beta").value);
   const eta = parseFloat(document.getElementById("eta").value);
+  const eMaxRaw = parseFloat(document.getElementById("e-max")?.value);
+  const eMax = Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0;
 
   // Optional extras (default off — energy-only is the fast path)
   const wantPasses = !!document.getElementById("want-passes")?.checked;
@@ -465,6 +767,9 @@ runBtn.addEventListener("click", async () => {
   const nRoutes    = Math.max(1, Math.min(20, parseInt(document.getElementById("n-routes")?.value, 10) || 3));
   const penalty    = Math.max(0, parseFloat(document.getElementById("penalty")?.value) || 2.0);
   const repulsionMode = document.getElementById("repulsion-mode")?.value || "per-cell";
+  // Density follows the global Mode select instead of having its own
+  // direction toggle.
+  const densityMode  = mode;
 
   if (wantTopN && !state.dst) {
     status.innerHTML = '<span style="color:#ff6b6b">Top-N routes requires a destination point.</span>';
@@ -474,10 +779,10 @@ runBtn.addEventListener("click", async () => {
   // Tear down old worker if any (we can't re-use after transferred buffers)
   if (state.worker) state.worker.terminate();
 
-  // Wasm worker doesn't yet implement passes / top-N. When either is on,
-  // force the JS worker. The energy-only fast path still uses wasm.
+  // Wasm worker doesn't yet implement passes / top-N / density / budget.
+  // Force JS for those; the energy-only fast path still uses wasm.
   const wasmOk = await wasmAvailable;
-  const useWasm = wasmOk && !wantPasses && !wantTopN;
+  const useWasm = wasmOk && !wantPasses && !wantTopN && !wantDensity && eMax === 0;
   state.worker = useWasm
     ? new Worker(WASM_WORKER_URL, { type: "module" })
     : new Worker(JS_WORKER_URL);
@@ -494,6 +799,9 @@ runBtn.addEventListener("click", async () => {
   // first few percent.
   state.computeStartedAt = performance.now();
   state.estimatedTotalMs = 0;
+  // Cache density's expected ref count so the progress text reads
+  // "ref X/N" while the worker is iterating.
+  state.computeRefTotal = wantDensity ? state.refPoints.length : 0;
 
   state.worker.onmessage = (ev) => {
     const m = ev.data;
@@ -505,17 +813,25 @@ runBtn.addEventListener("click", async () => {
         const elapsed = performance.now() - state.computeStartedAt;
         const total = elapsed / m.progress;
         const remaining = Math.max(0, total - elapsed);
-        status.textContent = `Computing… ${pct.toFixed(0)}% — ${formatDuration(remaining)} left`;
+        let label;
+        if (state.computeRefTotal > 0) {
+          // Density: progress fraction is (k+1)/N_refs after each ref.
+          const cur = Math.max(1, Math.min(state.computeRefTotal, Math.ceil(m.progress * state.computeRefTotal)));
+          label = `Computing density: ref ${cur}/${state.computeRefTotal} (${pct.toFixed(0)}%)`;
+        } else {
+          label = `Computing… ${pct.toFixed(0)}%`;
+        }
+        status.textContent = `${label} — ${formatDuration(remaining)} left`;
       }
     } else if (m.kind === "done") {
       progress.classList.remove("active");
-      runBtn.disabled = false;
+      updateRunButtonState();
       state.computeStartedAt = 0;
       renderResult(m);
       status.textContent = `Done in ${m.elapsedMs.toFixed(0)} ms (${state.engine}).`;
     } else if (m.kind === "error") {
       progress.classList.remove("active");
-      runBtn.disabled = false;
+      updateRunButtonState();
       state.computeStartedAt = 0;
       status.innerHTML = `<span style="color:#ff6b6b">Worker error: ${m.message}</span>`;
     }
@@ -535,12 +851,15 @@ runBtn.addEventListener("click", async () => {
       W: state.dem.W,
       dx: state.dem.dxM,
       dy: state.dem.dyM,
-      seedR: state.src[0],
-      seedC: state.src[1],
+      seedR: state.src ? state.src[0] : (state.refPoints[0] ? state.refPoints[0][0] : -1),
+      seedC: state.src ? state.src[1] : (state.refPoints[0] ? state.refPoints[0][1] : -1),
       goalR: state.dst ? state.dst[0] : -1,
       goalC: state.dst ? state.dst[1] : -1,
-      mode, alpha, beta, eta,
+      mode, alpha, beta, eta, eMax,
       wantPasses, wantTopN, nRoutes, penalty, repulsionMode,
+      wantDensity,
+      refPoints: wantDensity ? state.refPoints.slice() : null,
+      densityMode,
     },
     [heightCopy.buffer, maskCopy.buffer]
   );
@@ -551,13 +870,17 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
   // Cache for live re-render on colormap / view / range changes.
   state.lastResult = { energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs };
 
-  // Compute energy auto range (one pass)
+  // Compute energy auto range (one pass) — skip if energy is null (a
+  // density-only run could omit it, though the worker currently always
+  // returns the first ref's energy field).
   let autoMin = Infinity, autoMax = 0;
-  for (let i = 0; i < energy.length; i++) {
-    const v = energy[i];
-    if (Number.isFinite(v)) {
-      if (v < autoMin) autoMin = v;
-      if (v > autoMax) autoMax = v;
+  if (energy) {
+    for (let i = 0; i < energy.length; i++) {
+      const v = energy[i];
+      if (Number.isFinite(v)) {
+        if (v < autoMin) autoMin = v;
+        if (v > autoMax) autoMax = v;
+      }
     }
   }
   if (!Number.isFinite(autoMin)) autoMin = 0;
@@ -623,28 +946,44 @@ function rerenderCachedResult() {
   const { energy, passes, path, routes } = r;
   const { H, W, originX, originY, dx, dy, isGeographic } = state.dem;
 
-  // -- Energy layer (always rendered; absolute vmin/vmax controls) --
-  const energyDU = renderFieldToDataURL(energy, W, H, {
-    autoMin: state.lastAutoMin ?? 0,
-    autoMax: state.lastAutoMax ?? 1,
-    userMin: readRangeInput("vmin", null),
-    userMax: readRangeInput("vmax", null),
-    useGreyscale: false,
-    treatZeroAsTransparent: false,
-  });
-  state.energyDataUrl = energyDU;
+  // -- Energy layer (rendered unless density mode is on, in which case
+  // the user wants the density view alone). --
+  const densityOn = !!document.getElementById("want-density")?.checked;
+  if (energy && !densityOn) {
+    state.energyDataUrl = renderFieldToDataURL(energy, W, H, {
+      autoMin: state.lastAutoMin ?? 0,
+      autoMax: state.lastAutoMax ?? 1,
+      userMin: readRangeInput("vmin", null),
+      userMax: readRangeInput("vmax", null),
+      useGreyscale: false,
+      treatZeroAsTransparent: false,
+    });
+  } else {
+    state.energyDataUrl = null;
+  }
 
   // -- Passes layer (greyscale, mirrors energy's absolute-range UI) --
   // Greyscale so additive blending on top of the colour-mapped energy
-  // brightens "highway" cells without imposing its own hue.
+  // brightens "highway" cells without imposing its own hue. When blend
+  // mode is "normal" the renderer paints with full alpha so dim cells
+  // read as solid black instead of transparent.
   let passesDU = null;
   if (passes) {
+    const blend = document.getElementById("passes-blend")?.value || "plus-lighter";
+    const gamma = parseFloat(document.getElementById("passes-gamma")?.value);
+    const win = parseInt(document.getElementById("passes-mean-window")?.value, 10);
     passesDU = renderFieldToDataURL(passes, W, H, {
-      autoMin: state.lastPassesAutoMin ?? 0,
-      autoMax: state.lastPassesAutoMax ?? 1,
+      // Auto bounds (when user hasn't pinned vmin/vmax) come from p10/p90
+      // rather than min/max — passes counts are heavily long-tailed and the
+      // raw min/max maps the dynamic range mostly to a couple of highway
+      // cells, leaving everything else flat.
+      usePercentileBounds: true,
       userMin: readRangeInput("passes-vmin", null),
       userMax: readRangeInput("passes-vmax", null),
+      gamma: Number.isFinite(gamma) ? gamma : 1,
+      meanWindow: Number.isFinite(win) && win > 1 ? win : 1,
       useGreyscale: true,
+      solidAlpha: blend === "normal",
       treatZeroAsTransparent: true,
     });
     state.passesDataUrl = passesDU;
@@ -695,32 +1034,122 @@ function rerenderCachedResult() {
   updateLegendTicks();
   // Update placeholders so the user can see what "auto" is currently using.
   syncRangePlaceholders();
+  // Whatever style was rendered is now the "clean" snapshot. Any input
+  // change after this point will re-mark dirty.
+  clearStyleDirty();
+}
+
+// Separable 2D box blur. Treats the input as zero-padded outside the grid;
+// unsettled cells (value 0 in the passes field) get averaged in, which lets
+// the smoothed field bleed slightly past the original settled extent — the
+// natural "blur" look the user wants.
+function boxBlur2D(field, W, H, win) {
+  const N = W * H;
+  if (win <= 1) return field;
+  const half = (win - 1) >> 1;
+  const tmp = new Float64Array(N);
+  // Horizontal pass: sliding-window mean over each row.
+  for (let r = 0; r < H; r++) {
+    const rowOff = r * W;
+    let sum = 0, count = 0;
+    for (let c = 0; c <= half && c < W; c++) {
+      sum += field[rowOff + c];
+      count++;
+    }
+    tmp[rowOff] = sum / count;
+    for (let c = 1; c < W; c++) {
+      const addC = c + half;
+      const remC = c - half - 1;
+      if (addC < W) { sum += field[rowOff + addC]; count++; }
+      if (remC >= 0) { sum -= field[rowOff + remC]; count--; }
+      tmp[rowOff + c] = sum / count;
+    }
+  }
+  // Vertical pass over tmp.
+  const out = new Float64Array(N);
+  for (let c = 0; c < W; c++) {
+    let sum = 0, count = 0;
+    for (let r = 0; r <= half && r < H; r++) {
+      sum += tmp[r * W + c];
+      count++;
+    }
+    out[c] = sum / count;
+    for (let r = 1; r < H; r++) {
+      const addR = r + half;
+      const remR = r - half - 1;
+      if (addR < H) { sum += tmp[addR * W + c]; count++; }
+      if (remR >= 0) { sum -= tmp[remR * W + c]; count--; }
+      out[r * W + c] = sum / count;
+    }
+  }
+  return out;
 }
 
 // Render a 2D scalar field to a base64 dataURL.
-// Range: vmin/vmax in real units. When both blank → auto + sqrt stretch
-// (long-tail-friendly). When either pinned → linear with clamp.
-// `useGreyscale: true` renders to a black→white ramp instead of the active
-// colormap — used for the passes layer so additive blending on top of the
-// colour-mapped energy layer reads as "brighten where many routes pass".
+// Range: vmin/vmax in real units. When both blank → auto. Auto-bounds use
+// percentiles (p10/p90) when `usePercentileBounds` is set, else min/max.
+// Stretch: linear when bounds are pinned or percentile-based; sqrt for the
+// raw min/max auto path (long-tail friendly).
+// `useGreyscale: true` paints a black→white ramp instead of the active
+// colormap — used for the passes layer.
+// `meanWindow > 1` applies a separable box-blur prefilter (treats unsettled
+// cells as zero, so the smoothed field bleeds slightly outside the original
+// settled extent — that's the desired blur look).
+// `gamma`: exponent γ such that `t' = t^γ`. γ=1 → identity. γ=2 squares
+// the intensity (darkens dim cells). γ=0.5 takes the square root
+// (brightens dim cells).
 function renderFieldToDataURL(field, W, H, opts) {
   const N = W * H;
+
+  // Optional mean filter. boxBlur returns a fresh Float64Array.
+  const work = opts.meanWindow && opts.meanWindow > 1
+    ? boxBlur2D(field, W, H, opts.meanWindow)
+    : field;
+
+  // Resolve bounds.
+  let autoLo = Infinity, autoHi = 0;
+  if (opts.usePercentileBounds) {
+    const samples = [];
+    for (let i = 0; i < N; i++) {
+      const v = work[i];
+      if (Number.isFinite(v) && (!opts.treatZeroAsTransparent || v > 0)) samples.push(v);
+    }
+    samples.sort((a, b) => a - b);
+    if (samples.length) {
+      autoLo = samples[Math.floor(samples.length * 0.10)];
+      autoHi = samples[Math.floor(samples.length * 0.90)];
+    }
+  } else {
+    for (let i = 0; i < N; i++) {
+      const v = work[i];
+      if (Number.isFinite(v) && (!opts.treatZeroAsTransparent || v > 0)) {
+        if (v < autoLo) autoLo = v;
+        if (v > autoHi) autoHi = v;
+      }
+    }
+  }
+  if (opts.autoMin != null) autoLo = opts.autoMin;
+  if (opts.autoMax != null) autoHi = opts.autoMax;
+
+  const userPinned = opts.userMin != null || opts.userMax != null;
+  let lo = opts.userMin != null ? opts.userMin : autoLo;
+  let hi = opts.userMax != null ? opts.userMax : autoHi;
+  // Sqrt stretch only on the raw min/max auto path. Percentile-clipped or
+  // user-pinned bounds get a plain linear mapping.
+  const useSqrt = !userPinned && !opts.usePercentileBounds;
+  if (!Number.isFinite(lo)) lo = 0;
+  if (!Number.isFinite(hi) || hi <= lo) hi = lo + 1;
+  const span = hi - lo;
+  const gammaExp = Math.max(0.01, opts.gamma ?? 1);
+
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d");
   const img = ctx.createImageData(W, H);
 
-  const userPinned = opts.userMin != null || opts.userMax != null;
-  let lo = opts.userMin != null ? opts.userMin : opts.autoMin;
-  let hi = opts.userMax != null ? opts.userMax : opts.autoMax;
-  const useSqrt = !userPinned;
-  if (!Number.isFinite(lo)) lo = 0;
-  if (!Number.isFinite(hi) || hi <= lo) hi = lo + 1;
-  const span = hi - lo;
-
   for (let i = 0; i < N; i++) {
-    const v = field[i];
+    const v = work[i];
     const unsettled =
       !Number.isFinite(v) || (opts.treatZeroAsTransparent && v === 0);
     if (unsettled) {
@@ -735,15 +1164,19 @@ function renderFieldToDataURL(field, W, H, opts) {
     }
     if (t < 0) t = 0;
     else if (t > 1) t = 1;
+    // Gamma adjustment: t' = t^(1+γ). γ=0 leaves the mapping unchanged.
+    if (gammaExp !== 1) t = Math.pow(t, gammaExp);
     let r2, g2, b2, a2;
     if (opts.useGreyscale) {
       const g = Math.round(t * 255);
       r2 = g2 = b2 = g;
-      // Alpha equals brightness so black=transparent (zero contribution
-      // under any blend mode) and white=fully opaque white. Critical for
-      // additive blending — otherwise the layer washes a translucent dark
-      // tint over the whole DEM extent before the bright pixels fire.
-      a2 = g;
+      // For additive-style blends (plus-lighter, screen, multiply, etc.)
+      // alpha=brightness makes black cells contribute nothing while bright
+      // cells fully add. For "normal" blend that trick reads wrong (dark
+      // cells become transparent and the energy field bleeds through), so
+      // we use full alpha and let the slider do the dimming. The flag is
+      // set by the renderer based on the active blend mode.
+      a2 = opts.solidAlpha ? 255 : g;
     } else {
       [r2, g2, b2] = colormap(t);
       // Fully opaque on the canvas; user-facing dimming comes from the
@@ -920,6 +1353,16 @@ function estimateRunTime() {
     const rep = document.getElementById("repulsion-mode")?.value || "per-cell";
     const perIter = rep === "per-cell" ? 0.5 : 0.8;
     ms += (N / rate) * perIter * k;
+  }
+  // Multi-reference density runs one (or two for round-trip) Dijkstras per
+  // reference, each with passes tracking.
+  const wantDensity = !!document.getElementById("want-density")?.checked;
+  if (wantDensity) {
+    const refs = state.refPoints?.length || 0;
+    // Density direction now follows the global mode select.
+    const dmode = document.getElementById("mode")?.value || "from";
+    const dijkstrasPerRef = dmode === "round" ? 2 : 1;
+    ms += (N / rate) * 1.1 * dijkstrasPerRef * refs;
   }
   out.textContent = `≈ ${formatDuration(ms)} (${eff})`;
 }
@@ -1108,4 +1551,351 @@ function colormapToCss(name) {
 function applyColormapToLegend() {
   const swatch = document.querySelector(".swatch");
   if (swatch) swatch.style.background = colormapToCss(activeColormap);
+}
+
+// ------- Bundle download / reload -------
+// `metadata.jsonld` captures everything needed to reproduce the run from the
+// same DEM: timestamps, engine, all compute parameters, source/destination
+// pixel coordinates, and the visualisation knobs. Output arrays are written
+// alongside as raw little-endian binaries (energy.bin, passes.bin) plus
+// GeoJSON line layers for routes/path. JSON-LD `@context` is inlined so
+// the file is self-describing without a network fetch.
+
+const SIMU_CONTEXT = {
+  "@vocab": "https://pedalhidrografi.co/vocab/simujoules#",
+  "schema": "https://schema.org/",
+  "geo": "http://www.opengis.net/ont/geosparql#",
+  "qudt": "http://qudt.org/schema/qudt/",
+};
+
+function pixelToLonLat(idx, dem) {
+  const r = (idx / dem.W) | 0;
+  const c = idx - r * dem.W;
+  return [dem.originX + (c + 0.5) * dem.dx, dem.originY - (r + 0.5) * dem.dy];
+}
+
+function pathFCFromIndices(path, dem, props = {}) {
+  const coords = path.map((i) => pixelToLonLat(i, dem));
+  return {
+    type: "FeatureCollection",
+    features: [{
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: coords },
+      properties: props,
+    }],
+  };
+}
+
+function routesFCFromList(routes, dem) {
+  return {
+    type: "FeatureCollection",
+    features: routes.map((r, i) => ({
+      type: "Feature",
+      geometry: {
+        type: "LineString",
+        coordinates: r.path.map((idx) => pixelToLonLat(idx, dem)),
+      },
+      properties: {
+        rank: i + 1,
+        energy: r.energy,
+        length_m: r.length,
+        shared_cells: r.shared,
+      },
+    })),
+  };
+}
+
+function buildMetadata(result, withOutputs = true) {
+  const dem = state.dem;
+  const params = {
+    mode:          document.getElementById("mode")?.value,
+    alpha:         parseFloat(document.getElementById("alpha")?.value),
+    beta:          parseFloat(document.getElementById("beta")?.value),
+    eta:           parseFloat(document.getElementById("eta")?.value),
+    src:           state.src,
+    dst:           state.dst,
+    wantPasses:    !!document.getElementById("want-passes")?.checked,
+    wantTopN:      !!document.getElementById("want-topn")?.checked,
+    nRoutes:       parseInt(document.getElementById("n-routes")?.value, 10) || 3,
+    penalty:       parseFloat(document.getElementById("penalty")?.value) || 2.0,
+    repulsionMode: document.getElementById("repulsion-mode")?.value || "per-cell",
+  };
+  const viz = {
+    fieldColormap:  activeColormap,
+    routesColormap: document.getElementById("routes-colormap")?.value || "CET_R2",
+    energy: {
+      vmin:    readRangeInput("vmin", null),
+      vmax:    readRangeInput("vmax", null),
+      opacity: parseFloat(document.getElementById("energy-opacity")?.value),
+      visible: !!document.getElementById("energy-visible")?.checked,
+    },
+    passes: {
+      vmin:    readRangeInput("passes-vmin", null),
+      vmax:    readRangeInput("passes-vmax", null),
+      opacity: parseFloat(document.getElementById("passes-opacity")?.value),
+      visible: !!document.getElementById("passes-visible")?.checked,
+      blend:   document.getElementById("passes-blend")?.value || "plus-lighter",
+    },
+    tile: {
+      url:     RMSAMPA_URL,
+      opacity: parseFloat(document.getElementById("tile-opacity")?.value),
+      visible: !!document.getElementById("tile-visible")?.checked,
+    },
+  };
+
+  const md = {
+    "@context":           SIMU_CONTEXT,
+    "@type":              "EnergyFieldComputation",
+    "schema:dateCreated": new Date().toISOString(),
+    timestamp:            new Date().toISOString(),
+    schemaVersion:        1,
+    engine:               state.engine || "js",
+    elapsedMs:            result?.elapsedMs ?? null,
+    dem: {
+      label:        state.demLabel || null,
+      sourceUrl:    state.demSourceUrl || null,
+      H:            dem.H,
+      W:            dem.W,
+      originX:      dem.originX,
+      originY:      dem.originY,
+      dx:           dem.dx,
+      dy:           dem.dy,
+      dxM:          dem.dxM,
+      dyM:          dem.dyM,
+      isGeographic: dem.isGeographic,
+    },
+    params,
+    viz,
+    stats: {
+      maxE:        state.lastAutoMax ?? null,
+      maxPasses:   state.lastPassesAutoMax ?? null,
+      pathEnergy:  result?.pathEnergy ?? null,
+      pathLengthM: result?.pathLengthM ?? null,
+    },
+  };
+
+  if (withOutputs && result) {
+    md.outputs = {
+      energy: result.energy ? {
+        type: "Float32Array",
+        shape: [dem.H, dem.W],
+        file: "energy.bin",
+        byteOrder: "little-endian",
+      } : null,
+      passes: result.passes ? {
+        type: "Float64Array",
+        shape: [dem.H, dem.W],
+        file: "passes.bin",
+        byteOrder: "little-endian",
+      } : null,
+      routes: result.routes && result.routes.length ? {
+        type: "GeoJSON",
+        file: "routes.geojson",
+      } : null,
+      path: result.path && result.path.length ? {
+        type: "GeoJSON",
+        file: "path.geojson",
+      } : null,
+    };
+  }
+  return md;
+}
+
+async function downloadBundle() {
+  console.info("[bundle] download click — lastResult?", !!state.lastResult, "dem?", !!state.dem, "JSZip?", typeof JSZip);
+  if (!state.dem) {
+    status.innerHTML = '<span style="color:#ff6b6b">Load a DEM first, then run Compute, then download.</span>';
+    return;
+  }
+  if (!state.lastResult) {
+    status.innerHTML = '<span style="color:#ff6b6b">Nothing to download yet — click Compute first.</span>';
+    return;
+  }
+  if (typeof JSZip === "undefined") {
+    status.innerHTML = '<span style="color:#ff6b6b">JSZip didn\'t load — check the network/console.</span>';
+    return;
+  }
+  status.textContent = "Building bundle…";
+  try {
+    const r = state.lastResult;
+    const dem = state.dem;
+    const md = buildMetadata(r, true);
+
+    const zip = new JSZip();
+    zip.file("metadata.jsonld", JSON.stringify(md, null, 2));
+    // Use Uint8Array views so JSZip stores exactly the typed-array bytes
+    // regardless of byteOffset / shared underlying buffers.
+    if (r.energy) zip.file("energy.bin", new Uint8Array(r.energy.buffer, r.energy.byteOffset, r.energy.byteLength));
+    if (r.passes) zip.file("passes.bin", new Uint8Array(r.passes.buffer, r.passes.byteOffset, r.passes.byteLength));
+    if (r.routes && r.routes.length) {
+      zip.file("routes.geojson", JSON.stringify(routesFCFromList(r.routes, dem), null, 2));
+    }
+    if (r.path && r.path.length) {
+      zip.file("path.geojson", JSON.stringify(pathFCFromIndices(r.path, dem, {
+        energy: r.pathEnergy,
+        length_m: r.pathLengthM,
+      }), null, 2));
+    }
+
+    const blob = await zip.generateAsync({ type: "blob" });
+    const url = URL.createObjectURL(blob);
+    const ts = new Date().toISOString().replace(/[:.]/g, "-").replace(/-Z?$/, "");
+    const slug = state.demLabel ? state.demLabel.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_") + "-" : "";
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `simujoules-${slug}${ts}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+    status.textContent = `Saved bundle (${(blob.size / 1024 / 1024).toFixed(1)} MB).`;
+  } catch (err) {
+    console.error("[bundle] download failed:", err);
+    status.innerHTML = `<span style="color:#ff6b6b">Download failed: ${err.message}</span>`;
+  }
+}
+
+// Read a bundle (.zip with metadata.jsonld + arrays) or a bare .jsonld and
+// restore as much UI/state as possible. After restoration: if a matching
+// DEM is already loaded, src/dst markers are placed and the user can click
+// Compute to reproduce. If no DEM, the status nudges them to load one.
+async function loadBundleFile(file) {
+  try {
+    let md;
+    let bin = {}; // { energy: Float32Array, passes: Float64Array, ... }
+    if (/\.zip$/i.test(file.name)) {
+      if (typeof JSZip === "undefined") throw new Error("JSZip didn't load");
+      const zip = await JSZip.loadAsync(await file.arrayBuffer());
+      const mdEntry = zip.file("metadata.jsonld") || zip.file("metadata.json");
+      if (!mdEntry) throw new Error("No metadata.jsonld inside the archive.");
+      md = JSON.parse(await mdEntry.async("string"));
+      const eEntry = zip.file("energy.bin");
+      if (eEntry) bin.energy = new Float32Array(await eEntry.async("arraybuffer"));
+      const pEntry = zip.file("passes.bin");
+      if (pEntry) bin.passes = new Float64Array(await pEntry.async("arraybuffer"));
+      // GeoJSON route/path geometry doesn't get re-rasterised — when no DEM
+      // is loaded yet we couldn't draw it anyway. After the user loads a
+      // matching DEM and clicks Compute, the routes are regenerated.
+    } else if (/\.jsonld?$|\.json$/i.test(file.name)) {
+      md = JSON.parse(await file.text());
+    } else {
+      throw new Error("Unrecognised file — pass a .zip bundle or .jsonld.");
+    }
+    applyMetadataToUI(md, bin);
+  } catch (err) {
+    console.error(err);
+    status.innerHTML = `<span style="color:#ff6b6b">Reload failed: ${err.message}</span>`;
+  }
+}
+
+function applyMetadataToUI(md, bin = {}) {
+  const p = md.params || {};
+  const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+  const check = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.checked = !!v; };
+
+  set("mode", p.mode);
+  set("alpha", p.alpha);
+  set("beta", p.beta);
+  set("eta", p.eta);
+  check("want-passes", p.wantPasses);
+  check("want-topn", p.wantTopN);
+  set("n-routes", p.nRoutes);
+  set("penalty", p.penalty);
+  set("repulsion-mode", p.repulsionMode);
+
+  const v = md.viz || {};
+  if (v.fieldColormap && COLORMAPS[v.fieldColormap]) {
+    activeColormap = v.fieldColormap;
+    const sel = document.getElementById("colormap"); if (sel) sel.value = v.fieldColormap;
+    applyColormapToLegend();
+  }
+  if (v.routesColormap && COLORMAPS[v.routesColormap]) {
+    set("routes-colormap", v.routesColormap);
+  }
+  if (v.energy) {
+    set("vmin", v.energy.vmin);
+    set("vmax", v.energy.vmax);
+    set("energy-opacity", v.energy.opacity);
+    check("energy-visible", v.energy.visible);
+  }
+  if (v.passes) {
+    set("passes-vmin", v.passes.vmin);
+    set("passes-vmax", v.passes.vmax);
+    set("passes-opacity", v.passes.opacity);
+    check("passes-visible", v.passes.visible);
+    set("passes-blend", v.passes.blend);
+  }
+  if (v.tile) {
+    set("tile-opacity", v.tile.opacity);
+    check("tile-visible", v.tile.visible);
+  }
+
+  // Trigger any UI sync that depends on these (top-N reveal, etc.)
+  const topnCheck = document.getElementById("want-topn");
+  if (topnCheck) {
+    const evt = new Event("change");
+    topnCheck.dispatchEvent(evt);
+  }
+
+  // Restore src/dst pixel positions. If a DEM is loaded that matches the
+  // bundle's DEM dimensions, place markers right away; otherwise hold the
+  // values for when the DEM gets loaded.
+  if (Array.isArray(p.src)) state.src = p.src.slice(0, 2);
+  if (Array.isArray(p.dst)) state.dst = p.dst.slice(0, 2);
+
+  function placeMarker(point, label) {
+    if (!state.dem || !point) return null;
+    const [r, c] = point;
+    const { originX, originY, dx, dy } = state.dem;
+    const latlng = L.latLng(originY - (r + 0.5) * dy, originX + (c + 0.5) * dx);
+    return L.marker(latlng, { icon: makeSrcDstIcon(label === "Source" ? "src" : "dst") })
+      .addTo(map).bindTooltip(label);
+  }
+  if (state.dem && state.src) {
+    if (state.srcMarker) state.srcMarker.remove();
+    state.srcMarker = placeMarker(state.src, "Source");
+    document.getElementById("src-display").textContent = `r=${state.src[0]}, c=${state.src[1]}`;
+    document.getElementById("src-display").classList.add("set");
+  }
+  if (state.dem && state.dst) {
+    if (state.dstMarker) state.dstMarker.remove();
+    state.dstMarker = placeMarker(state.dst, "Destination");
+    document.getElementById("dst-display").textContent = `r=${state.dst[0]}, c=${state.dst[1]}`;
+    document.getElementById("dst-display").classList.add("set");
+  }
+
+  applyLayerControls();
+  estimateRunTime();
+
+  // If we got the binary outputs back, render them straight away — no
+  // recompute needed. Skip if the DEM dimensions don't match (or no DEM
+  // is loaded yet).
+  let restored = false;
+  if (state.dem && bin.energy) {
+    const N = state.dem.H * state.dem.W;
+    if (bin.energy.length === N && (!bin.passes || bin.passes.length === N)) {
+      const synth = {
+        energy:      bin.energy,
+        passes:      bin.passes || null,
+        path:        null,
+        pathEnergy:  md.stats?.pathEnergy ?? null,
+        pathLengthM: md.stats?.pathLengthM ?? null,
+        routes:      null,
+        elapsedMs:   md.elapsedMs ?? 0,
+      };
+      renderResult(synth);
+      restored = true;
+    }
+  }
+
+  updateRunButtonState();
+  if (restored) {
+    status.textContent = "Bundle restored from cache. Click Compute to re-derive routes/path.";
+  } else if (state.dem && state.src) {
+    status.textContent = "Bundle parameters loaded. Click Compute to reproduce.";
+  } else if (!state.dem) {
+    const hint = md.dem?.sourceUrl ? ` (try ${md.dem.sourceUrl})` : "";
+    status.innerHTML = `<span style="opacity:0.85">Bundle loaded. Now load the matching DEM${hint} and click Compute.</span>`;
+  } else {
+    status.textContent = "Bundle loaded. Click on the map to set source point.";
+  }
 }

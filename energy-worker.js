@@ -90,6 +90,13 @@ function dijkstra(opts) {
     dx, dy,
     reverse, trackParents,
     wantPasses,
+    eMax = 0,                  // 0 = no budget; >0 = stop expanding past this
+    // Per-cell progress messages get scaled into the range
+    // [progressBase, progressBase + progressScale]. Default = full range,
+    // i.e. one Dijkstra spans the whole bar. The density loop overrides
+    // these to keep the overall compute monotonic 0→1 across N refs.
+    progressBase = 0,
+    progressScale = 1,
   } = opts;
 
   const N = H * W;
@@ -134,8 +141,10 @@ function dijkstra(opts) {
 
     progressed++;
     if (progressed % reportEvery === 0) {
-      // Coarse progress: fraction of mask cells settled (approximation).
-      postMessage({ kind: "progress", progress: progressed / N });
+      // Coarse progress: fraction of mask cells settled (approximation),
+      // scaled into the caller's slice of the overall progress bar.
+      const local = progressed / N;
+      postMessage({ kind: "progress", progress: progressBase + local * progressScale });
     }
 
     const r = (idx / W) | 0;
@@ -169,6 +178,10 @@ function dijkstra(opts) {
       }
 
       const tentative = g + edge;
+      // Energy budget: skip cells beyond the allowance. Settled-but-out-of-
+      // budget cells just stay at E=Infinity (treated as "unreachable" by
+      // the renderer / passes-count subtree walk).
+      if (eMax > 0 && tentative > eMax) continue;
       if (tentative < E[nIdx]) {
         E[nIdx] = tentative;
         if (parents) parents[nIdx] = idx;
@@ -213,6 +226,7 @@ function astar(opts) {
     penalty, usedCount,
     repulsionMode = "per-cell",   // "per-cell" | "linear" | "square"
     distUsed = null,               // Float32Array of distance-to-nearest-used
+    eMax = 0,                      // 0 = no budget; >0 abandon past this
   } = opts;
   const N = H * W;
   const diag = Math.hypot(dx, dy);
@@ -306,6 +320,7 @@ function astar(opts) {
       }
 
       const tentative = g + edge;
+      if (eMax > 0 && tentative > eMax) continue;
       if (tentative < E[nIdx]) {
         E[nIdx] = tentative;
         L[nIdx] = L[idx] + dist;
@@ -410,6 +425,10 @@ self.onmessage = (ev) => {
     nRoutes = 1,                                         // number of top-N iterations
     penalty = 2.0,                                       // strength of repulsion
     repulsionMode = "per-cell",                          // "per-cell" | "linear" | "square"
+    eMax = 0,                                            // energy budget (0 = none)
+    wantDensity = false,                                  // multi-ref passes density
+    refPoints = null,                                     // [[r0,c0],[r1,c1], …]
+    densityMode = "from",                                 // mode for each ref's Dijkstra
   } = msg;
 
   const wantPath = goalR >= 0 && goalC >= 0;
@@ -442,7 +461,7 @@ self.onmessage = (ev) => {
         seedR, seedC,
         alpha, beta, eta, dx, dy,
         reverse: false, trackParents: wantPath,
-        wantPasses,
+        wantPasses, eMax,
       });
       energy = r.E;
       passes = r.passes;
@@ -456,7 +475,7 @@ self.onmessage = (ev) => {
         seedR, seedC,
         alpha, beta, eta, dx, dy,
         reverse: true, trackParents: wantPath,
-        wantPasses,
+        wantPasses, eMax,
       });
       energy = r.E;
       passes = r.passes;
@@ -471,14 +490,14 @@ self.onmessage = (ev) => {
         seedR, seedC,
         alpha, beta, eta, dx, dy,
         reverse: false, trackParents: wantPath,
-        wantPasses,
+        wantPasses, eMax,
       });
       const b = dijkstra({
         height, mask, H, W,
         seedR, seedC,
         alpha, beta, eta, dx, dy,
         reverse: true, trackParents: false,
-        wantPasses,
+        wantPasses, eMax,
       });
       energy = new Float32Array(N);
       for (let i = 0; i < N; i++) {
@@ -496,6 +515,76 @@ self.onmessage = (ev) => {
         path = reconstructPath(f.parents, goalIdx);
         pathEnergy = energy[goalIdx];
       }
+    }
+
+    // Multi-reference passes density. For each reference point, run a Dijkstra
+    // (with passes), normalise by H*W, sum across references, normalise by
+    // H*W again. Replaces the regular `passes` output. The first reference's
+    // energy field also goes back as `energy` (so the energy layer still has
+    // something to render); subsequent references' energy fields are not
+    // returned individually.
+    if (wantDensity && Array.isArray(refPoints) && refPoints.length > 0) {
+      const density = new Float64Array(N);
+      let firstEnergy = null;
+      const dmode = densityMode || "from";
+      const K = refPoints.length;
+      const slice = 1 / K;
+      for (let k = 0; k < K; k++) {
+        const [refR, refC] = refPoints[k];
+        if (refR < 0 || refR >= H || refC < 0 || refC >= W) continue;
+        if (!mask[refR * W + refC]) continue;
+
+        const base = k / K;
+
+        let perRefPasses;
+        if (dmode === "round") {
+          // Forward + reverse share this ref's slice equally.
+          const f = dijkstra({
+            height, mask, H, W,
+            seedR: refR, seedC: refC,
+            alpha, beta, eta, dx, dy,
+            reverse: false, trackParents: false,
+            wantPasses: true, eMax,
+            progressBase: base, progressScale: slice * 0.5,
+          });
+          const b = dijkstra({
+            height, mask, H, W,
+            seedR: refR, seedC: refC,
+            alpha, beta, eta, dx, dy,
+            reverse: true, trackParents: false,
+            wantPasses: true, eMax,
+            progressBase: base + slice * 0.5, progressScale: slice * 0.5,
+          });
+          perRefPasses = new Float64Array(N);
+          for (let i = 0; i < N; i++) perRefPasses[i] = f.passes[i] + b.passes[i];
+          if (k === 0) firstEnergy = f.E;
+        } else {
+          const r = dijkstra({
+            height, mask, H, W,
+            seedR: refR, seedC: refC,
+            alpha, beta, eta, dx, dy,
+            reverse: dmode === "to", trackParents: false,
+            wantPasses: true, eMax,
+            progressBase: base, progressScale: slice,
+          });
+          perRefPasses = r.passes;
+          if (k === 0) firstEnergy = r.E;
+        }
+        // First normalisation: each reference's count becomes a density
+        // (passes per cell over the grid).
+        for (let i = 0; i < N; i++) density[i] += perRefPasses[i] / N;
+        // Snap progress to the slice boundary at end of each ref so the
+        // bar lines up with the "ref X/K" status text the main thread
+        // shows. The per-cell ticks above already cover the slice
+        // monotonically; this is just a clean checkpoint.
+        postMessage({ kind: "progress", progress: (k + 1) / K });
+      }
+      // Second normalisation: divide the accumulated density by H*W again,
+      // matching the user-specified definition.
+      for (let i = 0; i < N; i++) density[i] /= N;
+
+      passes = density;
+      if (firstEnergy) energy = firstEnergy;
     }
 
     // Top-N: iterative penalization on top of the energy field. We keep the
@@ -527,6 +616,7 @@ self.onmessage = (ev) => {
           alpha, beta, eta, dx, dy,
           penalty: pen, usedCount,
           repulsionMode, distUsed,
+          eMax,
         });
         if (!res.path) break;
         let shared = 0;
