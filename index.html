@@ -456,169 +456,173 @@
 
   <div id="app">
     <aside id="panel">
-      <h1>Simulador bici-geo-energético</h1>
+      <h1 data-i18n="title">Simulador bici-geo-energético</h1>
       <div class="header-actions">
-        <button type="button" class="engine-tag" id="engine-tag" title="Compute engine — click to toggle">js</button>
-        <button type="button" class="help-button" id="help-btn" aria-label="Help" title="How it works">?</button>
+        <button type="button" class="engine-tag" id="engine-tag" data-i18n-title="engine.toggle.title" title="Compute engine — click to toggle">js</button>
+        <button type="button" class="engine-tag" id="lang-tag" data-i18n-title="lang.toggle.title" title="Language — click to switch">EN</button>
+        <button type="button" class="help-button" id="help-btn" aria-label="Help" data-i18n-title="help.title" title="How it works">?</button>
       </div>
 
       <div class="group">
-        <h2>1. Load DEM</h2>
+        <h2 data-i18n="group.load_dem">1. Load DEM</h2>
         <input type="file" id="dem-file" accept=".tif,.tiff" />
         <div class="examples">
-          <div class="hint" style="margin-bottom: 4px;">or download (locally) an example:</div>
+          <div class="hint" data-i18n="examples.heading" style="margin-bottom: 4px;">or download (locally) an example:</div>
           <a href="#" class="ex-link" id="ex-aguapreta">
-            Entorno da Água Preta <span class="ex-tag">~2 MB · imediato</span>
+            <span data-i18n="ex.aguapreta">Entorno da Água Preta</span> <span class="ex-tag" data-i18n="ex.tag.aguapreta">~2 MB · imediato</span>
           </a>
           <a href="#" class="ex-link" id="ex-centro">
-            Sampa Centro Expandido <span class="ex-tag">~34 MB · rápido</span>
+            <span data-i18n="ex.centro">Sampa Centro Expandido</span> <span class="ex-tag" data-i18n="ex.tag.centro">~34 MB · rápido</span>
           </a>
           <a href="#" class="ex-link" id="ex-geral">
-            Sampa Sítio Urbano <span class="ex-tag">~540 MB · lento</span>
+            <span data-i18n="ex.geral">Sampa Sítio Urbano</span> <span class="ex-tag" data-i18n="ex.tag.geral">~540 MB · lento</span>
+          </a>
+          <a href="#" class="ex-link" id="ex-fabdem-view">
+            <span data-i18n="ex.fabdem">Carregar FABDEM para a janela atual</span> <span class="ex-tag" data-i18n="ex.tag.fabdem">≤ 50 MB</span>
           </a>
         </div>
-        <div class="meta" id="dem-meta">No DEM loaded.</div>
-        <div class="hint" style="margin-top: 6px;">
+        <div class="meta" id="dem-meta" data-i18n="dem.no_dem">No DEM loaded.</div>
+        <div class="hint" data-i18n="bundle.reload_hint" style="margin-top: 6px;">
           Reload a saved bundle (.zip) or .jsonld:
         </div>
         <input type="file" id="bundle-file" accept=".zip,.jsonld,.json" style="margin-top: 3px;" />
       </div>
 
       <div class="group">
-        <h2>1b. Optional vector network (.gpkg)</h2>
+        <h2 data-i18n="group.network">1b. Optional vector network (.gpkg)</h2>
         <input type="file" id="vector-file" accept=".gpkg" />
         <div class="row" style="margin-top: 5px;">
           <div>
-            <label>line width (cells)</label>
+            <label data-i18n="net.line_width">line width (cells)</label>
             <input type="number" id="vec-width" value="1" min="1" max="10" step="1" />
           </div>
           <div>
-            <label>snap radius (cells)</label>
+            <label data-i18n="net.snap_radius">snap radius (cells)</label>
             <input type="number" id="vec-snap" value="10" min="0" max="200" step="1" />
           </div>
         </div>
-        <button type="button" class="secondary" id="vec-clear" style="margin-top: 4px;">Clear network</button>
+        <button type="button" class="secondary" id="vec-clear" data-i18n="net.clear" style="margin-top: 4px;">Clear network</button>
         <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
           <input type="checkbox" id="net-interp" checked />
-          <span>Interpolate across non-network cells</span>
+          <span data-i18n="net.interp">Interpolate across non-network cells</span>
         </label>
         <div class="row" style="margin-top: 3px;">
           <div>
-            <label>max distance (cells)</label>
+            <label data-i18n="net.max_distance">max distance (cells)</label>
             <input type="number" id="net-interp-max-dist" value="50" min="1" max="500" step="1" />
           </div>
           <div>
-            <label>smoothing iters</label>
+            <label data-i18n="net.smoothing">smoothing iters</label>
             <input type="number" id="net-interp-smoothing" value="0" min="0" max="20" step="1" />
           </div>
         </div>
-        <div class="meta" id="vec-meta">No network loaded.</div>
+        <div class="meta" id="vec-meta" data-i18n="net.no_network">No network loaded.</div>
       </div>
 
       <div class="group" id="pick-points-group">
-        <h2>2. Pick points</h2>
+        <h2 data-i18n="group.pick_points">2. Pick points</h2>
         <div class="point-row-inline">
-          <span class="point-cell"><span class="point-label">src</span><span class="point-display" id="src-display">— click map —</span></span>
-          <span class="point-cell"><span class="point-label">dst</span><span class="point-display" id="dst-display">— optional —</span></span>
+          <span class="point-cell"><span class="point-label">src</span><span class="point-display" id="src-display" data-i18n="pts.click_map">— click map —</span></span>
+          <span class="point-cell"><span class="point-label">dst</span><span class="point-display" id="dst-display" data-i18n="pts.optional">— optional —</span></span>
         </div>
-        <button class="secondary" id="clear-points" style="margin-top: 5px;">Clear points</button>
+        <button class="secondary" id="clear-points" data-i18n="pts.clear" style="margin-top: 5px;">Clear points</button>
       </div>
 
       <div class="group">
-        <h2>3. Parameters</h2>
-        <label>Mode</label>
+        <h2 data-i18n="group.parameters">3. Parameters</h2>
+        <label data-i18n="param.mode">Mode</label>
         <select id="mode">
-          <option value="from">From source</option>
-          <option value="to">To source point</option>
-          <option value="round">Round trip</option>
+          <option value="from"  data-i18n="mode.from">From source</option>
+          <option value="to"    data-i18n="mode.to">To source point</option>
+          <option value="round" data-i18n="mode.round">Round trip</option>
         </select>
         <div class="row">
           <div>
-            <label>α (per metre flat)</label>
+            <label data-i18n="param.alpha">α (per metre flat)</label>
             <input type="number" id="alpha" value="0.008" step="0.001" />
           </div>
           <div>
-            <label>β (per metre uphill)</label>
+            <label data-i18n="param.beta">β (per metre uphill)</label>
             <input type="number" id="beta" value="1.0" step="0.1" />
           </div>
         </div>
         <div class="row">
           <div>
-            <label>η (downhill recovery)</label>
+            <label data-i18n="param.eta">η (downhill recovery)</label>
             <input type="number" id="eta" value="0.1" step="0.05" min="0" max="1" />
           </div>
           <div>
-            <label>Energy budget (≤0 = ∞)</label>
+            <label data-i18n="param.budget">Energy budget (≤0 = ∞)</label>
             <input type="number" id="e-max" value="0" step="any" />
           </div>
         </div>
         <label style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
           <input type="checkbox" id="want-passes" />
-          <span>Compute passes count (route density)</span>
+          <span data-i18n="param.want_passes">Compute passes count (route density)</span>
         </label>
         <label style="display: flex; align-items: center; gap: 6px; margin-top: 3px;">
           <input type="checkbox" id="want-topn" />
-          <span>Compute top-N routes</span>
+          <span data-i18n="param.want_topn">Compute top-N routes</span>
         </label>
         <label style="display: flex; align-items: center; gap: 6px; margin-top: 3px;">
           <input type="checkbox" id="want-density" />
-          <span>Compute multi-reference density</span>
+          <span data-i18n="param.want_density">Compute multi-reference density</span>
         </label>
         <div id="density-extra" style="display: none;">
           <div class="row">
             <div>
-              <label>N references</label>
+              <label data-i18n="param.n_refs">N references</label>
               <input type="number" id="n-refs" value="10" min="1" max="2000" step="1" />
             </div>
             <div>
-              <label>Reference source</label>
+              <label data-i18n="param.ref_source">Reference source</label>
               <select id="ref-source">
-                <option value="click">click on map</option>
-                <option value="random">random</option>
+                <option value="click"  data-i18n="ref.click">click on map</option>
+                <option value="random" data-i18n="ref.random">random</option>
               </select>
             </div>
           </div>
-          <div class="hint" style="margin-top: 3px;">Direction follows the Mode above.</div>
+          <div class="hint" data-i18n="ref.direction_hint" style="margin-top: 3px;">Direction follows the Mode above.</div>
           <div class="row" style="margin-top: 4px;">
-            <button type="button" class="secondary" id="ref-place-random">Place random</button>
-            <button type="button" class="secondary" id="ref-clear">Clear refs</button>
+            <button type="button" class="secondary" id="ref-place-random" data-i18n="ref.place_random">Place random</button>
+            <button type="button" class="secondary" id="ref-clear" data-i18n="ref.clear">Clear refs</button>
           </div>
-          <div class="hint" id="ref-display" style="margin-top: 3px;">no references placed</div>
+          <div class="hint" id="ref-display" data-i18n="ref.none" style="margin-top: 3px;">no references placed</div>
         </div>
         <div id="topn-extra" style="display: none;">
           <div class="row">
             <div>
-              <label>N (1–20)</label>
+              <label data-i18n="param.n_routes">N (1–20)</label>
               <input type="number" id="n-routes" value="3" min="1" max="20" step="1" />
             </div>
             <div>
-              <label>penalty / strength</label>
+              <label data-i18n="param.penalty">penalty / strength</label>
               <input type="number" id="penalty" value="2.0" min="0" step="0.1" />
             </div>
           </div>
-          <label>Repulsion mode</label>
+          <label data-i18n="param.repulsion">Repulsion mode</label>
           <select id="repulsion-mode">
-            <option value="per-cell">per-cell (penalty^used) — sharp</option>
-            <option value="linear">linear 1/(d+1) — soft, wide</option>
-            <option value="square">square 1/(d²+1) — soft, local</option>
+            <option value="per-cell" data-i18n="rep.per_cell">per-cell (penalty^used) — sharp</option>
+            <option value="linear"   data-i18n="rep.linear">linear 1/(d+1) — soft, wide</option>
+            <option value="square"   data-i18n="rep.square">square 1/(d²+1) — soft, local</option>
           </select>
-          <label>Routes colormap</label>
+          <label data-i18n="param.routes_cmap">Routes colormap</label>
           <select id="routes-colormap"></select>
         </div>
 
-        <label>Field colormap</label>
+        <label data-i18n="param.field_cmap">Field colormap</label>
         <select id="colormap"></select>
       </div>
 
-      <button id="run" disabled>Compute</button>
+      <button id="run" data-i18n="btn.compute" disabled>Compute</button>
       <div id="time-estimate" style="font-size: 10px; color: var(--muted); margin-top: 3px; text-align: center;"></div>
       <div class="progress" id="progress"><div class="bar"></div></div>
       <div id="status"></div>
 
       <div class="group" style="margin-top: 8px;">
-        <h2>Result</h2>
-        <button type="button" id="refresh-style" class="secondary" style="margin-bottom: 5px;">Refresh style</button>
-        <div class="meta" id="result-meta">—</div>
+        <h2 data-i18n="group.result">Result</h2>
+        <button type="button" id="refresh-style" class="secondary" data-i18n="btn.refresh_style" style="margin-bottom: 5px;">Refresh style</button>
+        <div class="meta" id="result-meta" data-i18n="result.empty">—</div>
         <div class="legend">
           <div class="swatch"></div>
           <div class="legend-ticks">
@@ -633,14 +637,28 @@
           <div class="layer-head">
             <label class="layer-toggle">
               <input type="checkbox" id="tile-visible" checked />
-              <span>rmsampa-v2 tiles</span>
+              <span data-i18n="layer.tiles">rmsampa-v2 tiles</span>
             </label>
             <input type="range" id="tile-opacity" min="0" max="1" step="0.05" value="0.85" />
           </div>
-          <div class="hint">
+          <div class="hint" data-i18n-html="layer.tiles.hint">
             <a href="https://telhas.pedalhidrografi.co/rmsampa-v2/" target="_blank" rel="noopener" style="color: var(--accent-2);">XYZ tiles</a>
             from pedalhidrografi.co.
           </div>
+        </div>
+
+        <!-- DEM relief (cmo.phase elevation + B/W slope, fixed style).
+             Hidden until a DEM is loaded; loadDemFromArrayBuffer flips
+             the display and renders the PNG. -->
+        <div class="layer-block" id="relief-row" style="display: none;">
+          <div class="layer-head">
+            <label class="layer-toggle">
+              <input type="checkbox" id="relief-visible" />
+              <span data-i18n="layer.relief">Relief (DEM)</span>
+            </label>
+            <input type="range" id="relief-opacity" min="0" max="1" step="0.05" value="0.85" />
+          </div>
+          <div class="hint" data-i18n="layer.relief.hint">cmocean.phase, p5–p80 · slope 0–p80, γ=1.2</div>
         </div>
 
         <!-- Energy layer controls -->
@@ -648,21 +666,21 @@
           <div class="layer-head">
             <label class="layer-toggle">
               <input type="checkbox" id="energy-visible" checked />
-              <span>Energy</span>
+              <span data-i18n="layer.energy">Energy</span>
             </label>
             <input type="range" id="energy-opacity" min="0" max="1" step="0.05" value="0.85" />
           </div>
           <div class="row">
             <div>
-              <label>min</label>
+              <label data-i18n="vmin.label">min (auto = p1)</label>
               <input type="number" id="vmin" placeholder="auto" step="any" />
             </div>
             <div>
-              <label>max</label>
+              <label data-i18n="vmax.label">max (auto = p80)</label>
               <input type="number" id="vmax" placeholder="auto" step="any" />
             </div>
           </div>
-          <div class="hint">Auto = sqrt-stretched; pin either bound for linear with clamping.</div>
+          <div class="hint" data-i18n="energy.range_hint">Auto = sqrt-stretched; pin either bound for linear with clamping.</div>
         </div>
 
         <!-- Passes layer controls (overlaid above energy) -->
@@ -670,46 +688,46 @@
           <div class="layer-head">
             <label class="layer-toggle">
               <input type="checkbox" id="passes-visible" checked />
-              <span>Passes (overlay)</span>
+              <span data-i18n="layer.passes">Passes (overlay)</span>
             </label>
             <input type="range" id="passes-opacity" min="0" max="1" step="0.05" value="0.7" />
           </div>
           <div class="row">
             <div>
-              <label>min (auto = p10)</label>
+              <label data-i18n="vmin.passes">min (auto = p10)</label>
               <input type="number" id="passes-vmin" placeholder="p10" step="any" />
             </div>
             <div>
-              <label>max (auto = p90)</label>
+              <label data-i18n="vmax.passes">max (auto = p90)</label>
               <input type="number" id="passes-vmax" placeholder="p90" step="any" />
             </div>
           </div>
           <div class="row">
             <div>
-              <label>γ gamma (1 = no change)</label>
+              <label data-i18n="passes.gamma">γ gamma (1 = no change)</label>
               <input type="number" id="passes-gamma" value="1" min="0.01" step="0.05" />
             </div>
             <div>
-              <label>mean filter N</label>
+              <label data-i18n="passes.mean_window">mean filter N</label>
               <input type="number" id="passes-mean-window" value="5" min="1" max="200" step="1" />
             </div>
           </div>
-          <label>Blend</label>
+          <label data-i18n="passes.blend">Blend</label>
           <select id="passes-blend">
-            <option value="plus-lighter">add (plus-lighter)</option>
-            <option value="normal">normal</option>
-            <option value="screen">screen</option>
-            <option value="multiply">multiply</option>
-            <option value="overlay">overlay</option>
+            <option value="plus-lighter" data-i18n="blend.add">add (plus-lighter)</option>
+            <option value="normal"       data-i18n="blend.normal">normal</option>
+            <option value="screen"       data-i18n="blend.screen">screen</option>
+            <option value="multiply"     data-i18n="blend.multiply">multiply</option>
+            <option value="overlay"      data-i18n="blend.overlay">overlay</option>
           </select>
-          <div class="hint">Greyscale ramp; with "add" mode high-pass cells brighten the energy field beneath. Same auto / pinned-range behaviour as Energy.</div>
+          <div class="hint" data-i18n="passes.hint">Greyscale ramp; with "add" mode high-pass cells brighten the energy field beneath. Same auto / pinned-range behaviour as Energy.</div>
         </div>
 
-        <button class="secondary" id="range-reset" style="margin-top: 4px;">Reset ranges to auto</button>
-        <button type="button" id="download-bundle" style="margin-top: 4px;">Download bundle (.zip)</button>
+        <button class="secondary" id="range-reset" data-i18n="btn.range_reset" style="margin-top: 4px;">Reset ranges to auto</button>
+        <button type="button" id="download-bundle" data-i18n="btn.download_bundle" style="margin-top: 4px;">Download bundle (.zip)</button>
       </div>
 
-      <div class="credit">feito por Claúdio e dirigido pelos neogeógrafos geomorfológicos</div>
+      <div class="credit" data-i18n="credit">feito por Claúdio e dirigido pelos neogeógrafos geomorfológicos</div>
     </aside>
     <div id="map"></div>
   </div>
@@ -775,65 +793,64 @@
   <div class="modal-backdrop" id="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-modal-title">
     <div class="modal">
       <button type="button" class="modal-close" id="help-close" aria-label="Close">×</button>
-      <h2 id="help-modal-title" style="margin: 0 0 16px; font-size: 16px;">Simulador bici-geo-energético</h2>
+      <h2 id="help-modal-title" data-i18n="title" style="margin: 0 0 16px; font-size: 16px;">Simulador bici-geo-energético</h2>
       <div class="modal-pages">
         <div class="modal-page">
-          <h3>Como usar</h3>
+          <h3 data-i18n="help.usage_heading">Como usar</h3>
 
-          <h4>1 · Carregar um DEM</h4>
-          <p>Use o seletor de arquivo para abrir um GeoTIFF local, ou clique em um dos exemplos hospedados (imediato / rápido / lento). O DEM é mostrado por um retângulo tracejado e o mapa centra automaticamente.</p>
+          <h4 data-i18n="help.h.load_dem">1 · Carregar um DEM</h4>
+          <p data-i18n-html="help.p.load_dem"></p>
 
-          <h4>2 · Marcar pontos</h4>
-          <p><strong>Modo padrão:</strong> clique no mapa para o ponto-fonte (<code>src</code>). Um segundo clique marca o destino (<code>dst</code>) — necessário para "to destination", "round trip" e "top-N rotas".</p>
-          <p><strong>Modo densidade multi-referência:</strong> ative <em>Compute multi-reference density</em>. Os cliques agora adicionam pontos de referência (numerados). Use "Place random" para uma amostra aleatória ou ajuste <em>N references</em>. A política é FIFO: ao exceder N o mais antigo é descartado.</p>
+          <h4 data-i18n="help.h.points">2 · Marcar pontos</h4>
+          <p data-i18n-html="help.p.points"></p>
+          <p data-i18n-html="help.p.density_pts"></p>
 
-          <h4>3 · Parâmetros</h4>
-          <p><code>α</code> custo por metro horizontal · <code>β</code> custo por metro de subida · <code>η</code> fração da subida recuperada na descida (0–1) · <em>Energy budget</em> para podar caminhos acima de um limiar (≤0 = sem orçamento).</p>
+          <h4 data-i18n="help.h.params">3 · Parâmetros</h4>
+          <p data-i18n-html="help.p.params"></p>
 
-          <h4>4 · Computar</h4>
-          <p>Clique em <em>Compute</em>. O botão fica habilitado quando há fonte (modo padrão) ou pelo menos uma referência (modo densidade). Uma estimativa de tempo aparece antes da execução; durante o processo, a barra de progresso mostra o tempo restante.</p>
+          <h4 data-i18n="help.h.compute">4 · Computar</h4>
+          <p data-i18n-html="help.p.compute"></p>
 
-          <h4>5 · Visualização</h4>
-          <p>As camadas <em>Energy</em> e <em>Passes</em> têm visibilidade, opacidade e blend independentes. Mudanças em colormap, range, gamma, mean filter e blend ficam pendentes até <em>Refresh style</em> — evita re-renderizar a cada digitação em DEMs grandes.</p>
+          <h4 data-i18n="help.h.viz">5 · Visualização</h4>
+          <p data-i18n-html="help.p.viz"></p>
 
-          <h4>6 · Salvar / restaurar</h4>
-          <p><em>Download bundle (.zip)</em> empacota um <code>metadata.jsonld</code> com todos os parâmetros mais os arrays binários (energy.bin, passes.bin) e GeoJSON das rotas. Para reproduzir um cálculo: carregue o mesmo DEM, depois use o seletor abaixo para ler o JSON-LD ou o ZIP.</p>
+          <h4 data-i18n="help.h.bundle">6 · Salvar / restaurar</h4>
+          <p data-i18n-html="help.p.bundle"></p>
         </div>
 
         <div class="modal-page">
-          <h3>O que estamos fazendo</h3>
+          <h3 data-i18n="help.theory_heading">O que estamos fazendo</h3>
 
-          <h4>Modelo de custo assimétrico</h4>
-          <p>Cada movimento entre células adjacentes (4 cardinais + 4 diagonais) tem um custo em "joules normalizados". Com <code>Δh = h_v − h_u</code>:</p>
-          <div class="formula">subida (Δh ≥ 0):  α·dist + β·Δh
-descida (Δh &lt; 0): max(0, α·dist − η·β·|Δh|)</div>
-          <p>Padrão <code>α = 0.008</code> (8 mJ/m horizontal), <code>β = 1</code> (1 J/m de subida), <code>η = 0.1</code> (10% da descida vira recuperação). É um modelo grosseiro de ciclista: andar no plano custa pouco, subir custa muito, descer pode até <em>devolver</em> energia até zero.</p>
+          <h4 data-i18n="help.h.cost">Modelo de custo assimétrico</h4>
+          <p data-i18n-html="help.p.cost"></p>
+          <div class="formula" data-i18n="help.formula"></div>
+          <p data-i18n-html="help.p.cost_extra"></p>
 
-          <h4>Campo de energia</h4>
-          <p>Dijkstra sobre todas as células passáveis a partir do ponto-fonte (ou para o ponto-destino, com arestas reversas) dá o custo mínimo de chegar a cada célula. É isso que a camada <em>Energy</em> renderiza.</p>
+          <h4 data-i18n="help.h.field">Campo de energia</h4>
+          <p data-i18n-html="help.p.field"></p>
 
-          <h4>Modos</h4>
-          <p><em>From source</em>: campo direto a partir de <code>src</code>. <em>To destination</em>: campo reverso para <code>dst</code> — útil em terreno assimétrico (subir é mais caro que descer). <em>Round trip</em>: soma ida + volta, dando o custo total de "ir e voltar" passando por cada célula.</p>
+          <h4 data-i18n="help.h.modes">Modos</h4>
+          <p data-i18n-html="help.p.modes"></p>
 
-          <h4>Contagem de passagens</h4>
-          <p>Para cada célula <code>c</code>, quantos caminhos ótimos passam por <code>c</code>. É o tamanho da subárvore enraizada em <code>c</code> na árvore de caminhos mínimos. Destaca corredores naturais ("autoestradas") da paisagem energética.</p>
+          <h4 data-i18n="help.h.passes">Contagem de passagens</h4>
+          <p data-i18n-html="help.p.passes"></p>
 
-          <h4>Top-N rotas</h4>
-          <p>A* com penalização iterativa: encontre a rota ótima, multiplique o termo <code>α·dist</code> em suas células por uma penalidade, repita N vezes. Modos de repulsão: <em>per-cell</em> (penaliza só células reusadas, bordas duras), <em>linear</em> (1/(d+1), repulsão suave e ampla), <em>square</em> (1/(d²+1), suave e local).</p>
+          <h4 data-i18n="help.h.topn">Top-N rotas</h4>
+          <p data-i18n-html="help.p.topn"></p>
 
-          <h4>Densidade multi-referência</h4>
-          <p>Para K pontos de referência: para cada um, computa as passagens, normaliza por <code>H·W</code>, soma; depois divide por <code>H·W</code> de novo. O resultado destaca corredores comuns entre múltiplas origens — útil para mapear "onde a topografia força a passagem". A camada de energia neste modo é a média por célula sobre as referências que conseguem alcançá-la.</p>
+          <h4 data-i18n="help.h.density">Densidade multi-referência</h4>
+          <p data-i18n-html="help.p.density"></p>
 
-          <h4>Restrição por rede vetorial (.gpkg)</h4>
-          <p>Quando um arquivo de linhas vetoriais é carregado, toda a análise fica restrita às células tocadas por essas linhas — Dijkstra ignora qualquer célula fora da rede, e cliques no mapa "agarram" para a célula de rede mais próxima dentro do raio de snap configurado.</p>
-          <p><strong>Largura da linha</strong> (em células) controla a espessura do carimbo durante a rasterização. <strong>Raio de snap</strong> é a distância máxima (em células) que o clique procura uma célula de rede antes de desistir. As coordenadas das linhas são reprojetadas via <code>proj4js</code> para o CRS do DEM antes da rasterização.</p>
+          <h4 data-i18n="help.h.network">Restrição por rede vetorial (.gpkg)</h4>
+          <p data-i18n-html="help.p.network"></p>
+          <p data-i18n-html="help.p.network_extra"></p>
 
-          <h4>Interpolação fora da rede</h4>
-          <p>Visualização opcional: preenche as células fora da rede com uma média dos valores da rede em redor, usando o mesmo algoritmo do GDAL <code>fillnodata</code>. Para cada célula vazia, busca em 8 direções até encontrar uma célula de rede dentro de <strong>max distance</strong> (em células); calcula a média ponderada por <code>1/d²</code> dos (até 8) acertos. Em seguida, aplica <strong>smoothing iters</strong> passes de média 3×3 sobre o preenchimento — preservando os valores originais da rede.</p>
-          <p>Apenas para visualização; a análise (Dijkstra, top-N, densidade) continua estritamente sobre a rede.</p>
+          <h4 data-i18n="help.h.interp">Interpolação fora da rede</h4>
+          <p data-i18n-html="help.p.interp"></p>
+          <p data-i18n-html="help.p.interp_only"></p>
 
-          <h4>Implementação</h4>
-          <p>Dois engines: JS (Dijkstra com heap binário sobre <code>Float64Array</code>) e Wasm (Rust compilado, mesmo algoritmo, ~3–5× mais rápido). O Wasm cobre só o caminho energy-only; passes / top-N / densidade / orçamento ainda rodam no JS.</p>
+          <h4 data-i18n="help.h.impl">Implementação</h4>
+          <p data-i18n-html="help.p.impl"></p>
         </div>
       </div>
     </div>

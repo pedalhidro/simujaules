@@ -1,5 +1,209 @@
 // app.js — wires up DEM loading, map UI, worker dispatch, result overlay
 
+// ============================================================================
+// i18n
+// ============================================================================
+// Tiny translation layer: a single STRINGS dict, plus three hooks:
+//   t(key, ...args)     — look up the current-language string, optional
+//                          {0}/{1} placeholder substitution.
+//   applyTranslations() — walks the DOM and substitutes textContent /
+//                          innerHTML / title for every [data-i18n*] element.
+//   setLang(lang)       — flips the active language (persists in localStorage)
+//                          and re-applies.
+//
+// HTML elements opt in via:
+//   data-i18n="key"       → textContent
+//   data-i18n-html="key"  → innerHTML  (use for strings with markup)
+//   data-i18n-title="key" → title attribute
+//
+// JS-set strings (status messages, computed labels) call t("key") directly.
+
+const STRINGS = {
+  // ---- Header / chrome --------------------------------------------------
+  "title":               { pt: "Simulador bici-geo-energético",       en: "Bicycling Energy Field Simulator" },
+  "lang.toggle.title":   { pt: "Idioma — clique para alternar PT/EN", en: "Language — click to switch PT/EN" },
+  "engine.toggle.title": { pt: "Motor de cálculo — clique para alternar JS / wasm", en: "Compute engine — click to toggle JS / wasm" },
+  "engine.no_wasm.title":{ pt: "Wasm não compilado — só JS. Rode wasm/build.sh e recarregue.", en: "Wasm not built — JS only. Run wasm/build.sh and reload." },
+  "help.title":          { pt: "Como funciona", en: "How it works" },
+
+  // ---- Group: Load DEM --------------------------------------------------
+  "group.load_dem":      { pt: "1. Carregar DEM", en: "1. Load DEM" },
+  "examples.heading":    { pt: "ou baixar (localmente) um exemplo:", en: "or download (locally) an example:" },
+  "ex.aguapreta":        { pt: "Entorno da Água Preta", en: "Água Preta surroundings" },
+  "ex.centro":           { pt: "Sampa Centro Expandido", en: "São Paulo central area" },
+  "ex.geral":            { pt: "Sampa Sítio Urbano",    en: "São Paulo urban site" },
+  "ex.fabdem":           { pt: "Carregar FABDEM para a janela atual", en: "Load FABDEM for current viewport" },
+  "ex.tag.aguapreta":    { pt: "~2 MB · imediato",      en: "~2 MB · instant" },
+  "ex.tag.centro":       { pt: "~34 MB · rápido",       en: "~34 MB · fast" },
+  "ex.tag.geral":        { pt: "~540 MB · lento",       en: "~540 MB · slow" },
+  "ex.tag.fabdem":       { pt: "≤ 50 MB",                en: "≤ 50 MB" },
+  "dem.no_dem":          { pt: "Nenhum DEM carregado.", en: "No DEM loaded." },
+  "bundle.reload_hint":  { pt: "Restaurar bundle (.zip) ou .jsonld:", en: "Reload a saved bundle (.zip) or .jsonld:" },
+
+  // ---- Group: Vector network -------------------------------------------
+  "group.network":       { pt: "1b. Rede vetorial opcional (.gpkg)", en: "1b. Optional vector network (.gpkg)" },
+  "net.line_width":      { pt: "largura da linha (células)", en: "line width (cells)" },
+  "net.snap_radius":     { pt: "raio de snap (células)", en: "snap radius (cells)" },
+  "net.clear":           { pt: "Limpar rede",  en: "Clear network" },
+  "net.interp":          { pt: "Interpolar entre células fora da rede", en: "Interpolate across non-network cells" },
+  "net.max_distance":    { pt: "distância máx (células)", en: "max distance (cells)" },
+  "net.smoothing":       { pt: "suavizações", en: "smoothing iters" },
+  "net.no_network":      { pt: "Nenhuma rede carregada.", en: "No network loaded." },
+
+  // ---- Group: Pick points ----------------------------------------------
+  "group.pick_points":   { pt: "2. Marcar pontos", en: "2. Pick points" },
+  "pts.click_map":       { pt: "— clicar mapa —", en: "— click map —" },
+  "pts.optional":        { pt: "— opcional —",  en: "— optional —" },
+  "pts.click_again":     { pt: "— clicar novamente —", en: "— click again —" },
+  "pts.density":         { pt: "— densidade —", en: "— density —" },
+  "pts.clear":           { pt: "Limpar pontos", en: "Clear points" },
+
+  // ---- Group: Parameters -----------------------------------------------
+  "group.parameters":    { pt: "3. Parâmetros", en: "3. Parameters" },
+  "param.mode":          { pt: "Modo", en: "Mode" },
+  "mode.from":           { pt: "Saindo da fonte",     en: "From source" },
+  "mode.to":             { pt: "Vindo até a fonte",  en: "To source point" },
+  "mode.round":          { pt: "Ida e volta",         en: "Round trip" },
+  "param.alpha":         { pt: "α (por metro plano)", en: "α (per metre flat)" },
+  "param.beta":          { pt: "β (por metro de subida)", en: "β (per metre uphill)" },
+  "param.eta":           { pt: "η (recuperação descida)", en: "η (downhill recovery)" },
+  "param.budget":        { pt: "Orçamento de energia (≤0 = ∞)", en: "Energy budget (≤0 = ∞)" },
+  "param.want_passes":   { pt: "Calcular contagem de passagens", en: "Compute passes count (route density)" },
+  "param.want_topn":     { pt: "Calcular top-N rotas", en: "Compute top-N routes" },
+  "param.want_density":  { pt: "Calcular densidade multi-referência", en: "Compute multi-reference density" },
+  "param.n_refs":        { pt: "N referências", en: "N references" },
+  "param.ref_source":    { pt: "Origem das referências", en: "Reference source" },
+  "ref.click":           { pt: "clicar no mapa", en: "click on map" },
+  "ref.random":          { pt: "aleatórias", en: "random" },
+  "ref.direction_hint":  { pt: "A direção segue o Modo acima.", en: "Direction follows the Mode above." },
+  "ref.place_random":    { pt: "Distribuir aleatórias", en: "Place random" },
+  "ref.clear":           { pt: "Limpar referências", en: "Clear refs" },
+  "ref.none":            { pt: "nenhuma referência marcada", en: "no references placed" },
+  "param.n_routes":      { pt: "N (1–20)", en: "N (1–20)" },
+  "param.penalty":       { pt: "penalidade / força", en: "penalty / strength" },
+  "param.repulsion":     { pt: "Modo de repulsão", en: "Repulsion mode" },
+  "rep.per_cell":        { pt: "por célula (penalidade^usadas) — afiada", en: "per-cell (penalty^used) — sharp" },
+  "rep.linear":          { pt: "linear 1/(d+1) — suave, ampla", en: "linear 1/(d+1) — soft, wide" },
+  "rep.square":          { pt: "quadrática 1/(d²+1) — suave, local", en: "square 1/(d²+1) — soft, local" },
+  "param.routes_cmap":   { pt: "Colormap das rotas", en: "Routes colormap" },
+  "param.field_cmap":    { pt: "Colormap do campo", en: "Field colormap" },
+
+  // ---- Compute -----------------------------------------------------------
+  "btn.compute":         { pt: "Calcular", en: "Compute" },
+
+  // ---- Group: Result ----------------------------------------------------
+  "group.result":        { pt: "Resultado", en: "Result" },
+  "btn.refresh_style":   { pt: "Atualizar estilo", en: "Refresh style" },
+  "result.empty":        { pt: "—", en: "—" },
+  "layer.tiles":         { pt: "rmsampa-v2 tiles", en: "rmsampa-v2 tiles" },
+  "layer.tiles.hint":    { pt: '<a href="https://telhas.pedalhidrografi.co/rmsampa-v2/" target="_blank" rel="noopener" style="color: var(--accent-2);">Tiles XYZ</a> de pedalhidrografi.co.', en: '<a href="https://telhas.pedalhidrografi.co/rmsampa-v2/" target="_blank" rel="noopener" style="color: var(--accent-2);">XYZ tiles</a> from pedalhidrografi.co.' },
+  "layer.relief":        { pt: "Relevo (DEM)", en: "Relief (DEM)" },
+  "layer.relief.hint":   { pt: "cmocean.phase, p5–p80 · declividade 0–p80, γ=1.2", en: "cmocean.phase, p5–p80 · slope 0–p80, γ=1.2" },
+  "layer.energy":        { pt: "Energia", en: "Energy" },
+  "vmin.label":          { pt: "min (auto = p1)", en: "min (auto = p1)" },
+  "vmax.label":          { pt: "max (auto = p80)", en: "max (auto = p80)" },
+  "vmin.passes":         { pt: "min (auto = p10)", en: "min (auto = p10)" },
+  "vmax.passes":         { pt: "max (auto = p90)", en: "max (auto = p90)" },
+  "energy.range_hint":   { pt: "Auto = sqrt-stretched; pino qualquer limite para linear com clamping.", en: "Auto = sqrt-stretched; pin either bound for linear with clamping." },
+  "layer.passes":        { pt: "Passagens (overlay)", en: "Passes (overlay)" },
+  "passes.gamma":        { pt: "γ gama (1 = sem mudança)", en: "γ gamma (1 = no change)" },
+  "passes.mean_window":  { pt: "filtro média N", en: "mean filter N" },
+  "passes.blend":        { pt: "Blend", en: "Blend" },
+  "blend.add":           { pt: "soma (plus-lighter)", en: "add (plus-lighter)" },
+  "blend.normal":        { pt: "normal", en: "normal" },
+  "blend.screen":        { pt: "screen", en: "screen" },
+  "blend.multiply":      { pt: "multiply", en: "multiply" },
+  "blend.overlay":       { pt: "overlay", en: "overlay" },
+  "passes.hint":         { pt: "Rampa cinza; com modo \"soma\", células de alta passagem clareiam o campo de energia abaixo. Mesmo comportamento auto/pinado da Energia.", en: 'Greyscale ramp; with "add" mode high-pass cells brighten the energy field beneath. Same auto / pinned-range behaviour as Energy.' },
+  "btn.range_reset":     { pt: "Reset auto", en: "Reset ranges to auto" },
+  "btn.download_bundle": { pt: "Baixar bundle (.zip)", en: "Download bundle (.zip)" },
+  "credit":              { pt: "feito por Cláudio e dirigido pelos neogeógrafos geomorfológicos", en: "made by Cláudio, directed by the geomorphological neo-geographers" },
+
+  // ---- Help modal -------------------------------------------------------
+  "help.usage_heading":  { pt: "Como usar", en: "How to use" },
+  "help.theory_heading": { pt: "O que estamos fazendo", en: "What we're doing" },
+  "help.h.load_dem":     { pt: "1 · Carregar um DEM", en: "1 · Load a DEM" },
+  "help.p.load_dem":     { pt: "Use o seletor para abrir um GeoTIFF local, clique num exemplo hospedado, ou aperte <em>Carregar FABDEM para a janela atual</em> (puxa tiles FABDEM 1°×1° pela extensão visível, limite de 50 MB). O DEM aparece como retângulo tracejado e o mapa centra automaticamente.", en: 'Use the file picker to open a local GeoTIFF, click a hosted example, or press <em>Load FABDEM for current viewport</em> (pulls FABDEM 1°×1° tiles for the visible extent, 50 MB cap). The DEM is shown as a dashed rectangle and the map auto-centres.' },
+  "help.h.points":       { pt: "2 · Marcar pontos", en: "2 · Pick points" },
+  "help.p.points":       { pt: "<strong>Modo padrão:</strong> clique no mapa para o ponto-fonte (<code>src</code>). Um segundo clique marca o destino (<code>dst</code>) — necessário para \"até a fonte\", \"ida e volta\" e \"top-N rotas\".", en: '<strong>Default mode:</strong> click the map for the source (<code>src</code>). A second click sets the destination (<code>dst</code>) — required for "to source point", "round trip", and "top-N routes".' },
+  "help.p.density_pts":  { pt: "<strong>Densidade multi-referência:</strong> ative <em>Calcular densidade multi-referência</em>. Os cliques agora adicionam pontos numerados. Use \"Distribuir aleatórias\" ou ajuste <em>N referências</em>. Política FIFO: ao exceder N, o mais antigo é descartado.", en: '<strong>Multi-reference density:</strong> turn on <em>Compute multi-reference density</em>. Clicks now add numbered reference points. Use "Place random" or adjust <em>N references</em>. FIFO policy: above N, the oldest is dropped.' },
+  "help.h.params":       { pt: "3 · Parâmetros", en: "3 · Parameters" },
+  "help.p.params":       { pt: "<code>α</code> custo por metro horizontal · <code>β</code> custo por metro de subida · <code>η</code> fração da subida recuperada na descida (0–1) · <em>Orçamento</em> para podar caminhos acima de um limiar (≤0 = sem orçamento).", en: '<code>α</code> cost per horizontal metre · <code>β</code> cost per metre uphill · <code>η</code> fraction of the climb recovered on descent (0–1) · <em>Budget</em> prunes paths above a threshold (≤0 = no budget).' },
+  "help.h.compute":      { pt: "4 · Calcular", en: "4 · Compute" },
+  "help.p.compute":      { pt: "Aperte <em>Calcular</em>. Habilitado quando há fonte (modo padrão) ou pelo menos uma referência (modo densidade). Estimativa de tempo aparece antes; durante a execução, a barra mostra o tempo restante.", en: 'Hit <em>Compute</em>. Enabled when a source is set (default mode) or at least one reference (density mode). A time estimate appears beforehand; during the run, the bar shows time remaining.' },
+  "help.h.viz":          { pt: "5 · Visualização", en: "5 · Visualisation" },
+  "help.p.viz":          { pt: "As camadas <em>Energia</em> e <em>Passagens</em> têm visibilidade, opacidade e blend independentes. Mudanças de colormap, range, gamma, filtro média e blend ficam pendentes até <em>Atualizar estilo</em> — evita re-renderizar a cada digitação em DEMs grandes.", en: 'The <em>Energy</em> and <em>Passes</em> layers have independent visibility, opacity, and blend. Changes to colormap, range, gamma, mean filter, and blend stay pending until you click <em>Refresh style</em> — saves re-rendering on every keystroke for large DEMs.' },
+  "help.h.bundle":       { pt: "6 · Salvar / restaurar", en: "6 · Save / reload" },
+  "help.p.bundle":       { pt: "<em>Baixar bundle (.zip)</em> empacota um <code>metadata.jsonld</code> com todos os parâmetros, mais GeoTIFFs georeferenciados (energy.tif, passes.tif, network.tif) que abrem direto no QGIS. Para reproduzir: carregue o mesmo DEM, depois leia o JSON-LD ou ZIP.", en: '<em>Download bundle (.zip)</em> packs a <code>metadata.jsonld</code> with every parameter, plus georeferenced GeoTIFFs (energy.tif, passes.tif, network.tif) that open directly in QGIS. To reproduce: load the same DEM, then read the JSON-LD or ZIP back.' },
+  "help.h.cost":         { pt: "Modelo de custo assimétrico", en: "Asymmetric cost model" },
+  "help.p.cost":         { pt: "Cada movimento entre células adjacentes (4 cardeais + 4 diagonais) tem custo em \"joules normalizados\". Com <code>Δh = h_v − h_u</code>:", en: 'Each move between adjacent cells (4 cardinal + 4 diagonal) costs "normalised joules". With <code>Δh = h_v − h_u</code>:' },
+  "help.formula":        { pt: "subida (Δh ≥ 0):  α·dist + β·Δh\ndescida (Δh < 0): max(0, α·dist − η·β·|Δh|)",
+                           en: "uphill (Δh ≥ 0):   α·dist + β·Δh\ndownhill (Δh < 0): max(0, α·dist − η·β·|Δh|)" },
+  "help.p.cost_extra":   { pt: "Padrão <code>α = 0.008</code> (8 mJ/m horizontal), <code>β = 1</code> (1 J/m de subida), <code>η = 0.1</code> (10% da descida vira recuperação). Modelo grosseiro de ciclista: andar no plano custa pouco, subir custa muito, descer pode até <em>devolver</em> energia até zero.", en: 'Default <code>α = 0.008</code> (8 mJ/m horizontal), <code>β = 1</code> (1 J/m climbing), <code>η = 0.1</code> (10% of the climb is recovered). A rough cyclist model: flat is cheap, climbing is expensive, descending can <em>refund</em> down to zero.' },
+  "help.h.field":        { pt: "Campo de energia", en: "Energy field" },
+  "help.p.field":        { pt: "Dijkstra sobre todas as células passáveis a partir do ponto-fonte (ou para o ponto-destino, com arestas reversas) dá o custo mínimo de chegar a cada célula. É isso que a camada <em>Energia</em> renderiza.", en: 'Dijkstra over all passable cells starting from the source (or terminating at the destination, with reversed edges) gives the minimum cost to reach each cell. That\'s what the <em>Energy</em> layer renders.' },
+  "help.h.modes":        { pt: "Modos", en: "Modes" },
+  "help.p.modes":        { pt: "<em>Saindo da fonte</em>: campo direto a partir de <code>src</code>. <em>Vindo até a fonte</em>: campo reverso para <code>dst</code> — útil em terreno assimétrico (subir é mais caro que descer). <em>Ida e volta</em>: soma ida + volta, custo total de \"ir e voltar\" passando por cada célula.", en: '<em>From source</em>: forward field from <code>src</code>. <em>To source point</em>: reverse field arriving at <code>dst</code> — useful on asymmetric terrain (climbing costs more than descending). <em>Round trip</em>: forward + reverse summed, the total cost of going there and back through each cell.' },
+  "help.h.passes":       { pt: "Contagem de passagens", en: "Passes count" },
+  "help.p.passes":       { pt: "Para cada célula <code>c</code>, quantos caminhos ótimos passam por <code>c</code> — o tamanho da subárvore enraizada em <code>c</code> na árvore de caminhos mínimos. Destaca corredores naturais (\"autoestradas\") da paisagem energética.", en: 'For each cell <code>c</code>, how many optimal paths pass through it — the size of the subtree rooted at <code>c</code> in the shortest-path tree. Highlights the natural corridors ("highways") of the energy landscape.' },
+  "help.h.topn":         { pt: "Top-N rotas", en: "Top-N routes" },
+  "help.p.topn":         { pt: "A* com penalização iterativa: encontra a rota ótima, multiplica o termo <code>α·dist</code> em suas células por uma penalidade, repete N vezes. Modos de repulsão: <em>por célula</em> (penaliza só células reusadas, bordas duras), <em>linear</em> (1/(d+1), suave e ampla), <em>quadrática</em> (1/(d²+1), suave e local).", en: 'A* with iterative penalisation: find the optimal route, multiply the <code>α·dist</code> term over its cells by a penalty, repeat N times. Repulsion modes: <em>per-cell</em> (only re-used cells get penalised, sharp), <em>linear</em> (1/(d+1), soft and wide), <em>square</em> (1/(d²+1), soft and local).' },
+  "help.h.density":      { pt: "Densidade multi-referência", en: "Multi-reference density" },
+  "help.p.density":      { pt: "Para K pontos de referência: para cada um, computa as passagens, normaliza por <code>H·W</code>, soma; depois divide por <code>H·W</code> de novo. O resultado destaca corredores comuns entre múltiplas origens — útil para mapear \"onde a topografia força a passagem\". A camada de energia neste modo é a média por célula sobre as referências que conseguem alcançá-la.", en: 'For K reference points: for each one, compute passes, normalise by <code>H·W</code>, sum; then divide by <code>H·W</code> again. The output highlights corridors common across multiple sources — useful for mapping "where topography forces traffic to converge". The energy layer in this mode is the per-cell mean across the references that can reach it.' },
+  "help.h.network":      { pt: "Restrição por rede vetorial (.gpkg)", en: "Vector network constraint (.gpkg)" },
+  "help.p.network":      { pt: "Quando um arquivo de linhas vetoriais é carregado, toda a análise fica restrita às células tocadas por essas linhas — Dijkstra ignora qualquer célula fora da rede, e cliques no mapa \"agarram\" para a célula de rede mais próxima dentro do raio de snap configurado.", en: 'When a vector-line file is loaded, the analysis is constrained to cells touched by those lines — Dijkstra ignores any cell outside the network, and map clicks "snap" to the nearest network cell within the configured snap radius.' },
+  "help.p.network_extra":{ pt: "<strong>Largura da linha</strong> (em células) controla a espessura do carimbo durante a rasterização. <strong>Raio de snap</strong> é a distância máxima (em células) que o clique procura uma célula de rede antes de desistir. As coordenadas das linhas são reprojetadas via <code>proj4js</code> para o CRS do DEM antes da rasterização.", en: '<strong>Line width</strong> (in cells) controls the stamp thickness during rasterisation. <strong>Snap radius</strong> is the maximum distance (in cells) a click searches for a network cell before giving up. Line coordinates are reprojected via <code>proj4js</code> to the DEM CRS before rasterising.' },
+  "help.h.interp":       { pt: "Interpolação fora da rede", en: "Off-network interpolation" },
+  "help.p.interp":       { pt: "Visualização opcional: preenche células fora da rede com a média dos valores da rede em redor, usando o mesmo algoritmo do GDAL <code>fillnodata</code>. Para cada célula vazia, busca em 8 direções até achar uma célula de rede dentro de <strong>distância máx</strong> (em células); calcula a média ponderada por <code>1/d²</code> dos acertos. Em seguida, aplica <strong>suavizações</strong> passes de média 3×3 sobre o preenchimento — preservando os valores originais da rede.", en: 'Optional visualisation: fills off-network cells with a weighted mean of nearby on-network values, using the same algorithm as GDAL <code>fillnodata</code>. For each empty cell, scan 8 directions for a network cell within <strong>max distance</strong> (cells); compute a <code>1/d²</code>-weighted mean of the hits. Then apply <strong>smoothing iters</strong> 3×3 mean passes over the fill, preserving the original network values.' },
+  "help.p.interp_only":  { pt: "Apenas para visualização; a análise (Dijkstra, top-N, densidade) continua estritamente sobre a rede.", en: 'For visualisation only; the analysis (Dijkstra, top-N, density) stays strictly on the network.' },
+  "help.h.impl":         { pt: "Implementação", en: "Implementation" },
+  "help.p.impl":         { pt: "Dois engines: JS (Dijkstra com heap binário sobre <code>Float64Array</code>) e Wasm (Rust compilado, mesmo algoritmo, ~3–5× mais rápido). O Wasm cobre só o caminho energy-only; passes / top-N / densidade / orçamento ainda rodam no JS.", en: 'Two engines: JS (Dijkstra on a binary heap over <code>Float64Array</code>) and Wasm (compiled Rust, same algorithm, ~3–5× faster). Wasm covers only the energy-only fast path; passes / top-N / density / budget still run on JS.' },
+};
+
+let currentLang = (typeof localStorage !== "undefined" && localStorage.getItem("simu-lang")) || "pt";
+if (currentLang !== "pt" && currentLang !== "en") currentLang = "pt";
+
+function t(key, ...args) {
+  const entry = STRINGS[key];
+  if (!entry) return key;            // unknown keys surface verbatim — easy to spot
+  let s = entry[currentLang] ?? entry.en ?? key;
+  if (args.length) {
+    s = s.replace(/\{(\d+)\}/g, (_, i) => args[+i] ?? "");
+  }
+  return s;
+}
+
+function applyTranslations() {
+  document.documentElement.lang = currentLang === "pt" ? "pt-BR" : "en";
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  document.querySelectorAll("[data-i18n-html]").forEach((el) => {
+    el.innerHTML = t(el.dataset.i18nHtml);
+  });
+  document.querySelectorAll("[data-i18n-title]").forEach((el) => {
+    el.title = t(el.dataset.i18nTitle);
+  });
+  // The lang pill displays the OTHER language (the one a click would switch to)
+  // — clearer affordance than showing the current language.
+  const pill = document.getElementById("lang-tag");
+  if (pill) pill.textContent = currentLang === "pt" ? "EN" : "PT";
+  // Update <title> on the document so the OS / tab bar reflects the choice.
+  document.title = t("title");
+  // Engine-tag tooltip depends on whether wasm is available — refresh both.
+  const eng = document.getElementById("engine-tag");
+  if (eng) {
+    eng.title = t(eng.disabled ? "engine.no_wasm.title" : "engine.toggle.title");
+  }
+}
+
+function setLang(lang) {
+  if (lang !== "pt" && lang !== "en") return;
+  currentLang = lang;
+  try { localStorage.setItem("simu-lang", lang); } catch {}
+  applyTranslations();
+}
+
 // ------- Wasm engine probe -------
 // At startup we try to construct the wasm worker once. If it sends back
 // `ready`, every Compute will use the wasm worker. If it fails (browser
@@ -102,9 +306,9 @@ wasmAvailable.then((ok) => {
   if (!el) return;
   el.textContent = state.enginePreference;
   el.disabled = !ok;
-  el.title = ok
-    ? "Compute engine — click to toggle JS / wasm"
-    : "Wasm not built — JS only. Run wasm/build.sh and reload.";
+  // Tooltip text comes from the i18n table so it tracks the language toggle.
+  // applyTranslations() also re-reads .disabled to pick the right key.
+  el.title = t(ok ? "engine.toggle.title" : "engine.no_wasm.title");
   el.addEventListener("click", () => {
     if (!state.wasmAvailable) return;
     state.enginePreference = state.enginePreference === "wasm" ? "js" : "wasm";
@@ -117,6 +321,17 @@ wasmAvailable.then((ok) => {
 // Wire the colormap selector and the manual range inputs. Any change
 // re-renders the cached energy field — no recompute needed.
 document.addEventListener("DOMContentLoaded", () => {
+  // Apply translations as soon as the DOM is ready, BEFORE any other UI
+  // wiring that might read element text. This populates static labels,
+  // option text in select elements, etc.
+  applyTranslations();
+  // Language toggle pill — flips PT ↔ EN, persists to localStorage.
+  const langPill = document.getElementById("lang-tag");
+  if (langPill) {
+    langPill.addEventListener("click", () => {
+      setLang(currentLang === "pt" ? "en" : "pt");
+    });
+  }
   // Populate the colormap dropdown with all CET maps, grouped by class.
   const sel = document.getElementById("colormap");
   if (sel) {
@@ -185,7 +400,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // Per-layer visibility / opacity controls — pure live updates (no
   // canvas re-render).
   for (const id of [
-    "tile-visible", "tile-opacity",
+    "tile-visible",   "tile-opacity",
+    "relief-visible", "relief-opacity",
     "energy-visible", "energy-opacity",
     "passes-visible", "passes-opacity",
   ]) {
@@ -310,6 +526,16 @@ document.addEventListener("DOMContentLoaded", () => {
     a.addEventListener("click", (ev) => {
       ev.preventDefault();
       loadDemFromUrl(ex.url, ex.label);
+    });
+  }
+  // FABDEM-for-current-viewport. Sized at click time from map.getBounds()
+  // so the user can zoom around before clicking; capped at 50 MB inside
+  // loadFabdemForView().
+  const fabBtn = document.getElementById("ex-fabdem-view");
+  if (fabBtn) {
+    fabBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      loadFabdemForView();
     });
   }
   // Vector-network upload + clear.
@@ -471,6 +697,207 @@ async function loadDemFromUrl(url, label) {
   }
 }
 
+// ------- FABDEM viewport loader -------
+// Pulls FABDEM 1°×1° tiles that intersect the current map viewport,
+// crops each to the visible extent, and stitches them into a single
+// in-memory GeoTIFF that we hand to loadDemFromArrayBuffer. Tiles are
+// COGs hosted at https://telhas.pedalhidrografi.co/fabdem/ and named
+// in the original Bristol convention `{LAT}{NS}{LON}{EW}_FABDEM_V1-2.tif`
+// keyed by the SW corner. geotiff.js's fromUrl uses HTTP Range requests
+// so we never download more than the visible cells (the 50 MB cap is
+// enforced as decompressed pixel-bytes, since that's what we allocate).
+
+const FABDEM_BASE_URL = "https://telhas.pedalhidrografi.co/fabdem/";
+const FABDEM_TILE_DEG = 1;          // 1° per tile, keyed by SW corner
+const FABDEM_ARCSEC = 1 / 3600;     // ~30 m at the equator
+const FABDEM_MAX_BYTES = 50 * 1024 * 1024;
+
+function fabdemTileName(lat, lon) {
+  // Naming convention used by this deploy: hemisphere prefix BEFORE digits,
+  // e.g. S24W047_FABDEM_V1-2.tif for the tile keyed by SW corner -24, -47.
+  const ns = lat >= 0 ? "N" : "S";
+  const ew = lon >= 0 ? "E" : "W";
+  return `${ns}${String(Math.abs(lat)).padStart(2, "0")}${ew}${String(Math.abs(lon)).padStart(3, "0")}_FABDEM_V1-2.tif`;
+}
+
+async function loadFabdemForView() {
+  if (!map) {
+    status.innerHTML = '<span style="color:#ff6b6b">Map not ready.</span>';
+    return;
+  }
+  const bounds = map.getBounds();
+  const south = bounds.getSouth();
+  const north = bounds.getNorth();
+  const west  = bounds.getWest();
+  const east  = bounds.getEast();
+  if (!Number.isFinite(south) || north <= south || east <= west) {
+    status.innerHTML = '<span style="color:#ff6b6b">Couldn\'t read map bounds.</span>';
+    return;
+  }
+
+  // Snap the output extent to FABDEM's 1-arcsec grid so the synthetic
+  // GeoTIFF we hand off has integer-cell origin and dimensions.
+  const outWest  = Math.floor(west  * 3600) / 3600;
+  const outEast  = Math.ceil (east  * 3600) / 3600;
+  const outSouth = Math.floor(south * 3600) / 3600;
+  const outNorth = Math.ceil (north * 3600) / 3600;
+  const outW = Math.round((outEast  - outWest)  * 3600);
+  const outH = Math.round((outNorth - outSouth) * 3600);
+
+  // Cap by allocated pixel-bytes (Float32). 50 MB / 4 = 12.5 M cells, which
+  // is roughly a 0.98° × 0.98° square at 1 arcsec — about 110 km on a side
+  // at the equator. Beyond that we ask the user to zoom in.
+  const estBytes = outW * outH * 4;
+  if (estBytes > FABDEM_MAX_BYTES) {
+    status.innerHTML =
+      `<span style="color:#ff6b6b">Janela ~${(estBytes / 1024 / 1024).toFixed(0)} MB ` +
+      `(${outW}×${outH} cells), acima do limite de ${FABDEM_MAX_BYTES / 1024 / 1024} MB. Aproxime o zoom.</span>`;
+    return;
+  }
+
+  // Enumerate 1° tiles whose SW corner lat ∈ [floor(south)..ceil(north)-1]
+  // and lon ∈ [floor(west)..ceil(east)-1]. The tiny epsilon on the upper
+  // bounds avoids fetching an extra tile when the viewport edge sits
+  // exactly on an integer degree.
+  const eps = 1e-9;
+  const latLo = Math.floor(south);
+  const latHi = Math.floor(north - eps);
+  const lonLo = Math.floor(west);
+  const lonHi = Math.floor(east - eps);
+  const tileSpecs = [];
+  for (let lat = latLo; lat <= latHi; lat++) {
+    for (let lon = lonLo; lon <= lonHi; lon++) {
+      tileSpecs.push({
+        lat, lon,
+        url: FABDEM_BASE_URL + fabdemTileName(lat, lon),
+      });
+    }
+  }
+
+  status.textContent = `Buscando ${tileSpecs.length} tile(s) FABDEM…`;
+  progress.classList.add("active");
+  progressBar.style.width = "0%";
+
+  try {
+    // Open each tile (small IFD fetch only — geotiff.js doesn't pull pixels
+    // until readRasters is called). 404s are common: oceans and polar
+    // strips fall outside FABDEM coverage. We log and skip.
+    const opened = [];
+    for (let i = 0; i < tileSpecs.length; i++) {
+      const t = tileSpecs[i];
+      try {
+        const tiff = await GeoTIFF.fromUrl(t.url);
+        const image = await tiff.getImage();
+        opened.push({ ...t, image });
+      } catch (e) {
+        console.info(`[fabdem] skipping ${t.url}: ${e.message}`);
+      }
+      progressBar.style.width = `${((i + 1) / tileSpecs.length * 30).toFixed(1)}%`;
+    }
+
+    if (!opened.length) {
+      status.innerHTML =
+        '<span style="color:#ff6b6b">Nenhum tile FABDEM encontrado para esta janela ' +
+        '(provavelmente oceano ou fora da cobertura ±60° lat).</span>';
+      return;
+    }
+
+    // Allocate the mosaic. NaN-fill so unwritten cells (gaps between tiles
+    // or outside FABDEM coverage) read as nodata in the downstream mask
+    // construction (Number.isFinite check in loadDemFromArrayBuffer).
+    const mosaic = new Float32Array(outW * outH);
+    mosaic.fill(NaN);
+
+    // Read each tile's intersection with the viewport. readRasters({bbox})
+    // fetches only the relevant strips/tiles within the COG over HTTP
+    // Range requests — that's where the bandwidth saving comes from.
+    for (let i = 0; i < opened.length; i++) {
+      const t = opened[i];
+      const tileSouth = t.lat;
+      const tileNorth = t.lat + FABDEM_TILE_DEG;
+      const tileWest  = t.lon;
+      const tileEast  = t.lon + FABDEM_TILE_DEG;
+
+      // Snap the intersection to the same arcsec grid as the mosaic so
+      // pixel offsets line up exactly.
+      const interWest  = Math.max(outWest,  tileWest);
+      const interEast  = Math.min(outEast,  tileEast);
+      const interSouth = Math.max(outSouth, tileSouth);
+      const interNorth = Math.min(outNorth, tileNorth);
+      if (interEast <= interWest || interNorth <= interSouth) continue;
+
+      // Per-tile nodata sentinel — FABDEM uses GDAL_NODATA, varies by tile.
+      const nodataRaw = t.image.fileDirectory.getValue("GDAL_NODATA");
+      const nodata = nodataRaw ? parseFloat(nodataRaw) : null;
+
+      // Convert the geographic intersection to a pixel window. NB:
+      // image.readRasters({bbox}) does NOT exist on GeoTIFFImage — only
+      // the top-level tiff.readRasters supports bbox. Passing it to the
+      // image-level call silently falls back to "read full image", which
+      // would blow the 50 MB cap AND scramble the mosaic placement below.
+      // We compute the pixel window ourselves from the source's origin
+      // and resolution so geotiff.js issues Range requests for just the
+      // strips overlapping the viewport.
+      const [oX, oY] = t.image.getOrigin();
+      const [rX, rY] = t.image.getResolution(); // rX > 0 east, rY < 0 down
+      const wnd = [
+        Math.round((interWest  - oX) / rX),
+        Math.round((interNorth - oY) / rY),
+        Math.round((interEast  - oX) / rX),
+        Math.round((interSouth - oY) / rY),
+      ];
+      const raster = await t.image.readRasters({
+        window: wnd,
+        interleave: true,
+      });
+      const rW = wnd[2] - wnd[0];
+      const rH = wnd[3] - wnd[1];
+
+      // Place into mosaic. Mosaic origin is (outWest, outNorth) at row 0,
+      // col 0; rows count southward.
+      const colOffset = Math.round((interWest - outWest)  * 3600);
+      const rowOffset = Math.round((outNorth - interNorth) * 3600);
+      for (let r = 0; r < rH; r++) {
+        const mr = rowOffset + r;
+        if (mr < 0 || mr >= outH) continue;
+        for (let c = 0; c < rW; c++) {
+          const mc = colOffset + c;
+          if (mc < 0 || mc >= outW) continue;
+          const v = raster[r * rW + c];
+          if (Number.isFinite(v) && (nodata === null || v !== nodata)) {
+            mosaic[mr * outW + mc] = v;
+          }
+        }
+      }
+      progressBar.style.width = `${(30 + (i + 1) / opened.length * 70).toFixed(1)}%`;
+      status.textContent = `Mosaico: tile ${i + 1}/${opened.length}…`;
+    }
+
+    // Wrap the mosaic as a GeoTIFF in memory so loadDemFromArrayBuffer
+    // can ingest it like any other DEM. Same writer we use for bundle
+    // outputs — Float32, EPSG:4326, north-up.
+    const tiffMd = {
+      width:  outW,
+      height: outH,
+      BitsPerSample:    [32],
+      SampleFormat:     [3],
+      SamplesPerPixel:  [1],
+      ModelPixelScale:  [FABDEM_ARCSEC, FABDEM_ARCSEC, 0],
+      ModelTiepoint:    [0, 0, 0, outWest, outNorth, 0],
+      GeographicTypeGeoKey: 4326,
+    };
+    const buf = GeoTIFF.writeArrayBuffer(mosaic, tiffMd);
+
+    state.demSourceUrl = `FABDEM viewport ${outWest.toFixed(2)},${outSouth.toFixed(2)} → ${outEast.toFixed(2)},${outNorth.toFixed(2)} (${opened.length} tile${opened.length === 1 ? "" : "s"})`;
+    await loadDemFromArrayBuffer(buf, `FABDEM ${outW}×${outH} (${opened.length} tile${opened.length === 1 ? "" : "s"})`);
+  } catch (err) {
+    console.error(err);
+    status.innerHTML = `<span style="color:#ff6b6b">FABDEM load failed: ${err.message}</span>`;
+  } finally {
+    progress.classList.remove("active");
+  }
+}
+
 async function loadDemFromArrayBuffer(buf, label) {
   status.textContent = `Loading ${label}…`;
   const tiff = await GeoTIFF.fromArrayBuffer(buf);
@@ -562,10 +989,13 @@ async function loadDemFromArrayBuffer(buf, label) {
     map.fitBounds(bounds, { padding: [20, 20], maxZoom: 16 });
   }
 
-  // Clear any prior energy / passes overlay + clicked points so we don't
-  // leave stale visuals from the previous DEM hanging around.
-  if (state.energyOverlay) { state.energyOverlay.remove(); state.energyOverlay = null; }
-  if (state.passesOverlay) { state.passesOverlay.remove(); state.passesOverlay = null; }
+  // Clear any prior energy / passes / relief overlay + clicked points so
+  // we don't leave stale visuals from the previous DEM hanging around.
+  if (state.energyOverlay)     { state.energyOverlay.remove();     state.energyOverlay = null; }
+  if (state.passesOverlay)     { state.passesOverlay.remove();     state.passesOverlay = null; }
+  if (state.demReliefOverlay)  { state.demReliefOverlay.remove();  state.demReliefOverlay = null; }
+  state.demSlope = null;
+  state.demReliefDataUrl = null;
   if (state.pathLine)      { state.pathLine.remove();      state.pathLine = null; }
   if (state.routeLines)    { for (const ln of state.routeLines) ln.remove(); state.routeLines = []; }
   if (state.srcMarker)     { state.srcMarker.remove();     state.srcMarker = null; }
@@ -606,6 +1036,26 @@ async function loadDemFromArrayBuffer(buf, label) {
   status.textContent = `${label} loaded. Click on the map to set source point.`;
   updateRunButtonState();
   estimateRunTime();
+
+  // Build the cmocean.phase + slope hillshade for the new DEM. Renders
+  // synchronously — for a 12 M-cell viewport (the FABDEM cap) this takes
+  // about a second; the user already paid for the DEM load so the extra
+  // delay is rolled into that. The relief overlay is wired into the
+  // standard layer-controls; it stays hidden until the user toggles it.
+  try {
+    state.demSlope = computeSlope(height, mask, H, W,
+                                  state.dem.dxM, state.dem.dyM);
+    state.demReliefDataUrl = renderReliefToDataURL(state.dem, state.demSlope);
+    applyDemReliefOverlay();
+  } catch (err) {
+    console.warn("[relief] failed to build hillshade:", err);
+    state.demSlope = null;
+    state.demReliefDataUrl = null;
+  }
+  // Reveal the layer-block now that the data exists.
+  const reliefRow = document.getElementById("relief-row");
+  if (reliefRow) reliefRow.style.display = state.demReliefDataUrl ? "" : "none";
+  applyLayerControls();
 }
 
 // ------- Vector network loader (GeoPackage) -------
@@ -1177,6 +1627,43 @@ runBtn.addEventListener("click", async () => {
     return;
   }
 
+  // If a network is loaded, src/dst must lie on it — otherwise the Dijkstra
+  // is constrained to network cells and can't relax through them. Re-snap
+  // here defensively: covers the case where the user clicked points BEFORE
+  // loading the .gpkg, and the case where snap-radius was 0 at click time.
+  // If a point can't be snapped (no network cell within radius) we abort
+  // with a clear message rather than silently producing empty routes.
+  if (state.networkMask && state.dem) {
+    const W = state.dem.W;
+    const offNet = (rc) => rc && !state.networkMask[rc[0] * W + rc[1]];
+    const reSnapAndUpdate = (rc, marker, displayId, label) => {
+      if (!rc || !offNet(rc)) return rc;
+      const snapped = snapToNetwork(rc);
+      if (offNet(snapped)) {
+        status.innerHTML = `<span style="color:#ff6b6b">${label} isn't on the network and no network cell is within snap radius — increase the radius or move the point closer to a line.</span>`;
+        return null;
+      }
+      // Move the marker so the user sees where compute actually started.
+      const { originX, originY, dx, dy } = state.dem;
+      const latlng = L.latLng(originY - (snapped[0] + 0.5) * dy, originX + (snapped[1] + 0.5) * dx);
+      if (marker) marker.setLatLng(latlng);
+      const disp = document.getElementById(displayId);
+      if (disp) {
+        disp.textContent = `r=${snapped[0]}, c=${snapped[1]}`;
+        disp.classList.add("set");
+      }
+      return snapped;
+    };
+    const newSrc = reSnapAndUpdate(state.src, state.srcMarker, "src-display", "Source");
+    if (newSrc === null) return;
+    state.src = newSrc;
+    if (state.dst) {
+      const newDst = reSnapAndUpdate(state.dst, state.dstMarker, "dst-display", "Destination");
+      if (newDst === null) return;
+      state.dst = newDst;
+    }
+  }
+
   // Tear down old worker if any (we can't re-use after transferred buffers)
   if (state.worker) state.worker.terminate();
 
@@ -1584,6 +2071,146 @@ function renderFieldToDataURL(field, W, H, opts) {
   return { url: canvas.toDataURL(), lo, hi };
 }
 
+// ============================================================================
+// DEM relief layer (elevation + slope hillshade)
+// ============================================================================
+// Visualises the loaded DEM as cmocean.phase-coloured elevation with a
+// black-to-white slope superimposed on top. Both layers share one rendered
+// PNG (single Leaflet imageOverlay, single visibility/opacity control) so
+// flat terrain reads as pure colour and steep terrain washes toward white,
+// giving a hillshade-ish feel without computing aspect.
+//
+// Spec (fixed, no UI knobs for now):
+//   elevation range  : p5 → p80 percentile of valid heights
+//   slope range      : 0   → p80 percentile of |∇h| (m/m)
+//   slope gamma      : 1.2 (out = pow(slope_norm, 1/1.2))
+//   composite        : alpha-blend  out = elev*(1-s) + 255*s
+//   colormap         : cmo_phase (cyclic, perceptually uniform)
+
+// Central-difference slope magnitude in m/m. Edge cells use replicated
+// boundary; masked neighbours fall back to the cell's own height (so a
+// nodata strip at the DEM edge produces zero slope rather than a wild
+// fictitious gradient).
+function computeSlope(height, mask, H, W, dxM, dyM) {
+  const slope = new Float32Array(H * W);
+  for (let r = 0; r < H; r++) {
+    for (let c = 0; c < W; c++) {
+      const i = r * W + c;
+      if (!mask[i]) continue;
+      const cw = c > 0     ? c - 1 : c;
+      const ce = c < W - 1 ? c + 1 : c;
+      const rn = r > 0     ? r - 1 : r;
+      const rs = r < H - 1 ? r + 1 : r;
+      const wIdx = r  * W + cw;
+      const eIdx = r  * W + ce;
+      const nIdx = rn * W + c;
+      const sIdx = rs * W + c;
+      const h0 = height[i];
+      const hw = mask[wIdx] ? height[wIdx] : h0;
+      const he = mask[eIdx] ? height[eIdx] : h0;
+      const hn = mask[nIdx] ? height[nIdx] : h0;
+      const hs = mask[sIdx] ? height[sIdx] : h0;
+      const spanX = (ce - cw) * dxM;
+      const spanY = (rs - rn) * dyM;
+      const dhdx = spanX > 0 ? (he - hw) / spanX : 0;
+      const dhdy = spanY > 0 ? (hs - hn) / spanY : 0;
+      slope[i] = Math.sqrt(dhdx * dhdx + dhdy * dhdy);
+    }
+  }
+  return slope;
+}
+
+function renderReliefToDataURL(dem, slope) {
+  const { H, W, height, mask } = dem;
+  const N = H * W;
+
+  // Collect valid samples once for both percentile lookups. Sorting two
+  // arrays of size N is the dominant cost — ~300 ms on a 5 M-cell DEM.
+  const validH = [];
+  const validS = [];
+  for (let i = 0; i < N; i++) {
+    if (mask[i]) {
+      validH.push(height[i]);
+      validS.push(slope[i]);
+    }
+  }
+  if (!validH.length) return null;
+  validH.sort((a, b) => a - b);
+  validS.sort((a, b) => a - b);
+  const elevMin  = percentileFromSorted(validH, 5);
+  const elevMax  = percentileFromSorted(validH, 80);
+  const slopeMax = Math.max(1e-9, percentileFromSorted(validS, 80));
+  const elevSpan = elevMax - elevMin;
+
+  // cmo_phase is cyclic — values that wrap past 1.0 alias to the same
+  // hue as 0.0, which is fine since we clip to [0, 1].
+  const phaseMap = COLORMAPS.cmo_phase;
+  const phaseN = phaseMap.length - 1;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  const imageData = ctx.createImageData(W, H);
+  const data = imageData.data;
+
+  const invGamma = 1 / 1.2;
+
+  for (let i = 0; i < N; i++) {
+    const j = i * 4;
+    if (!mask[i]) {
+      data[j + 3] = 0; // transparent over nodata
+      continue;
+    }
+
+    // -- Elevation lookup
+    let er = 0, eg = 0, eb = 0;
+    if (elevSpan > 0) {
+      const t = Math.max(0, Math.min(1, (height[i] - elevMin) / elevSpan));
+      const f = t * phaseN;
+      const k = Math.floor(f);
+      const frac = f - k;
+      const a = phaseMap[Math.min(k, phaseN)];
+      const b = phaseMap[Math.min(k + 1, phaseN)];
+      er = a[0] + (b[0] - a[0]) * frac;
+      eg = a[1] + (b[1] - a[1]) * frac;
+      eb = a[2] + (b[2] - a[2]) * frac;
+    } else {
+      // Pathological DEM (all same elevation) — paint mid-colormap.
+      const a = phaseMap[Math.floor(phaseN / 2)];
+      er = a[0]; eg = a[1]; eb = a[2];
+    }
+
+    // -- Slope as gamma-corrected white overlay alpha
+    const sNorm = Math.min(1, slope[i] / slopeMax);
+    const sGamma = Math.pow(sNorm, invGamma);
+    const inv = 1 - sGamma;
+    const whiteContrib = sGamma * 255;
+    data[j]     = Math.round(er * inv + whiteContrib);
+    data[j + 1] = Math.round(eg * inv + whiteContrib);
+    data[j + 2] = Math.round(eb * inv + whiteContrib);
+    data[j + 3] = 255;
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  return canvas.toDataURL();
+}
+
+function applyDemReliefOverlay() {
+  if (state.demReliefOverlay) {
+    state.demReliefOverlay.remove();
+    state.demReliefOverlay = null;
+  }
+  if (!state.dem || !state.dem.isGeographic || !state.demReliefDataUrl) return;
+  const { H, W, originX, originY, dx, dy } = state.dem;
+  const bounds = [[originY - H * dy, originX], [originY, originX + W * dx]];
+  state.demReliefOverlay = L.imageOverlay(
+    state.demReliefDataUrl,
+    bounds,
+    { opacity: 0.85 },
+  ).addTo(map);
+}
+
 // Linearly interpolate the p-th percentile (0..100) from a sorted ascending
 // array. Returns NaN if the array is empty.
 function percentileFromSorted(sorted, p) {
@@ -1637,6 +2264,12 @@ function applyLayerControls() {
     state.tileOverlay.setOpacity(tileOp);
   }
 
+  if (state.demReliefOverlay) {
+    const visible = document.getElementById("relief-visible")?.checked ?? false;
+    const opacity = parseFloat(document.getElementById("relief-opacity")?.value);
+    const op = Number.isFinite(opacity) ? opacity : 0.85;
+    state.demReliefOverlay.setOpacity(visible ? op : 0);
+  }
   if (state.energyOverlay) {
     const visible = document.getElementById("energy-visible")?.checked ?? true;
     const opacity = parseFloat(document.getElementById("energy-opacity")?.value);
@@ -2115,6 +2748,10 @@ function buildMetadata(result, withOutputs = true) {
       opacity: parseFloat(document.getElementById("tile-opacity")?.value),
       visible: !!document.getElementById("tile-visible")?.checked,
     },
+    relief: {
+      opacity: parseFloat(document.getElementById("relief-opacity")?.value),
+      visible: !!document.getElementById("relief-visible")?.checked,
+    },
   };
   // Vector network constraint, if loaded. The actual rasterised mask is
   // saved separately as `network.bin` (see downloadBundle).
@@ -2379,6 +3016,10 @@ function applyMetadataToUI(md, bin = {}) {
   if (v.tile) {
     set("tile-opacity", v.tile.opacity);
     check("tile-visible", v.tile.visible);
+  }
+  if (v.relief) {
+    set("relief-opacity", v.relief.opacity);
+    check("relief-visible", v.relief.visible);
   }
 
   // ---- Vector network params ---------------------------------------------

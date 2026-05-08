@@ -25,7 +25,9 @@
 // lingering until manual reload.
 //   v1 → v2: GeoTIFF library upgrade (3.0.5), bundle outputs as .tif,
 //            mobile drawer, sidebar tightening.
-const VERSION  = "v2";
+//   v2 → v3: PT/EN i18n toggle, FABDEM viewport loader,
+//            astar mask-relaxation fix.
+const VERSION  = "v3";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

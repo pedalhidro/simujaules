@@ -236,7 +236,12 @@ function astar(opts) {
 
   const startIdx = startR * W + startC;
   const goalIdx = goalR * W + goalC;
-  if (!mask[startIdx] || !mask[goalIdx]) {
+  // Bounds check is hard, but mask check is soft: if start/goal aren't on
+  // the (effective) mask the search can still run — relaxation refuses to
+  // step *through* off-mask cells, but we let the seed itself sit there.
+  // This matches dijkstra() and means top-N still produces routes when the
+  // user dropped src/dst before loading a vector network constraint.
+  if (startIdx < 0 || startIdx >= N || goalIdx < 0 || goalIdx >= N) {
     return { path: null, energy: Infinity, length: 0 };
   }
 
