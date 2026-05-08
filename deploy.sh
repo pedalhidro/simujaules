@@ -20,7 +20,7 @@ PUBLIC_URL="https://telhas.pedalhidrografi.co/simujoules/"
 # whatever the edge has cached. Set URL_MAP to your Cloud CDN url-map name —
 # discover it with:  gcloud compute url-maps list
 # Override per-run via env var:  URL_MAP=my-url-map ./deploy.sh
-URL_MAP="${URL_MAP:-telhas-pedalhidrografico}"
+URL_MAP="${URL_MAP:-tiles-map}"
 # Path inside the URL map to invalidate. Leave the * — the simujoules
 # subtree is exactly what we just deployed.
 INVALIDATE_PATH="/simujoules/*"
@@ -70,7 +70,7 @@ if ! command -v gsutil >/dev/null 2>&1; then
   exit 1
 fi
 
-# 3. Upload. Flags:
+# 3. Upload Flags:
 #    -m  parallelise.
 #    -r  recurse into wasm/pkg/.
 #    -d  delete files in the bucket that aren't in the staging dir, so

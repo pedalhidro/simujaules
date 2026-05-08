@@ -1,4 +1,4 @@
-// app.js — wires up DEM loading, map UI, worker dispatch, result overlay.
+// app.js — wires up DEM loading, map UI, worker dispatch, result overlay
 
 // ------- Wasm engine probe -------
 // At startup we try to construct the wasm worker once. If it sends back
@@ -565,6 +565,10 @@ async function loadDemFromArrayBuffer(buf, label) {
   state.src = null;
   state.dst = null;
   state.lastResult = null;
+  // Drop any previously loaded vector network — its rasterised mask is
+  // sized to the *previous* DEM's H×W and would corrupt the next compute
+  // (or crash) if reused. The user re-uploads the .gpkg if they want it.
+  clearVectorNetwork();
   syncRefDisplay();
   document.getElementById("src-display").textContent = "— click map to set —";
   document.getElementById("dst-display").textContent = "— click again to set —";
@@ -1721,6 +1725,16 @@ function estimateRunTime() {
     const dijkstrasPerRef = dmode === "round" ? 2 : 1;
     ms += (N / rate) * 1.1 * dijkstrasPerRef * refs;
   }
+  // Network IDW fill (8-direction ray search) plus optional 3×3 smoothing
+  // passes. Only kicks in when a network mask is loaded AND interpolation
+  // is enabled — otherwise the cells outside the network are left empty.
+  // The 0.3 / 0.05 multipliers are rough rule-of-thumb fits from runs on
+  // the 5e6-cell DEM; tune if they drift.
+  const wantNetInterp = !!document.getElementById("net-interp")?.checked;
+  if (wantNetInterp && state.networkMask) {
+    const smoothingIters = parseInt(document.getElementById("net-interp-smoothing")?.value, 10) || 0;
+    ms += (N / rate) * (0.3 + 0.05 * smoothingIters);
+  }
   out.textContent = `≈ ${formatDuration(ms)} (${eff})`;
 }
 
@@ -1969,6 +1983,7 @@ function buildMetadata(result, withOutputs = true) {
     alpha:         parseFloat(document.getElementById("alpha")?.value),
     beta:          parseFloat(document.getElementById("beta")?.value),
     eta:           parseFloat(document.getElementById("eta")?.value),
+    eMax:          parseFloat(document.getElementById("e-max")?.value) || 0,
     src:           state.src,
     dst:           state.dst,
     wantPasses:    !!document.getElementById("want-passes")?.checked,
@@ -1976,6 +1991,12 @@ function buildMetadata(result, withOutputs = true) {
     nRoutes:       parseInt(document.getElementById("n-routes")?.value, 10) || 3,
     penalty:       parseFloat(document.getElementById("penalty")?.value) || 2.0,
     repulsionMode: document.getElementById("repulsion-mode")?.value || "per-cell",
+    wantDensity:   !!document.getElementById("want-density")?.checked,
+    nRefs:         parseInt(document.getElementById("n-refs")?.value, 10) || 10,
+    refSource:     document.getElementById("ref-source")?.value || "click",
+    // refPoints carries the actual placed points so reload can re-stamp
+    // the green markers exactly where they were.
+    refPoints:     Array.isArray(state.refPoints) ? state.refPoints.slice() : [],
   };
   const viz = {
     fieldColormap:  activeColormap,
@@ -1987,11 +2008,13 @@ function buildMetadata(result, withOutputs = true) {
       visible: !!document.getElementById("energy-visible")?.checked,
     },
     passes: {
-      vmin:    readRangeInput("passes-vmin", null),
-      vmax:    readRangeInput("passes-vmax", null),
-      opacity: parseFloat(document.getElementById("passes-opacity")?.value),
-      visible: !!document.getElementById("passes-visible")?.checked,
-      blend:   document.getElementById("passes-blend")?.value || "plus-lighter",
+      vmin:       readRangeInput("passes-vmin", null),
+      vmax:       readRangeInput("passes-vmax", null),
+      opacity:    parseFloat(document.getElementById("passes-opacity")?.value),
+      visible:    !!document.getElementById("passes-visible")?.checked,
+      blend:      document.getElementById("passes-blend")?.value || "plus-lighter",
+      gamma:      parseFloat(document.getElementById("passes-gamma")?.value),
+      meanWindow: parseInt(document.getElementById("passes-mean-window")?.value, 10) || 1,
     },
     tile: {
       url:     RMSAMPA_URL,
@@ -1999,14 +2022,30 @@ function buildMetadata(result, withOutputs = true) {
       visible: !!document.getElementById("tile-visible")?.checked,
     },
   };
+  // Vector network constraint, if loaded. The actual rasterised mask is
+  // saved separately as `network.bin` (see downloadBundle).
+  const network = {
+    enabled:           !!state.networkMask,
+    srsId:             state.networkSrsId || null,
+    featureCount:      state.networkFeatureCount || 0,
+    lineWidth:         parseInt(document.getElementById("vec-width")?.value, 10) || 1,
+    snapRadius:        parseInt(document.getElementById("vec-snap")?.value, 10) || 10,
+    wantInterp:        !!document.getElementById("net-interp")?.checked,
+    interpMaxDistance: parseInt(document.getElementById("net-interp-max-dist")?.value, 10) || 50,
+    interpSmoothing:   parseInt(document.getElementById("net-interp-smoothing")?.value, 10) || 0,
+  };
 
   const md = {
     "@context":           SIMU_CONTEXT,
     "@type":              "EnergyFieldComputation",
     "schema:dateCreated": new Date().toISOString(),
     timestamp:            new Date().toISOString(),
-    schemaVersion:        1,
+    // Bumped because we added params/viz/network fields that older bundles
+    // don't carry. v1 bundles still load fine; missing fields fall through
+    // to their defaults in applyMetadataToUI.
+    schemaVersion:        2,
     engine:               state.engine || "js",
+    enginePreference:     state.enginePreference || "js",
     elapsedMs:            result?.elapsedMs ?? null,
     dem: {
       label:        state.demLabel || null,
@@ -2023,6 +2062,7 @@ function buildMetadata(result, withOutputs = true) {
     },
     params,
     viz,
+    network,
     stats: {
       maxE:        state.lastAutoMax ?? null,
       maxPasses:   state.lastPassesAutoMax ?? null,
@@ -2044,6 +2084,12 @@ function buildMetadata(result, withOutputs = true) {
         shape: [dem.H, dem.W],
         file: "passes.bin",
         byteOrder: "little-endian",
+      } : null,
+      network: state.networkMask ? {
+        type: "Uint8Array",
+        shape: [dem.H, dem.W],
+        file: "network.bin",
+        byteOrder: "n/a",
       } : null,
       routes: result.routes && result.routes.length ? {
         type: "GeoJSON",
@@ -2084,6 +2130,10 @@ async function downloadBundle() {
     // regardless of byteOffset / shared underlying buffers.
     if (r.energy) zip.file("energy.bin", new Uint8Array(r.energy.buffer, r.energy.byteOffset, r.energy.byteLength));
     if (r.passes) zip.file("passes.bin", new Uint8Array(r.passes.buffer, r.passes.byteOffset, r.passes.byteLength));
+    // The rasterised network mask is captured here so a reload reproduces
+    // the same constrained compute even if the source .gpkg isn't handy.
+    // Stored raw (Uint8Array, H*W bytes); zip's deflate handles the redundancy.
+    if (state.networkMask) zip.file("network.bin", new Uint8Array(state.networkMask));
     if (r.routes && r.routes.length) {
       zip.file("routes.geojson", JSON.stringify(routesFCFromList(r.routes, dem), null, 2));
     }
@@ -2129,6 +2179,8 @@ async function loadBundleFile(file) {
       if (eEntry) bin.energy = new Float32Array(await eEntry.async("arraybuffer"));
       const pEntry = zip.file("passes.bin");
       if (pEntry) bin.passes = new Float64Array(await pEntry.async("arraybuffer"));
+      const nEntry = zip.file("network.bin");
+      if (nEntry) bin.network = new Uint8Array(await nEntry.async("arraybuffer"));
       // GeoJSON route/path geometry doesn't get re-rasterised — when no DEM
       // is loaded yet we couldn't draw it anyway. After the user loads a
       // matching DEM and clicks Compute, the routes are regenerated.
@@ -2149,15 +2201,36 @@ function applyMetadataToUI(md, bin = {}) {
   const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
   const check = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.checked = !!v; };
 
+  // ---- DEM dimension check -----------------------------------------------
+  // Binary outputs (energy/passes/network) are sized to the bundle's DEM.
+  // Replaying them onto a different DEM would corrupt the visualisation,
+  // so we gate the binary path on a strict H×W match. Parameters/UI still
+  // get applied — the user is told to re-Compute.
+  const bundleH = md.dem?.H, bundleW = md.dem?.W;
+  const demDimsMatch =
+    state.dem && Number.isFinite(bundleH) && Number.isFinite(bundleW)
+      ? state.dem.H === bundleH && state.dem.W === bundleW
+      : null; // null = unknown (no DEM loaded yet, or bundle didn't record dims)
+  if (state.dem && demDimsMatch === false) {
+    console.warn(
+      `[bundle] DEM dimension mismatch: bundle ${bundleW}×${bundleH}, ` +
+      `loaded ${state.dem.W}×${state.dem.H}. Skipping binary replay.`
+    );
+  }
+
   set("mode", p.mode);
   set("alpha", p.alpha);
   set("beta", p.beta);
   set("eta", p.eta);
+  set("e-max", p.eMax);
   check("want-passes", p.wantPasses);
   check("want-topn", p.wantTopN);
   set("n-routes", p.nRoutes);
   set("penalty", p.penalty);
   set("repulsion-mode", p.repulsionMode);
+  check("want-density", p.wantDensity);
+  set("n-refs", p.nRefs);
+  set("ref-source", p.refSource);
 
   const v = md.viz || {};
   if (v.fieldColormap && COLORMAPS[v.fieldColormap]) {
@@ -2180,18 +2253,43 @@ function applyMetadataToUI(md, bin = {}) {
     set("passes-opacity", v.passes.opacity);
     check("passes-visible", v.passes.visible);
     set("passes-blend", v.passes.blend);
+    set("passes-gamma", v.passes.gamma);
+    set("passes-mean-window", v.passes.meanWindow);
   }
   if (v.tile) {
     set("tile-opacity", v.tile.opacity);
     check("tile-visible", v.tile.visible);
   }
 
-  // Trigger any UI sync that depends on these (top-N reveal, etc.)
-  const topnCheck = document.getElementById("want-topn");
-  if (topnCheck) {
-    const evt = new Event("change");
-    topnCheck.dispatchEvent(evt);
+  // ---- Vector network params ---------------------------------------------
+  // Slider/checkbox values from the bundle's `network` section. Mask
+  // restoration happens further down once we've also confirmed DEM dims.
+  const net = md.network || {};
+  set("vec-width", net.lineWidth);
+  set("vec-snap", net.snapRadius);
+  check("net-interp", net.wantInterp);
+  set("net-interp-max-dist", net.interpMaxDistance);
+  set("net-interp-smoothing", net.interpSmoothing);
+
+  // ---- Engine preference -------------------------------------------------
+  // Honour a wasm preference only when wasm is actually available — bundles
+  // saved on a build-with-wasm machine shouldn't break the loader on a
+  // build-without-wasm one.
+  if (md.enginePreference === "wasm" && state.wasmAvailable) {
+    state.enginePreference = "wasm";
+  } else if (md.enginePreference === "js") {
+    state.enginePreference = "js";
   }
+  const engineEl = document.getElementById("engine-tag");
+  if (engineEl) engineEl.textContent = state.enginePreference;
+
+  // Trigger UI sync for toggles that reveal/hide their option groups —
+  // top-N exposes the routes-count + repulsion controls, density swaps
+  // src/dst for the multi-ref UI and disables/enables the energy layer.
+  const topnCheck = document.getElementById("want-topn");
+  if (topnCheck) topnCheck.dispatchEvent(new Event("change"));
+  const densityCheck = document.getElementById("want-density");
+  if (densityCheck) densityCheck.dispatchEvent(new Event("change"));
 
   // Restore src/dst pixel positions. If a DEM is loaded that matches the
   // bundle's DEM dimensions, place markers right away; otherwise hold the
@@ -2207,17 +2305,59 @@ function applyMetadataToUI(md, bin = {}) {
     return L.marker(latlng, { icon: makeSrcDstIcon(label === "Source" ? "src" : "dst") })
       .addTo(map).bindTooltip(label);
   }
-  if (state.dem && state.src) {
+  // Don't drop markers onto a mismatched DEM — they'd land on bogus pixels.
+  // Also skip in density mode — the "Pick points" UI is hidden / disabled
+  // there and stale src/dst markers would just clutter the map.
+  const densityOnNow = !!document.getElementById("want-density")?.checked;
+  if (state.dem && state.src && demDimsMatch !== false && !densityOnNow) {
     if (state.srcMarker) state.srcMarker.remove();
     state.srcMarker = placeMarker(state.src, "Source");
     document.getElementById("src-display").textContent = `r=${state.src[0]}, c=${state.src[1]}`;
     document.getElementById("src-display").classList.add("set");
   }
-  if (state.dem && state.dst) {
+  if (state.dem && state.dst && demDimsMatch !== false && !densityOnNow) {
     if (state.dstMarker) state.dstMarker.remove();
     state.dstMarker = placeMarker(state.dst, "Destination");
     document.getElementById("dst-display").textContent = `r=${state.dst[0]}, c=${state.dst[1]}`;
     document.getElementById("dst-display").classList.add("set");
+  }
+
+  // ---- Reference points (multi-ref density) ------------------------------
+  // Re-stamp the FIFO ring exactly as it was. addRefPoint pushes + numbers
+  // the markers and respects enforceRefCap, so the cap field set above
+  // governs how many actually survive.
+  if (Array.isArray(p.refPoints) && state.dem && demDimsMatch !== false) {
+    // Clear whatever is on the map from a previous bundle / run.
+    if (state.refMarkers) for (const m of state.refMarkers) m.remove();
+    state.refMarkers = [];
+    state.refPoints = [];
+    for (const rc of p.refPoints) {
+      if (Array.isArray(rc) && rc.length >= 2) addRefPoint([rc[0] | 0, rc[1] | 0]);
+    }
+    syncRefDisplay();
+  }
+
+  // ---- Network mask restore ---------------------------------------------
+  // Only when we have a DEM, dims match, and the byte length matches H*W.
+  // Otherwise leave the slot empty — better to recompute than to load a
+  // mask that points at the wrong cells.
+  if (bin.network && state.dem && demDimsMatch === true) {
+    const N = state.dem.H * state.dem.W;
+    if (bin.network.length === N) {
+      state.networkMask = bin.network;
+      state.networkSrsId = net.srsId || null;
+      state.networkFeatureCount = net.featureCount || 0;
+      const meta = document.getElementById("vec-meta");
+      if (meta) {
+        meta.innerHTML =
+          `Restored from bundle: <span class="v">${state.networkFeatureCount}</span> ` +
+          `features (SRS ${state.networkSrsId || "?"}).`;
+      }
+    } else {
+      console.warn(
+        `[bundle] network.bin size mismatch: ${bin.network.length} bytes vs H*W=${N}. Discarded.`
+      );
+    }
   }
 
   applyLayerControls();
@@ -2227,7 +2367,7 @@ function applyMetadataToUI(md, bin = {}) {
   // recompute needed. Skip if the DEM dimensions don't match (or no DEM
   // is loaded yet).
   let restored = false;
-  if (state.dem && bin.energy) {
+  if (state.dem && bin.energy && demDimsMatch === true) {
     const N = state.dem.H * state.dem.W;
     if (bin.energy.length === N && (!bin.passes || bin.passes.length === N)) {
       const synth = {
@@ -2247,7 +2387,12 @@ function applyMetadataToUI(md, bin = {}) {
   updateRunButtonState();
   if (restored) {
     status.textContent = "Bundle restored from cache. Click Compute to re-derive routes/path.";
-  } else if (state.dem && state.src) {
+  } else if (state.dem && demDimsMatch === false) {
+    status.innerHTML =
+      `<span style="color:#ff9d3d">DEM size mismatch — bundle was for ` +
+      `${bundleW}×${bundleH}, loaded DEM is ${state.dem.W}×${state.dem.H}. ` +
+      `Parameters applied; binary outputs skipped. Load the matching DEM to restore overlays.</span>`;
+  } else if (state.dem && (state.src || (p.wantDensity && state.refPoints?.length))) {
     status.textContent = "Bundle parameters loaded. Click Compute to reproduce.";
   } else if (!state.dem) {
     const hint = md.dem?.sourceUrl ? ` (try ${md.dem.sourceUrl})` : "";
