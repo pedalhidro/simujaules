@@ -18,7 +18,14 @@
 // every cache that doesn't match. deploy.sh sets no-cache on this file so
 // browsers actually fetch the new version instead of staling out.
 
-const VERSION  = "v1";
+// Bump on every deploy that ships meaningful behavioural changes to the
+// app shell — the activate handler purges any cache whose name doesn't
+// match these two, so an old cached app.js / index.html / wasm /
+// geotiff CDN URL is replaced on the user's next visit instead of
+// lingering until manual reload.
+//   v1 → v2: GeoTIFF library upgrade (3.0.5), bundle outputs as .tif,
+//            mobile drawer, sidebar tightening.
+const VERSION  = "v2";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
