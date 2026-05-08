@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Maskable variant of icon.svg. Android adaptive icons crop arbitrarily
+  (circle, squircle, rounded square, etc.), so the design has to fit
+  inside a "safe zone" — a centred circle of radius 40% of the canvas.
+  Everything outside might get clipped. Here the visible artwork is
+  scaled to ~60% of the viewport and centred, padded by the bg colour.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#0f1115"/>
+  <g transform="translate(102 102) scale(0.605)">
+    <rect width="512" height="512" rx="96" ry="96" fill="#1a1d23"/>
+
+    <g fill="none" stroke="#4cc9f0" stroke-width="3" opacity="0.55">
+      <ellipse cx="220" cy="270" rx="40"  ry="36"  />
+      <ellipse cx="225" cy="272" rx="80"  ry="72"  />
+      <ellipse cx="232" cy="276" rx="124" ry="110" />
+      <ellipse cx="240" cy="282" rx="170" ry="150" />
+    </g>
+    <g fill="none" stroke="#4cc9f0" stroke-width="2" opacity="0.25">
+      <ellipse cx="252" cy="290" rx="218" ry="190" />
+    </g>
+
+    <circle cx="220" cy="270" r="22" fill="#ff8c42"/>
+    <circle cx="220" cy="270" r="9"  fill="#0f1115"/>
+
+    <path d="M 252 296 L 308 340"
+          stroke="#ff8c42" stroke-width="6" stroke-linecap="round" fill="none"/>
+    <path d="M 296 332 L 312 344 L 304 326"
+          stroke="#ff8c42" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+</svg>

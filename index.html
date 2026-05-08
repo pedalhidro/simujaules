@@ -2,8 +2,23 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- viewport: maximum-scale not pinned because pinch-zoom on the map is
+       part of the UX. Some devices add their own zoom controls when the
+       app is "installed" — that's fine. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Simulador bicigeoenergético</title>
+
+  <!-- PWA wiring. The manifest drives Add-to-Home-Screen on Android/Chrome;
+       the apple-touch-icon and the iOS-specific meta tags do the same job
+       on iOS Safari (which still ignores parts of the manifest spec). -->
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <meta name="theme-color" content="#0f1115" />
+  <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Simujoules" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <link
     rel="stylesheet" 
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -22,92 +37,223 @@
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
-    #app { display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
+    /* Use 100dvh (dynamic viewport) where supported so the layout doesn't
+       jump under the iOS Safari URL bar. Falls back to 100vh elsewhere. */
+    #app { display: grid; grid-template-columns: 320px 1fr; height: 100vh; height: 100dvh; }
     #panel {
       background: var(--panel);
       border-right: 1px solid var(--border);
-      padding: 16px;
+      padding: 10px 12px;
       overflow-y: auto;
+      /* iOS momentum scrolling — without this the panel feels stuck on touch. */
+      -webkit-overflow-scrolling: touch;
     }
-    #map { height: 100vh; }
+    #map { height: 100vh; height: 100dvh; }
+
+    /* ---- Mobile drawer ----------------------------------------------------
+       Below 860 px (small tablets and phones) the panel becomes a fixed
+       overlay drawer that slides in from the left. The map gets the full
+       viewport. A hamburger button lives in the corner of the map; tapping
+       it (or the backdrop) toggles the drawer.
+
+       The desktop grid column is collapsed to 0 so the map fills the row.
+       The panel itself is repositioned with `position: fixed` and animated
+       on transform — cheap on the GPU, no layout reflow. */
+    .drawer-toggle {
+      display: none; /* desktop hides it */
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      z-index: 900;
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      align-items: center;
+      justify-content: center;
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+    }
+    .drawer-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 850;
+      opacity: 0;
+      transition: opacity 0.18s ease;
+    }
+    .drawer-backdrop.active { display: block; opacity: 1; }
+
+    @media (max-width: 860px) {
+      /* Single-column grid on mobile. CRITICAL: position:fixed removes
+         #panel from grid auto-placement, so if we kept two columns the
+         remaining child (#map) would auto-place into column 1 (0 px wide)
+         and render as a black void. One column → map fills the only cell. */
+      #app { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+      #panel {
+        position: fixed;
+        top: 0; left: 0;
+        height: 100vh; height: 100dvh;
+        width: min(86vw, 360px);
+        z-index: 900;
+        transform: translateX(-100%);
+        transition: transform 0.22s ease-out;
+        box-shadow: 4px 0 18px rgba(0, 0, 0, 0.5);
+        /* Extra top padding so content clears the hamburger button. */
+        padding-top: 56px;
+      }
+      #panel.open { transform: translateX(0); }
+      .drawer-toggle { display: inline-flex; }
+      /* Once the drawer is open, swap the icon to an × via the data-attr.
+         The button stays where it is so the user can close from the same
+         spot they opened it from. */
+      .drawer-toggle.open { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+      /* Touch-friendly bump on mobile, but only as much as readability
+         actually needs — the user has to scroll less when these stay
+         modest. Buttons end up ~32 px tall, comfortable for thumbs. */
+      button { padding: 8px; font-size: 13px; }
+      .ex-link { padding: 6px 10px; font-size: 12px; }
+      input[type="number"], select { padding: 6px 9px; font-size: 13px; }
+      /* Keep the small inline buttons (engine tag, help) compact even on
+         mobile — they're not primary actions. */
+      .engine-tag, .help-button { padding: 0; }
+      .help-button { width: 22px !important; height: 22px; font-size: 13px; }
+      .engine-tag { height: 22px; min-width: 30px; font-size: 11px; }
+
+      h1 { font-size: 13px; }
+      .group { padding: 8px 10px; }
+    }
+    /* On really small screens (phones in portrait), let the modal use the
+       full viewport — the side-by-side help layout already collapses below
+       720 px in the existing rule. */
+    @media (max-width: 480px) {
+      .modal { padding: 16px; max-height: 92vh; }
+      #panel { width: 92vw; }
+    }
+
+    /* Hide Leaflet's default +/− zoom control on mobile — the hamburger
+       lives in the same top-left slot, and pinch-zoom is the natural
+       gesture on touch devices anyway. */
+    @media (max-width: 860px) {
+      .leaflet-control-zoom { display: none; }
+    }
     h1 {
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 600;
-      margin: 0 0 6px 0;
-      line-height: 1.25;
+      margin: 0 0 4px 0;
+      line-height: 1.2;
     }
     .header-actions {
       display: flex;
       align-items: center;
       gap: 6px;
-      margin: 0 0 12px 0;
+      margin: 0 0 8px 0;
     }
-    .group { border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 12px; }
-    .group h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 8px 0; font-weight: 500; }
-    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; margin-top: 8px; }
+    /* Compact rhythm: tighter group padding + smaller margin between
+       groups. The card border still gives the eye a clear stop without
+       wasting 12 px of internal padding. */
+    .group { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
+    .group h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 5px 0; font-weight: 500; }
+    label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px; margin-top: 5px; }
     label:first-child { margin-top: 0; }
     input[type="number"], select {
-      width: 100%; padding: 6px 8px;
+      width: 100%; padding: 5px 7px;
       background: var(--bg); color: var(--text);
       border: 1px solid var(--border); border-radius: 4px;
-      font-size: 13px; font-family: inherit;
+      font-size: 12px; font-family: inherit;
     }
-    input[type="file"] { font-size: 12px; }
+    input[type="file"] { font-size: 11px; }
     button {
-      width: 100%; padding: 8px;
+      width: 100%; padding: 7px;
       background: var(--accent); color: var(--bg);
       border: none; border-radius: 4px;
       font-weight: 600; cursor: pointer;
-      font-size: 13px;
+      font-size: 12px;
     }
     button:disabled { background: #555; cursor: not-allowed; }
     button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); font-weight: 500; }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .point-display { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    /* SRC and DST share one line, two equal cells side by side. The
+       label is a 22 px monospaced tag and the value takes the rest of
+       its cell — a four-line stack compressed to one line. */
+    .point-row-inline {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .point-cell {
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+      min-width: 0; /* let the value truncate inside its cell */
+    }
+    .point-label {
+      flex: 0 0 auto;
+      font-size: 10px;
+      color: var(--muted);
+      font-family: ui-monospace, monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .point-display {
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .point-display.set { color: var(--accent-2); }
-    #status { font-size: 11px; color: var(--muted); margin-top: 8px; min-height: 1.4em; }
-    .legend { margin-top: 8px; }
+    #status { font-size: 11px; color: var(--muted); margin-top: 5px; min-height: 1.3em; }
+    .legend { margin-top: 5px; }
     .swatch {
       display: block;
       width: 100%;
-      height: 10px;
+      height: 9px;
       border-radius: 2px;
       background: linear-gradient(to right, #440154, #3b528b, #21918c, #5ec962, #fde725);
     }
     .legend-ticks {
       display: flex;
       justify-content: space-between;
-      margin-top: 3px;
+      margin-top: 2px;
       font-size: 10px;
       font-family: ui-monospace, monospace;
       color: var(--muted);
     }
     .legend-ticks .v { color: var(--text); }
-    .progress { width: 100%; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 8px; display: none; }
+    .progress { width: 100%; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 5px; display: none; }
     .progress.active { display: block; }
     .progress > .bar { height: 100%; background: var(--accent-2); width: 0; transition: width 0.1s; }
-    .meta { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.6; font-family: ui-monospace, monospace; }
+    .meta { font-size: 11px; color: var(--muted); margin-top: 5px; line-height: 1.45; font-family: ui-monospace, monospace; }
     .meta .v { color: var(--text); }
     .leaflet-container { background: #0a0c10; }
     .credit {
-      margin-top: 14px;
-      padding-top: 10px;
+      margin-top: 8px;
+      padding-top: 6px;
       border-top: 1px solid var(--border);
       font-size: 10px;
       color: var(--muted);
       text-align: center;
       font-style: italic;
-      line-height: 1.5;
+      line-height: 1.4;
     }
     .examples {
-      margin-top: 8px;
+      margin-top: 5px;
     }
     .ex-link {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 4px 6px;
-      margin-top: 3px;
+      padding: 3px 6px;
+      margin-top: 2px;
       border: 1px solid var(--border);
       border-radius: 3px;
       color: var(--text);
@@ -127,14 +273,14 @@
     .ex-link:hover .ex-tag { color: var(--accent-2); }
     .layer-block {
       border-top: 1px solid var(--border);
-      padding-top: 8px;
-      margin-top: 8px;
+      padding-top: 5px;
+      margin-top: 5px;
     }
     .layer-head {
       display: flex;
       align-items: center;
-      gap: 8px;
-      margin-bottom: 4px;
+      gap: 6px;
+      margin-bottom: 3px;
     }
     .layer-head input[type="range"] {
       /* min-width: 0 lets the slider shrink below its UA min-content
@@ -157,8 +303,8 @@
     .hint {
       font-size: 10px;
       color: var(--muted);
-      margin-top: 4px;
-      line-height: 1.4;
+      margin-top: 3px;
+      line-height: 1.35;
     }
     .engine-tag {
       flex: 0 0 auto;
@@ -303,6 +449,11 @@
   </style>
 </head>
 <body>
+  <!-- Mobile drawer controls. Hidden by CSS above 860 px — they only show
+       on phones/small tablets. Both toggle the same `panel.open` class. -->
+  <button type="button" class="drawer-toggle" id="drawer-toggle" aria-label="Toggle controls" aria-expanded="false">☰</button>
+  <div class="drawer-backdrop" id="drawer-backdrop" aria-hidden="true"></div>
+
   <div id="app">
     <aside id="panel">
       <h1>Simulador bici-geo-energético</h1>
@@ -327,16 +478,16 @@
           </a>
         </div>
         <div class="meta" id="dem-meta">No DEM loaded.</div>
-        <div class="hint" style="margin-top: 10px;">
-          Reload a saved bundle (.zip) or parameter set (.jsonld):
+        <div class="hint" style="margin-top: 6px;">
+          Reload a saved bundle (.zip) or .jsonld:
         </div>
-        <input type="file" id="bundle-file" accept=".zip,.jsonld,.json" style="margin-top: 4px;" />
+        <input type="file" id="bundle-file" accept=".zip,.jsonld,.json" style="margin-top: 3px;" />
       </div>
 
       <div class="group">
         <h2>1b. Optional vector network (.gpkg)</h2>
         <input type="file" id="vector-file" accept=".gpkg" />
-        <div class="row" style="margin-top: 8px;">
+        <div class="row" style="margin-top: 5px;">
           <div>
             <label>line width (cells)</label>
             <input type="number" id="vec-width" value="1" min="1" max="10" step="1" />
@@ -346,12 +497,12 @@
             <input type="number" id="vec-snap" value="10" min="0" max="200" step="1" />
           </div>
         </div>
-        <button type="button" class="secondary" id="vec-clear" style="margin-top: 6px;">Clear network</button>
-        <label style="display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--text);">
+        <button type="button" class="secondary" id="vec-clear" style="margin-top: 4px;">Clear network</button>
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
           <input type="checkbox" id="net-interp" checked />
-          <span>Interpolate energy across non-network cells</span>
+          <span>Interpolate across non-network cells</span>
         </label>
-        <div class="row" style="margin-top: 4px;">
+        <div class="row" style="margin-top: 3px;">
           <div>
             <label>max distance (cells)</label>
             <input type="number" id="net-interp-max-dist" value="50" min="1" max="500" step="1" />
@@ -366,11 +517,11 @@
 
       <div class="group" id="pick-points-group">
         <h2>2. Pick points</h2>
-        <label>Source</label>
-        <div class="point-display" id="src-display">— click map to set —</div>
-        <label>Destination (optional)</label>
-        <div class="point-display" id="dst-display">— click again to set —</div>
-        <button class="secondary" id="clear-points" style="margin-top: 8px;">Clear points</button>
+        <div class="point-row-inline">
+          <span class="point-cell"><span class="point-label">src</span><span class="point-display" id="src-display">— click map —</span></span>
+          <span class="point-cell"><span class="point-label">dst</span><span class="point-display" id="dst-display">— optional —</span></span>
+        </div>
+        <button class="secondary" id="clear-points" style="margin-top: 5px;">Clear points</button>
       </div>
 
       <div class="group">
@@ -378,7 +529,7 @@
         <label>Mode</label>
         <select id="mode">
           <option value="from">From source</option>
-          <option value="to">To destination</option>
+          <option value="to">To source point</option>
           <option value="round">Round trip</option>
         </select>
         <div class="row">
@@ -391,19 +542,25 @@
             <input type="number" id="beta" value="1.0" step="0.1" />
           </div>
         </div>
-        <label>η (downhill recovery, 0–1)</label>
-        <input type="number" id="eta" value="0.1" step="0.05" min="0" max="1" />
-        <label>Energy budget (≤0 = none)</label>
-        <input type="number" id="e-max" value="0" step="any" />
-        <label style="margin-top: 12px; display: flex; align-items: center; gap: 6px;">
+        <div class="row">
+          <div>
+            <label>η (downhill recovery)</label>
+            <input type="number" id="eta" value="0.1" step="0.05" min="0" max="1" />
+          </div>
+          <div>
+            <label>Energy budget (≤0 = ∞)</label>
+            <input type="number" id="e-max" value="0" step="any" />
+          </div>
+        </div>
+        <label style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
           <input type="checkbox" id="want-passes" />
           <span>Compute passes count (route density)</span>
         </label>
-        <label style="display: flex; align-items: center; gap: 6px;">
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 3px;">
           <input type="checkbox" id="want-topn" />
           <span>Compute top-N routes</span>
         </label>
-        <label style="display: flex; align-items: center; gap: 6px;">
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 3px;">
           <input type="checkbox" id="want-density" />
           <span>Compute multi-reference density</span>
         </label>
@@ -421,12 +578,12 @@
               </select>
             </div>
           </div>
-          <div class="hint" style="margin-top: 4px;">Direction follows the global Mode setting above.</div>
-          <div class="row" style="margin-top: 6px;">
+          <div class="hint" style="margin-top: 3px;">Direction follows the Mode above.</div>
+          <div class="row" style="margin-top: 4px;">
             <button type="button" class="secondary" id="ref-place-random">Place random</button>
             <button type="button" class="secondary" id="ref-clear">Clear refs</button>
           </div>
-          <div class="hint" id="ref-display" style="margin-top: 4px;">no references placed</div>
+          <div class="hint" id="ref-display" style="margin-top: 3px;">no references placed</div>
         </div>
         <div id="topn-extra" style="display: none;">
           <div class="row">
@@ -454,13 +611,13 @@
       </div>
 
       <button id="run" disabled>Compute</button>
-      <div id="time-estimate" style="font-size: 10px; color: var(--muted); margin-top: 4px; text-align: center;"></div>
+      <div id="time-estimate" style="font-size: 10px; color: var(--muted); margin-top: 3px; text-align: center;"></div>
       <div class="progress" id="progress"><div class="bar"></div></div>
       <div id="status"></div>
 
-      <div class="group" style="margin-top: 12px;">
+      <div class="group" style="margin-top: 8px;">
         <h2>Result</h2>
-        <button type="button" id="refresh-style" class="secondary" style="margin-bottom: 8px;">Refresh style</button>
+        <button type="button" id="refresh-style" class="secondary" style="margin-bottom: 5px;">Refresh style</button>
         <div class="meta" id="result-meta">—</div>
         <div class="legend">
           <div class="swatch"></div>
@@ -548,8 +705,8 @@
           <div class="hint">Greyscale ramp; with "add" mode high-pass cells brighten the energy field beneath. Same auto / pinned-range behaviour as Energy.</div>
         </div>
 
-        <button class="secondary" id="range-reset" style="margin-top: 6px;">Reset ranges to auto</button>
-        <button type="button" id="download-bundle" style="margin-top: 6px;">Download bundle (.zip)</button>
+        <button class="secondary" id="range-reset" style="margin-top: 4px;">Reset ranges to auto</button>
+        <button type="button" id="download-bundle" style="margin-top: 4px;">Download bundle (.zip)</button>
       </div>
 
       <div class="credit">feito por Claúdio e dirigido pelos neogeógrafos geomorfológicos</div>
@@ -562,10 +719,57 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js"></script>
+  <!-- 3.x is required for floating-point GeoTIFF writes — 2.x's writer
+       silently truncates Float32/Float64 to uint8. Reader API also gained
+       async getTiePoints + ImageFileDirectory.getValue() in 3.0; see
+       loadDemFromArrayBuffer for the migrated calls. -->
+  <script src="https://cdn.jsdelivr.net/npm/geotiff@3.0.5/dist-browser/geotiff.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.0/dist/proj4.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+
+  <!-- Drawer toggle (mobile only). Inline + standalone so the panel is still
+       reachable if app.js fails to load. Exposes window.__simuDrawer.close()
+       so app.js can collapse the drawer after a map tap. -->
+  <script>
+    (function () {
+      const panel = document.getElementById('panel');
+      const btn = document.getElementById('drawer-toggle');
+      const backdrop = document.getElementById('drawer-backdrop');
+      if (!panel || !btn || !backdrop) return;
+      function setOpen(open) {
+        panel.classList.toggle('open', open);
+        btn.classList.toggle('open', open);
+        backdrop.classList.toggle('active', open);
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        btn.textContent = open ? '×' : '☰';
+      }
+      btn.addEventListener('click', () => setOpen(!panel.classList.contains('open')));
+      backdrop.addEventListener('click', () => setOpen(false));
+      // If the user rotates / resizes back to desktop, reset state so the
+      // panel doesn't sit half-translated on the desktop grid.
+      window.addEventListener('resize', () => {
+        if (window.innerWidth > 860) setOpen(false);
+      });
+      // Expose so app.js can close the drawer after a successful map click.
+      window.__simuDrawer = { close: () => setOpen(false), open: () => setOpen(true) };
+    })();
+  </script>
+
+  <!-- Service worker registration. Deferred to load so it doesn't compete
+       with the heavier wasm + Leaflet bootstrap. The SW only takes effect
+       on the *next* navigation, but skipWaiting + clients.claim in sw.js
+       compress that to "next reload". File:// URLs and old browsers fall
+       through silently. -->
+  <script>
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js', { scope: './' })
+          .catch((err) => console.warn('[sw] registration failed:', err));
+      });
+    }
+  </script>
+
   <script type="module" src="./app.js"></script>
 
   <div class="modal-backdrop" id="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-modal-title">

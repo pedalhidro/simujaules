@@ -270,13 +270,13 @@ document.addEventListener("DOMContentLoaded", () => {
         if (state.pathLine)  { state.pathLine.remove();  state.pathLine = null; }
         const srcDisp = document.getElementById("src-display");
         const dstDisp = document.getElementById("dst-display");
-        if (srcDisp) { srcDisp.textContent = "— disabled in density mode —"; srcDisp.classList.remove("set"); }
-        if (dstDisp) { dstDisp.textContent = "— disabled in density mode —"; dstDisp.classList.remove("set"); }
+        if (srcDisp) { srcDisp.textContent = "— density —"; srcDisp.classList.remove("set"); }
+        if (dstDisp) { dstDisp.textContent = "— density —"; dstDisp.classList.remove("set"); }
       } else {
         const srcDisp = document.getElementById("src-display");
         const dstDisp = document.getElementById("dst-display");
-        if (srcDisp && !state.src) srcDisp.textContent = "— click map to set —";
-        if (dstDisp && !state.dst) dstDisp.textContent = "— click again to set —";
+        if (srcDisp && !state.src) srcDisp.textContent = "— click map —";
+        if (dstDisp && !state.dst) dstDisp.textContent = "— optional —";
       }
 
       // Energy layer stays available in density mode — when refs > 0 the
@@ -477,9 +477,11 @@ async function loadDemFromArrayBuffer(buf, label) {
   const image = await tiff.getImage();
   const W = image.getWidth();
   const H = image.getHeight();
-  const tiePoints = image.getTiePoints();
+  // geotiff.js 3.x: getTiePoints() is async and fileDirectory is an
+  // ImageFileDirectory object — values are read via getValue('TagName').
+  const tiePoints = await image.getTiePoints();
   const fileDirectory = image.fileDirectory;
-  const pixelScale = fileDirectory.ModelPixelScale;
+  const pixelScale = fileDirectory.getValue("ModelPixelScale");
   if (!pixelScale || !tiePoints?.length) {
     throw new Error("DEM lacks geotransform metadata. Use a properly georeferenced GeoTIFF.");
   }
@@ -493,7 +495,8 @@ async function loadDemFromArrayBuffer(buf, label) {
   const height = raster instanceof Float32Array ? raster : Float32Array.from(raster);
 
   // Build mask: anything finite and != nodata
-  const nodata = fileDirectory.GDAL_NODATA ? parseFloat(fileDirectory.GDAL_NODATA) : null;
+  const nodataRaw = fileDirectory.getValue("GDAL_NODATA");
+  const nodata = nodataRaw ? parseFloat(nodataRaw) : null;
   const mask = new Uint8Array(H * W);
   for (let i = 0; i < H * W; i++) {
     const v = height[i];
@@ -519,6 +522,15 @@ async function loadDemFromArrayBuffer(buf, label) {
     : dx;
   const dyM = isProbablyGeographic ? dy * 110574 : dy;
 
+  // Pull GeoKeys from the source TIFF so we can stamp the same CRS onto
+  // any GeoTIFFs we write later (energy.tif / passes.tif / network.tif
+  // in the bundle export). Without this, projected DEMs would round-trip
+  // as bare 4326 — wrong for everything outside lon/lat space.
+  let geoKeys = null;
+  try {
+    geoKeys = image.getGeoKeys ? image.getGeoKeys() : null;
+  } catch { /* getGeoKeys throws on some malformed tiffs — fine to skip */ }
+
   state.dem = {
     height, mask, H, W,
     dx, dy,                  // native CRS units (degrees for geographic)
@@ -527,6 +539,7 @@ async function loadDemFromArrayBuffer(buf, label) {
     // bbox in DEM CRS units (degrees for geographic):
     bbox: { xmin: originX, ymin: originY - H * dy, xmax: originX + W * dx, ymax: originY },
     isGeographic: isProbablyGeographic,
+    geoKeys,                 // for GeoTIFF round-trip on export
   };
   state.demLabel = label;
 
@@ -570,8 +583,8 @@ async function loadDemFromArrayBuffer(buf, label) {
   // (or crash) if reused. The user re-uploads the .gpkg if they want it.
   clearVectorNetwork();
   syncRefDisplay();
-  document.getElementById("src-display").textContent = "— click map to set —";
-  document.getElementById("dst-display").textContent = "— click again to set —";
+  document.getElementById("src-display").textContent = "— click map —";
+  document.getElementById("dst-display").textContent = "— optional —";
   document.getElementById("src-display").classList.remove("set");
   document.getElementById("dst-display").classList.remove("set");
   resultMeta.innerHTML = "—";
@@ -720,17 +733,23 @@ async function loadVectorNetwork(file) {
     return;
   }
 
+  // In-progress status lives in the network section's own meta line — it's
+  // contextual to where the user clicked, and the global `status` stays
+  // free for messages from other parts of the app.
+  const vecMeta = document.getElementById("vec-meta");
+  const setVecStatus = (html) => { if (vecMeta) vecMeta.innerHTML = html; };
+
   // Reuse the compute progress bar. File-read phase fills 0–40 %, sql.js
   // init 40–50 %, rasterise 50–100 %.
   progress.classList.add("active");
   progressBar.style.width = "0%";
-  status.textContent = `Reading ${file.name} (${(file.size / 1024 / 1024).toFixed(0)} MB)…`;
+  setVecStatus(`Reading ${file.name} (${(file.size / 1024 / 1024).toFixed(0)} MB)…`);
   const buf = await readFileWithProgress(file, (frac) => {
     progressBar.style.width = `${(frac * 40).toFixed(1)}%`;
   });
   progressBar.style.width = "40%";
 
-  status.textContent = "Initializing sql.js…";
+  setVecStatus("Initializing sql.js…");
   const SQL = await getSQL();
   const db = new SQL.Database(new Uint8Array(buf));
   progressBar.style.width = "50%";
@@ -843,9 +862,9 @@ async function loadVectorNetwork(file) {
       if (scanned % 2000 === 0) {
         const frac = totalFeatures > 0 ? scanned / totalFeatures : 0;
         progressBar.style.width = `${(50 + frac * 50).toFixed(1)}%`;
-        status.textContent = totalFeatures > 0
-          ? `Rasterising… ${scanned}/${totalFeatures} (${rasterised} drawn)`
-          : `Rasterising… ${scanned} scanned, ${rasterised} drawn`;
+        setVecStatus(totalFeatures > 0
+          ? `Rasterising… <span class="v">${scanned}</span>/${totalFeatures} (${rasterised} drawn)`
+          : `Rasterising… <span class="v">${scanned}</span> scanned, ${rasterised} drawn`);
         await new Promise((r) => setTimeout(r, 0));
       }
     }
@@ -996,7 +1015,7 @@ map.on("click", (e) => {
       .addTo(map).bindTooltip("Source");
     state.dstMarker = null;
     document.getElementById("src-display").textContent = `r=${r}, c=${c}`;
-    document.getElementById("dst-display").textContent = "— click again to set —";
+    document.getElementById("dst-display").textContent = "— click again —";
     document.getElementById("dst-display").classList.remove("set");
     status.textContent = "Source replaced. Click to set destination, or run.";
   }
@@ -1008,8 +1027,8 @@ document.getElementById("clear-points").addEventListener("click", () => {
   if (state.srcMarker) { state.srcMarker.remove(); state.srcMarker = null; }
   if (state.dstMarker) { state.dstMarker.remove(); state.dstMarker = null; }
   if (state.pathLine) { state.pathLine.remove(); state.pathLine = null; }
-  document.getElementById("src-display").textContent = "— click map to set —";
-  document.getElementById("dst-display").textContent = "— click again to set —";
+  document.getElementById("src-display").textContent = "— click map —";
+  document.getElementById("dst-display").textContent = "— optional —";
   document.getElementById("src-display").classList.remove("set");
   document.getElementById("dst-display").classList.remove("set");
   updateRunButtonState();
@@ -1131,6 +1150,10 @@ runBtn.addEventListener("click", async () => {
     status.innerHTML = '<span style="color:#ff6b6b">Density mode needs at least one reference point — click on the map or use "Place random".</span>';
     return;
   }
+  // Mobile: close the drawer so the user sees the result land on the map
+  // instead of staring at the parameter panel while the compute runs.
+  // No-op on desktop (drawer never opens above 860 px).
+  window.__simuDrawer?.close();
 
   const mode = document.getElementById("mode").value;
   const alpha = parseFloat(document.getElementById("alpha").value);
@@ -1927,13 +1950,84 @@ function applyColormapToLegend() {
 // ------- Bundle download / reload -------
 // `metadata.jsonld` captures everything needed to reproduce the run from the
 // same DEM: timestamps, engine, all compute parameters, source/destination
-// pixel coordinates, and the visualisation knobs. Output arrays are written
-// alongside as raw little-endian binaries (energy.bin, passes.bin) plus
-// GeoJSON line layers for routes/path. JSON-LD `@context` is inlined so
-// the file is self-describing without a network fetch.
+// pixel coordinates, and the visualisation knobs. Output rasters are written
+// as GeoTIFFs (energy.tif / passes.tif / network.tif) so they drop straight
+// into QGIS without needing the metadata to interpret them. Routes and the
+// path are GeoJSON. JSON-LD `@context` is inlined so the file is self-
+// describing without a network fetch.
 
+// ---- GeoTIFF helpers --------------------------------------------------------
+// We use geotiff.js's writer (bundled in the same script as the reader). The
+// metadata schema mirrors what readRasters expects on the way back, so the
+// round-trip is lossless. Float32 / Float64 / Uint8 cover all our outputs.
+
+function tiffMetadataForDem(dem, sampleKind) {
+  // sampleKind: "float32" (energy), "float64" (passes), or "uint8" (mask).
+  const { H, W, originX, originY, dx, dy, isGeographic, geoKeys } = dem;
+  const bps = sampleKind === "float64" ? 64 : sampleKind === "uint8" ? 8 : 32;
+  // SampleFormat: 1 = unsigned int, 2 = signed int, 3 = IEEE floating point.
+  const sf  = sampleKind === "uint8" ? 1 : 3;
+  const md = {
+    width:  W,
+    height: H,
+    BitsPerSample: [bps],
+    SampleFormat:  [sf],
+    SamplesPerPixel: [1],
+    // ModelTiepoint maps raster pixel (0,0,0) to world (originX, originY, 0).
+    // ModelPixelScale gives the per-pixel size; dy is positive in our DEM
+    // model (height per row going down) so we use it directly.
+    ModelTiepoint:    [0, 0, 0, originX, originY, 0],
+    ModelPixelScale:  [Math.abs(dx), Math.abs(dy), 0],
+  };
+  // Forward the source DEM's CRS info verbatim. If we don't have it (older
+  // load path) but we know the DEM is geographic, set EPSG:4326. The writer
+  // also defaults to 4326 if neither is set, so projected DEMs without
+  // captured GeoKeys would be misinterpreted — this is the failure mode to
+  // watch for.
+  if (geoKeys && Object.keys(geoKeys).length > 0) {
+    Object.assign(md, geoKeys);
+  } else if (isGeographic) {
+    md.GeographicTypeGeoKey = 4326;
+  }
+  return md;
+}
+
+function writeRasterAsGeoTIFF(values, dem, sampleKind) {
+  if (typeof GeoTIFF?.writeArrayBuffer !== "function") {
+    throw new Error("GeoTIFF writer unavailable — load the full geotiff.js bundle.");
+  }
+  return GeoTIFF.writeArrayBuffer(values, tiffMetadataForDem(dem, sampleKind));
+}
+
+// Read a GeoTIFF blob from a bundle and return the underlying typed array
+// in the requested element kind. We do a strict size check against the
+// loaded DEM dims so a v3 bundle restored against a wrong DEM fails loudly
+// (the buffer length mismatch surfaces the same way the .bin path does).
+async function readRasterFromGeoTIFF(arrayBuffer, expectedKind) {
+  const tiff = await GeoTIFF.fromArrayBuffer(arrayBuffer);
+  const image = await tiff.getImage();
+  const raster = await image.readRasters({ interleave: true });
+  // readRasters returns the typed-array kind that matches the file's
+  // BitsPerSample/SampleFormat. We coerce to the kind the caller wants.
+  if (expectedKind === "float32" && !(raster instanceof Float32Array)) {
+    return Float32Array.from(raster);
+  }
+  if (expectedKind === "float64" && !(raster instanceof Float64Array)) {
+    return Float64Array.from(raster);
+  }
+  if (expectedKind === "uint8" && !(raster instanceof Uint8Array)) {
+    return Uint8Array.from(raster);
+  }
+  return raster;
+}
+
+// Vocab IRI deliberately points at the actual deployed file rather than an
+// abstract namespace. Trade-off: bundles tie themselves to this serving URL,
+// but in exchange the @vocab term resolves to a real document instead of a
+// 404. If you ever move the deploy, set up a redirect from this URL or bump
+// schemaVersion + ship a migration that rewrites the context.
 const SIMU_CONTEXT = {
-  "@vocab": "https://pedalhidrografi.co/vocab/simujoules#",
+  "@vocab": "https://telhas.pedalhidrografi.co/simujoules/vocab/simujoules.jsonld#",
   "schema": "https://schema.org/",
   "geo": "http://www.opengis.net/ont/geosparql#",
   "qudt": "http://qudt.org/schema/qudt/",
@@ -2040,10 +2134,10 @@ function buildMetadata(result, withOutputs = true) {
     "@type":              "EnergyFieldComputation",
     "schema:dateCreated": new Date().toISOString(),
     timestamp:            new Date().toISOString(),
-    // Bumped because we added params/viz/network fields that older bundles
-    // don't carry. v1 bundles still load fine; missing fields fall through
-    // to their defaults in applyMetadataToUI.
-    schemaVersion:        2,
+    // schemaVersion 3: outputs are GeoTIFFs (energy.tif/passes.tif/network.tif)
+    // instead of raw .bin dumps, so the unzipped bundle drops directly into
+    // QGIS. v2 bundles with .bin still load — see loadBundleFile fallback.
+    schemaVersion:        3,
     engine:               state.engine || "js",
     enginePreference:     state.enginePreference || "js",
     elapsedMs:            result?.elapsedMs ?? null,
@@ -2072,32 +2166,36 @@ function buildMetadata(result, withOutputs = true) {
   };
 
   if (withOutputs && result) {
+    // Each raster output is a GeoTIFF — same CRS / extent / pixel grid as
+    // the source DEM, so QGIS can stack them on top without reprojection.
+    // The "type" hint encodes the pixel datatype so the loader knows which
+    // typed array to read into; "format" disambiguates from older v2 .bin.
     md.outputs = {
       energy: result.energy ? {
-        type: "Float32Array",
-        shape: [dem.H, dem.W],
-        file: "energy.bin",
-        byteOrder: "little-endian",
+        format: "GeoTIFF",
+        type:   "Float32",
+        shape:  [dem.H, dem.W],
+        file:   "energy.tif",
       } : null,
       passes: result.passes ? {
-        type: "Float64Array",
-        shape: [dem.H, dem.W],
-        file: "passes.bin",
-        byteOrder: "little-endian",
+        format: "GeoTIFF",
+        type:   "Float64",
+        shape:  [dem.H, dem.W],
+        file:   "passes.tif",
       } : null,
       network: state.networkMask ? {
-        type: "Uint8Array",
-        shape: [dem.H, dem.W],
-        file: "network.bin",
-        byteOrder: "n/a",
+        format: "GeoTIFF",
+        type:   "Uint8",
+        shape:  [dem.H, dem.W],
+        file:   "network.tif",
       } : null,
       routes: result.routes && result.routes.length ? {
-        type: "GeoJSON",
-        file: "routes.geojson",
+        format: "GeoJSON",
+        file:   "routes.geojson",
       } : null,
       path: result.path && result.path.length ? {
-        type: "GeoJSON",
-        file: "path.geojson",
+        format: "GeoJSON",
+        file:   "path.geojson",
       } : null,
     };
   }
@@ -2126,14 +2224,21 @@ async function downloadBundle() {
 
     const zip = new JSZip();
     zip.file("metadata.jsonld", JSON.stringify(md, null, 2));
-    // Use Uint8Array views so JSZip stores exactly the typed-array bytes
-    // regardless of byteOffset / shared underlying buffers.
-    if (r.energy) zip.file("energy.bin", new Uint8Array(r.energy.buffer, r.energy.byteOffset, r.energy.byteLength));
-    if (r.passes) zip.file("passes.bin", new Uint8Array(r.passes.buffer, r.passes.byteOffset, r.passes.byteLength));
-    // The rasterised network mask is captured here so a reload reproduces
-    // the same constrained compute even if the source .gpkg isn't handy.
-    // Stored raw (Uint8Array, H*W bytes); zip's deflate handles the redundancy.
-    if (state.networkMask) zip.file("network.bin", new Uint8Array(state.networkMask));
+    // Output rasters as GeoTIFFs — the unzipped bundle drops straight into
+    // QGIS / any GIS, no .bin-plus-metadata gymnastics. CRS and pixel grid
+    // are inherited from the source DEM via tiffMetadataForDem.
+    if (r.energy) {
+      zip.file("energy.tif",  new Uint8Array(writeRasterAsGeoTIFF(r.energy, dem, "float32")));
+    }
+    if (r.passes) {
+      zip.file("passes.tif",  new Uint8Array(writeRasterAsGeoTIFF(r.passes, dem, "float64")));
+    }
+    // The rasterised network mask reproduces the constrained compute even
+    // when the source .gpkg isn't handy at reload. Stored as a 1-byte-per-
+    // cell GeoTIFF (uint8) so QGIS can also display it as a raster mask.
+    if (state.networkMask) {
+      zip.file("network.tif", new Uint8Array(writeRasterAsGeoTIFF(state.networkMask, dem, "uint8")));
+    }
     if (r.routes && r.routes.length) {
       zip.file("routes.geojson", JSON.stringify(routesFCFromList(r.routes, dem), null, 2));
     }
@@ -2175,12 +2280,27 @@ async function loadBundleFile(file) {
       const mdEntry = zip.file("metadata.jsonld") || zip.file("metadata.json");
       if (!mdEntry) throw new Error("No metadata.jsonld inside the archive.");
       md = JSON.parse(await mdEntry.async("string"));
-      const eEntry = zip.file("energy.bin");
-      if (eEntry) bin.energy = new Float32Array(await eEntry.async("arraybuffer"));
-      const pEntry = zip.file("passes.bin");
-      if (pEntry) bin.passes = new Float64Array(await pEntry.async("arraybuffer"));
-      const nEntry = zip.file("network.bin");
-      if (nEntry) bin.network = new Uint8Array(await nEntry.async("arraybuffer"));
+      // v3 bundles use GeoTIFFs for the rasters; v2 used raw little-endian
+      // .bin dumps. Try .tif first, fall back to .bin so old bundles still
+      // load after this change.
+      const eTif = zip.file("energy.tif"),  eBin = zip.file("energy.bin");
+      if (eTif) {
+        bin.energy = await readRasterFromGeoTIFF(await eTif.async("arraybuffer"), "float32");
+      } else if (eBin) {
+        bin.energy = new Float32Array(await eBin.async("arraybuffer"));
+      }
+      const pTif = zip.file("passes.tif"),  pBin = zip.file("passes.bin");
+      if (pTif) {
+        bin.passes = await readRasterFromGeoTIFF(await pTif.async("arraybuffer"), "float64");
+      } else if (pBin) {
+        bin.passes = new Float64Array(await pBin.async("arraybuffer"));
+      }
+      const nTif = zip.file("network.tif"), nBin = zip.file("network.bin");
+      if (nTif) {
+        bin.network = await readRasterFromGeoTIFF(await nTif.async("arraybuffer"), "uint8");
+      } else if (nBin) {
+        bin.network = new Uint8Array(await nBin.async("arraybuffer"));
+      }
       // GeoJSON route/path geometry doesn't get re-rasterised — when no DEM
       // is loaded yet we couldn't draw it anyway. After the user loads a
       // matching DEM and clicks Compute, the routes are regenerated.
@@ -2275,6 +2395,12 @@ function applyMetadataToUI(md, bin = {}) {
   // Honour a wasm preference only when wasm is actually available — bundles
   // saved on a build-with-wasm machine shouldn't break the loader on a
   // build-without-wasm one.
+  //
+  // Caveat: state.wasmAvailable is set by an async probe that resolves a few
+  // ms after page load. Bundles loaded inside that window silently fall back
+  // to JS even when the bundle says "wasm". This is the safe failure mode —
+  // the run-time path also gates on wasmAvailable — but worth knowing if the
+  // engine tag isn't sticking.
   if (md.enginePreference === "wasm" && state.wasmAvailable) {
     state.enginePreference = "wasm";
   } else if (md.enginePreference === "js") {

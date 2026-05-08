@@ -6,7 +6,7 @@
     "schema":      "https://schema.org/",
     "qudt":        "http://qudt.org/schema/qudt/",
     "unit":        "http://qudt.org/vocab/unit/",
-    "simu":        "https://pedalhidrografi.co/vocab/simujoules#",
+    "simu":        "https://telhas.pedalhidrografi.co/simujoules/vocab/simujoules.jsonld#",
     "label":       "rdfs:label",
     "comment":     "rdfs:comment",
     "domain":      { "@id": "rdfs:domain",     "@type": "@id" },
@@ -20,8 +20,8 @@
     { "@id": "simu:",
       "@type": "owl:Ontology",
       "label": "Simujoules vocabulary",
-      "comment": "Terms describing an asymmetric-cost Dijkstra energy-field computation over a DEM, as produced by the Simulador bici-geo-energético web app. Each computation persists as a JSON-LD bundle with companion binary outputs (energy/passes rasters, network mask, route/path GeoJSON).",
-      "schema:version": "2",
+      "comment": "Terms describing an asymmetric-cost Dijkstra energy-field computation over a DEM, as produced by the Simulador bici-geo-energético web app. Each computation persists as a JSON-LD bundle with companion GeoTIFF rasters (energy / passes / network mask) plus GeoJSON route layers — the rasters are georeferenced with the same CRS and pixel grid as the source DEM, so they drop directly into QGIS.",
+      "schema:version": "3",
       "schema:license": "https://creativecommons.org/licenses/by/4.0/" },
 
     { "@id": "simu:EnergyFieldComputation",
@@ -58,7 +58,12 @@
     { "@id": "simu:BinaryRaster",
       "@type": "owl:Class",
       "label": "Binary raster",
-      "comment": "A typed-array dump of an H×W grid, stored little-endian alongside the metadata." },
+      "comment": "A typed-array dump of an H×W grid, stored little-endian alongside the metadata. Used by schemaVersion 2 bundles. Newer bundles use simu:GeoTIFFRaster instead." },
+
+    { "@id": "simu:GeoTIFFRaster",
+      "@type": "owl:Class",
+      "label": "GeoTIFF raster",
+      "comment": "A georeferenced GeoTIFF carrying one of the computation's output rasters. CRS / extent / pixel grid match the source DEM, so the file opens directly in QGIS or any other GIS without needing the metadata.jsonld to interpret it. Used by schemaVersion 3 bundles." },
 
 
     { "@id": "simu:schemaVersion",
@@ -411,12 +416,17 @@
       "comment": "Planimetric length of the destination path, in metres." },
 
 
+    { "@id": "simu:format",
+      "@type": "owl:DatatypeProperty",
+      "range":  "xsd:string",
+      "label": "output file format",
+      "comment": "Container format of the output file. 'GeoTIFF' for v3 raster outputs, 'GeoJSON' for line layers. v2 bundles omit this property and imply a raw typed-array .bin via simu:type." },
+
     { "@id": "simu:type",
       "@type": "owl:DatatypeProperty",
-      "domain": "simu:BinaryRaster",
       "range":  "xsd:string",
-      "label": "typed-array kind",
-      "comment": "Element type of the binary file: 'Float32Array', 'Float64Array', 'Uint8Array', or 'GeoJSON' for line layers." },
+      "label": "pixel datatype",
+      "comment": "Element type of the raster pixels: 'Float32', 'Float64', or 'Uint8'. Determines which typed array to read into on load. v2 bundles used the same field with array-suffixed names ('Float32Array' etc.)." },
 
     { "@id": "simu:shape",
       "@type": "owl:DatatypeProperty",
@@ -436,7 +446,7 @@
       "domain": "simu:BinaryRaster",
       "range":  "xsd:string",
       "label": "byte order",
-      "comment": "Endianness of the binary payload. Always 'little-endian' for typed arrays; 'n/a' for the network mask (single-byte cells) and GeoJSON files." }
+      "comment": "Endianness of the binary payload. Always 'little-endian' for typed arrays; 'n/a' for the network mask (single-byte cells) and GeoJSON files. Only present in v2 bundles — v3 GeoTIFFs encode endianness internally." }
 
   ]
 }

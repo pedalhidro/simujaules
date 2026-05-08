@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Simujoules PWA icon. Concentric energy isolines around a source point;
+  the rings are skewed south-east to evoke the asymmetric uphill cost
+  that the app computes. Palette mirrors the app CSS:
+  bg #0f1115, panel #1a1d23, accent #ff8c42, accent-2 #4cc9f0.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Rounded square background. Padded slightly so the design has
+       breathing room and clears Android's circular adaptive mask. -->
+  <rect width="512" height="512" rx="96" ry="96" fill="#0f1115"/>
+  <rect x="24" y="24" width="464" height="464" rx="80" ry="80" fill="#1a1d23"/>
+
+  <!-- Concentric "isolines" of energy. Each successive ring is offset
+       slightly south-east to suggest the asymmetric cost — climbing up
+       (top-left) tightens the spacing, descending (bottom-right) opens
+       it up. -->
+  <g fill="none" stroke="#4cc9f0" stroke-width="3" opacity="0.55">
+    <ellipse cx="220" cy="270" rx="40"  ry="36"  />
+    <ellipse cx="225" cy="272" rx="80"  ry="72"  />
+    <ellipse cx="232" cy="276" rx="124" ry="110" />
+    <ellipse cx="240" cy="282" rx="170" ry="150" />
+  </g>
+
+  <!-- A second pair of dimmer outer rings, even more skewed, for depth. -->
+  <g fill="none" stroke="#4cc9f0" stroke-width="2" opacity="0.25">
+    <ellipse cx="252" cy="290" rx="218" ry="190" />
+    <ellipse cx="266" cy="300" rx="262" ry="222" />
+  </g>
+
+  <!-- Source dot. Warm accent ring + dark core so it reads at small sizes. -->
+  <circle cx="220" cy="270" r="22" fill="#ff8c42"/>
+  <circle cx="220" cy="270" r="9"  fill="#0f1115"/>
+
+  <!-- "Direction of travel" tick — short bright stroke pointing
+       down-right, the easy-descent direction. Optional flourish but it
+       gives the icon a sense of motion at 192×192. -->
+  <path d="M 252 296 L 308 340"
+        stroke="#ff8c42" stroke-width="6" stroke-linecap="round" fill="none"/>
+  <path d="M 296 332 L 312 344 L 304 326"
+        stroke="#ff8c42" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

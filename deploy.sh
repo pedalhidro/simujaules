@@ -65,6 +65,24 @@ cp wasm/pkg/energy_wasm.js          "$STAGE/wasm/pkg/"
 cp wasm/pkg/energy_wasm_bg.wasm     "$STAGE/wasm/pkg/"
 # wasm-pack also writes a package.json + README we don't need to ship.
 
+# JSON-LD vocab document referenced by SIMU_CONTEXT["@vocab"] — bundles point
+# at this URL, so it has to be present at every deploy or @vocab 404s.
+mkdir -p "$STAGE/vocab"
+cp vocab/simujoules.jsonld "$STAGE/vocab/"
+
+# PWA assets: manifest, service worker, icons. The service worker has its
+# own scope and must live at the deploy root for `scope: './'` to cover
+# the whole app — don't move it into a subdirectory.
+cp manifest.webmanifest "$STAGE/"
+cp sw.js                "$STAGE/"
+mkdir -p "$STAGE/icons"
+cp icons/icon.svg               "$STAGE/icons/"
+cp icons/icon-192.png           "$STAGE/icons/"
+cp icons/icon-512.png           "$STAGE/icons/"
+cp icons/icon-maskable-192.png  "$STAGE/icons/"
+cp icons/icon-maskable-512.png  "$STAGE/icons/"
+cp icons/apple-touch-icon.png   "$STAGE/icons/"
+
 if ! command -v gsutil >/dev/null 2>&1; then
   echo "gsutil not on PATH. Install via the Google Cloud SDK." >&2
   exit 1
@@ -110,6 +128,42 @@ if [[ "$CHANGED" -eq 1 ]]; then
     "$BUCKET/energy-worker.js" \
     "$BUCKET/energy-worker-wasm.js" \
     "$BUCKET/wasm/pkg/energy_wasm.js"
+
+  # The vocab is consumed by RDF tools that content-negotiate; tag it as
+  # application/ld+json (gsutil otherwise infers application/json from the
+  # extension table). Long-lived cache because the vocab churns rarely.
+  gsutil setmeta \
+    -h "Content-Type: application/ld+json" \
+    -h "Cache-Control: public, max-age=86400" \
+    "$BUCKET/vocab/simujoules.jsonld"
+
+  # PWA manifest: dedicated MIME type (browsers tolerate application/json
+  # but the spec wants this one). Short cache because adding/removing icons
+  # should propagate quickly.
+  gsutil setmeta \
+    -h "Content-Type: application/manifest+json" \
+    -h "Cache-Control: public, max-age=3600" \
+    "$BUCKET/manifest.webmanifest"
+
+  # Service worker: must NOT be aggressively cached — browsers check this
+  # file on every navigation to detect updates. With long caching, deploys
+  # would take hours to propagate to existing installs. no-cache forces a
+  # revalidation each time (it's tiny).
+  gsutil setmeta \
+    -h "Content-Type: application/javascript" \
+    -h "Cache-Control: no-cache" \
+    "$BUCKET/sw.js"
+
+  # Icons: long cache, content-hashed by their path so we never overwrite
+  # in place (rename + bump in manifest if you ever redesign).
+  gsutil -m setmeta \
+    -h "Cache-Control: public, max-age=2592000" \
+    "$BUCKET/icons/icon.svg" \
+    "$BUCKET/icons/icon-192.png" \
+    "$BUCKET/icons/icon-512.png" \
+    "$BUCKET/icons/icon-maskable-192.png" \
+    "$BUCKET/icons/icon-maskable-512.png" \
+    "$BUCKET/icons/apple-touch-icon.png"
 
   gsutil setmeta \
     -h "Cache-Control: public, max-age=300" \
