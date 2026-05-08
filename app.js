@@ -98,7 +98,7 @@ const STRINGS = {
   "layer.tiles":         { pt: "rmsampa-v2 tiles", en: "rmsampa-v2 tiles" },
   "layer.tiles.hint":    { pt: '<a href="https://telhas.pedalhidrografi.co/rmsampa-v2/" target="_blank" rel="noopener" style="color: var(--accent-2);">Tiles XYZ</a> de pedalhidrografi.co.', en: '<a href="https://telhas.pedalhidrografi.co/rmsampa-v2/" target="_blank" rel="noopener" style="color: var(--accent-2);">XYZ tiles</a> from pedalhidrografi.co.' },
   "layer.relief":        { pt: "Relevo (DEM)", en: "Relief (DEM)" },
-  "layer.relief.hint":   { pt: "cmocean.phase, p5–p80 · declividade 0–p80, γ=1.2", en: "cmocean.phase, p5–p80 · slope 0–p80, γ=1.2" },
+  "layer.relief.hint":   { pt: "cmocean.phase, p5–p80 · declividade 0–p80 (γ=1.2) multiplicada", en: "cmocean.phase, p5–p80 · slope 0–p80 (γ=1.2) multiplied" },
   "layer.energy":        { pt: "Energia", en: "Energy" },
   "vmin.label":          { pt: "min (auto = p1)", en: "min (auto = p1)" },
   "vmax.label":          { pt: "max (auto = p80)", en: "max (auto = p80)" },
@@ -2075,16 +2075,18 @@ function renderFieldToDataURL(field, W, H, opts) {
 // DEM relief layer (elevation + slope hillshade)
 // ============================================================================
 // Visualises the loaded DEM as cmocean.phase-coloured elevation with a
-// black-to-white slope superimposed on top. Both layers share one rendered
+// white-to-black slope multiplied on top. Both layers share one rendered
 // PNG (single Leaflet imageOverlay, single visibility/opacity control) so
-// flat terrain reads as pure colour and steep terrain washes toward white,
-// giving a hillshade-ish feel without computing aspect.
+// flat terrain reads as the pure elevation colour and steep terrain
+// darkens — the classic hillshade aesthetic where cliffs and ridges read
+// as shadow.
 //
 // Spec (fixed, no UI knobs for now):
 //   elevation range  : p5 → p80 percentile of valid heights
 //   slope range      : 0   → p80 percentile of |∇h| (m/m)
 //   slope gamma      : 1.2 (out = pow(slope_norm, 1/1.2))
-//   composite        : alpha-blend  out = elev*(1-s) + 255*s
+//   slope colour ramp: white → black   (slope=0 → 1.0, slope=p80 → 0.0)
+//   composite        : multiply         out_rgb = elev_rgb · slopeFactor
 //   colormap         : cmo_phase (cyclic, perceptually uniform)
 
 // Central-difference slope magnitude in m/m. Edge cells use replicated
@@ -2181,14 +2183,15 @@ function renderReliefToDataURL(dem, slope) {
       er = a[0]; eg = a[1]; eb = a[2];
     }
 
-    // -- Slope as gamma-corrected white overlay alpha
+    // -- Slope as gamma-corrected white→black multiplier.
+    //    slope=0   → factor 1.0 (multiplying by white leaves elev alone)
+    //    slope=p80 → factor 0.0 (multiplying by black collapses to black)
     const sNorm = Math.min(1, slope[i] / slopeMax);
     const sGamma = Math.pow(sNorm, invGamma);
-    const inv = 1 - sGamma;
-    const whiteContrib = sGamma * 255;
-    data[j]     = Math.round(er * inv + whiteContrib);
-    data[j + 1] = Math.round(eg * inv + whiteContrib);
-    data[j + 2] = Math.round(eb * inv + whiteContrib);
+    const slopeFactor = 1 - sGamma;
+    data[j]     = Math.round(er * slopeFactor);
+    data[j + 1] = Math.round(eg * slopeFactor);
+    data[j + 2] = Math.round(eb * slopeFactor);
     data[j + 3] = 255;
   }
 
