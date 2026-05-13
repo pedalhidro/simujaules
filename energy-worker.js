@@ -91,6 +91,12 @@ function dijkstra(opts) {
     reverse, trackParents,
     wantPasses,
     eMax = 0,                  // 0 = no budget; >0 = stop expanding past this
+    // Reverse-optimisation: when true, every edge cost is replaced with
+    // (maxEdgeCost − cost) before relaxation. Dijkstra then finds the
+    // "least inverted-cost" path, which is the same as "most original-
+    // cost" path among same-length paths.
+    maximize = false,
+    maxEdgeCost = 0,
     // Per-cell progress messages get scaled into the range
     // [progressBase, progressBase + progressScale]. Default = full range,
     // i.e. one Dijkstra spans the whole bar. The density loop overrides
@@ -177,6 +183,12 @@ function dijkstra(opts) {
         if (edge < 0) edge = 0;
       }
 
+      // Reverse the optimisation by inverting against the global cap.
+      if (maximize) {
+        edge = maxEdgeCost - edge;
+        if (edge < 0) edge = 0; // belt-and-suspenders guard
+      }
+
       const tentative = g + edge;
       // Energy budget: skip cells beyond the allowance. Settled-but-out-of-
       // budget cells just stay at E=Infinity (treated as "unreachable" by
@@ -227,6 +239,8 @@ function astar(opts) {
     repulsionMode = "per-cell",   // "per-cell" | "linear" | "square"
     distUsed = null,               // Float32Array of distance-to-nearest-used
     eMax = 0,                      // 0 = no budget; >0 abandon past this
+    maximize = false,              // invert edge cost against maxEdgeCost
+    maxEdgeCost = 0,
   } = opts;
   const N = H * W;
   const diag = Math.hypot(dx, dy);
@@ -251,7 +265,11 @@ function astar(opts) {
   const settled = new Uint8Array(N);
 
   const hGoal = height[goalIdx];
-  const heuristic = (idx) => {
+  // In maximize mode we don't have a useful admissible heuristic for the
+  // inverted cost (it would be an upper bound on the remaining path,
+  // which depends on path length). Falling back to h=0 makes A* behave
+  // as Dijkstra — slower, but correctness is preserved.
+  const heuristic = maximize ? (() => 0) : (idx) => {
     const r = (idx / W) | 0;
     const c = idx - r * W;
     const dr = (r - goalR) * dy;
@@ -296,6 +314,15 @@ function astar(opts) {
       if (dh >= 0) edge = alpha * dist + beta * dh;
       else {
         edge = alpha * dist - eta * beta * (-dh);
+        if (edge < 0) edge = 0;
+      }
+
+      // Reverse-optimisation: invert the base cost before the repulsion
+      // penalty is layered on. The penalty itself still ADDS to the
+      // (already inverted) cost — that keeps repulsion behaving as
+      // "avoid already-used cells" in both directions of optimisation.
+      if (maximize) {
+        edge = maxEdgeCost - edge;
         if (edge < 0) edge = 0;
       }
 
@@ -512,6 +539,181 @@ function reconstructPath(parents, goalIdx) {
   return path;
 }
 
+// ------- Length-constrained max-cost path (layered DP) -------
+// Finds the path from src to dst of exactly L edges that maximises the
+// sum of original edge costs, by running a Bellman-Ford-style relaxation
+// L times over the grid. Each iteration t computes dist[t][v] = max-cost
+// path of exactly t edges from src to v. Memory dominates: we keep one
+// Uint8Array per (t, v) for path reconstruction → ≈ L · H · W bytes.
+//
+// Caveats:
+//   - "Path of length L" is in edge count, not metres. Diagonal moves
+//     cover dx·√2 per edge.
+//   - The graph isn't a DAG (8-neighbour grid has cycles). Layered DP
+//     treats each (cell, t) pair as a separate DAG node, which means the
+//     resulting path *can* revisit cells across different t. In practice
+//     for short L and asymmetric costs this is rare, but we don't add
+//     a no-backtrack constraint — that would multiply the state by 8.
+//   - Memory cap below refuses runs above ~256 MB of parent storage.
+//     Large DEMs limit usable L to a few dozen; the only safe escape is
+//     to crop the DEM (FABDEM-viewport loader is the easiest way).
+
+const MAX_DP_PARENT_BYTES = 256 * 1024 * 1024;
+
+function maxCostPathOfLength(opts) {
+  const {
+    height, mask, H, W,
+    startR, startC, goalR, goalC,
+    alpha, beta, eta, dx, dy,
+    L,
+    progressBase = 0,
+    progressScale = 1,
+  } = opts;
+  const N = H * W;
+
+  // Memory cap. Parent storage is the dominant allocation; the two
+  // dist arrays are 8 N bytes regardless of L.
+  if (L <= 0 || L > 5000) {
+    return { path: null, energy: -Infinity, length: 0, error: "bad_L" };
+  }
+  if (N * L > MAX_DP_PARENT_BYTES) {
+    return {
+      path: null, energy: -Infinity, length: 0,
+      error: `memory_cap (L·N = ${(N * L / 1024 / 1024).toFixed(0)} MB > ${MAX_DP_PARENT_BYTES / 1024 / 1024} MB)`,
+    };
+  }
+
+  const drs = [-1, -1, -1, 0, 0, 1, 1, 1];
+  const dcs = [-1, 0, 1, -1, 1, -1, 0, 1];
+  const diag = Math.hypot(dx, dy);
+  const dists = [diag, dy, diag, dx, dx, diag, dy, diag];
+
+  const start = startR * W + startC;
+  const goal  = goalR  * W + goalC;
+  if (start < 0 || start >= N || goal < 0 || goal >= N) {
+    return { path: null, energy: -Infinity, length: 0, error: "oob" };
+  }
+
+  // Two alternating dist arrays. prev[v] holds dist[t-1][v]; we write
+  // dist[t][v] into curr[v], then swap.
+  let prev = new Float32Array(N);
+  let curr = new Float32Array(N);
+  prev.fill(-Infinity);
+  prev[start] = 0;
+
+  // parentDir[(t-1)·N + v] = direction (0..7) of the neighbour we came
+  // from when reaching v at step t. 255 = no path found yet to (t, v).
+  // Stored as a flat Uint8Array because Int32 would 4× the memory and we
+  // only need 3 bits.
+  const parentDir = new Uint8Array(N * L).fill(255);
+
+  for (let t = 1; t <= L; t++) {
+    curr.fill(-Infinity);
+    for (let r = 0; r < H; r++) {
+      const rowBase = r * W;
+      for (let c = 0; c < W; c++) {
+        const v = rowBase + c;
+        if (!mask[v]) continue;
+        const hv = height[v];
+
+        let bestVal = -Infinity;
+        let bestDir = 255;
+        for (let k = 0; k < 8; k++) {
+          const nr = r + drs[k];
+          const nc = c + dcs[k];
+          if (nr < 0 || nr >= H || nc < 0 || nc >= W) continue;
+          const n = nr * W + nc;
+          if (!mask[n]) continue;
+          const pVal = prev[n];
+          if (!Number.isFinite(pVal)) continue;
+
+          // Same cost model as Dijkstra/A*: asymmetric uphill/downhill.
+          const dh = hv - height[n];
+          const dist = dists[k];
+          let edge;
+          if (dh >= 0) edge = alpha * dist + beta * dh;
+          else {
+            edge = alpha * dist - eta * beta * (-dh);
+            if (edge < 0) edge = 0;
+          }
+          const cand = pVal + edge;
+          if (cand > bestVal) {
+            bestVal = cand;
+            bestDir = k;
+          }
+        }
+        curr[v] = bestVal;
+        if (bestDir !== 255) {
+          parentDir[(t - 1) * N + v] = bestDir;
+        }
+      }
+    }
+
+    // Swap prev/curr.
+    const tmp = prev; prev = curr; curr = tmp;
+
+    // Coarse progress per layer.
+    if (t === L || t % Math.max(1, Math.floor(L / 25)) === 0) {
+      postMessage({ kind: "progress", progress: progressBase + progressScale * (t / L) });
+    }
+  }
+
+  // After the loop, prev[v] = dist[L][v]. Bail if the goal wasn't reached
+  // in exactly L edges.
+  if (!Number.isFinite(prev[goal])) {
+    return {
+      path: null, energy: -Infinity, length: 0,
+      error: "unreachable",
+      energyField: prev,
+    };
+  }
+
+  // Reconstruct by walking parentDir backwards from (L, goal).
+  //
+  // The relaxation loop stores `bestDir = k`, where neighbour n is at
+  // offset (drs[k], dcs[k]) from v — i.e. n IS the predecessor at step
+  // t-1. So to move from v back to its predecessor we ADD the offset,
+  // not subtract it. The previous code did `r - drs[dir]`, which sent
+  // the walk in the opposite direction and eventually landed on a cell
+  // with parentDir=255 (because that wrong-direction cell wasn't on the
+  // actual max-cost chain), producing the spurious "backtrack_fail".
+  const path = new Array(L + 1);
+  path[L] = goal;
+  let v = goal;
+  for (let t = L; t >= 1; t--) {
+    const dir = parentDir[(t - 1) * N + v];
+    if (dir === 255) {
+      return {
+        path: null, energy: -Infinity, length: 0,
+        error: "backtrack_fail",
+        energyField: prev,
+      };
+    }
+    const r = (v / W) | 0;
+    const c = v - r * W;
+    const nr = r + drs[dir];
+    const nc = c + dcs[dir];
+    v = nr * W + nc;
+    path[t - 1] = v;
+  }
+
+  // Geometric length in metres.
+  let pathLen = 0;
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1], b = path[i];
+    const ar = (a / W) | 0, ac = a - ar * W;
+    const br = (b / W) | 0, bc = b - br * W;
+    pathLen += Math.hypot((br - ar) * dy, (bc - ac) * dx);
+  }
+
+  return {
+    path,
+    energy: prev[goal],
+    length: pathLen,
+    energyField: prev, // dist[L][v] for every cell — use as the field overlay
+  };
+}
+
 // ------- Worker message handler -------
 self.onmessage = (ev) => {
   const msg = ev.data;
@@ -537,11 +739,38 @@ self.onmessage = (ev) => {
     wantNetworkInterp = false,                            // fill non-network cells via IDW from network seeds
     interpMaxDistance = 50,                               // ray search cap, in cells
     interpSmoothing = 0,                                  // number of 3×3 smoothing passes
+    maximize = false,                                     // reverse the optimisation: prefer expensive edges
+    maximizeLength = 0,                                   // >0 → layered-DP max-cost path of exactly L edges
   } = msg;
 
   const wantPath = goalR >= 0 && goalC >= 0;
   const goalIdx = wantPath ? goalR * W + goalC : -1;
   const N = H * W;
+
+  // For maximize mode we replace each edge cost with (MAX_EDGE_COST − cost)
+  // before running Dijkstra. The output is still non-negative (Dijkstra
+  // works) and minimising the inverted sum is approximately maximising
+  // the original sum — biased toward shorter paths in the inverted space,
+  // which here means paths with the highest per-edge original cost. We
+  // bound MAX_EDGE_COST upfront from the global height range and the
+  // diagonal step so the inversion is safe for every neighbour pair.
+  let maxEdgeCost = 0;
+  if (maximize) {
+    let minH = Infinity, maxH = -Infinity;
+    for (let i = 0; i < N; i++) {
+      if (mask[i]) {
+        const h = height[i];
+        if (h < minH) minH = h;
+        if (h > maxH) maxH = h;
+      }
+    }
+    const dh = Number.isFinite(minH) && Number.isFinite(maxH) ? (maxH - minH) : 0;
+    const diag = Math.hypot(dx, dy);
+    // 1.001 buffer so even the absolute worst-case original edge cost
+    // can't push the inverted value to zero (which would make the cell
+    // free and degenerate the search).
+    maxEdgeCost = (alpha * diag + beta * Math.max(dh, 1e-6)) * 1.001;
+  }
 
   // When a network mask is supplied, Dijkstra runs on the AND of the DEM
   // mask and the network mask. We keep `mask` (the full DEM mask) around
@@ -604,6 +833,7 @@ self.onmessage = (ev) => {
             alpha, beta, eta, dx, dy,
             reverse: false, trackParents: false,
             wantPasses: true, eMax,
+            maximize, maxEdgeCost,
             progressBase: base, progressScale: slice * 0.5,
           });
           const b = dijkstra({
@@ -612,6 +842,7 @@ self.onmessage = (ev) => {
             alpha, beta, eta, dx, dy,
             reverse: true, trackParents: false,
             wantPasses: true, eMax,
+            maximize, maxEdgeCost,
             progressBase: base + slice * 0.5, progressScale: slice * 0.5,
           });
           perRefPasses = new Float64Array(N);
@@ -628,6 +859,7 @@ self.onmessage = (ev) => {
             alpha, beta, eta, dx, dy,
             reverse: dmode === "to", trackParents: false,
             wantPasses: true, eMax,
+            maximize, maxEdgeCost,
             progressBase: base, progressScale: slice,
           });
           perRefPasses = r.passes;
@@ -666,6 +898,7 @@ self.onmessage = (ev) => {
         alpha, beta, eta, dx, dy,
         reverse: false, trackParents: wantPath,
         wantPasses, eMax,
+        maximize, maxEdgeCost,
       });
       energy = r.E;
       passes = r.passes;
@@ -680,6 +913,7 @@ self.onmessage = (ev) => {
         alpha, beta, eta, dx, dy,
         reverse: true, trackParents: wantPath,
         wantPasses, eMax,
+        maximize, maxEdgeCost,
       });
       energy = r.E;
       passes = r.passes;
@@ -695,6 +929,7 @@ self.onmessage = (ev) => {
         alpha, beta, eta, dx, dy,
         reverse: false, trackParents: wantPath,
         wantPasses, eMax,
+        maximize, maxEdgeCost,
       });
       const b = dijkstra({
         height, mask: effMask, H, W,
@@ -702,6 +937,7 @@ self.onmessage = (ev) => {
         alpha, beta, eta, dx, dy,
         reverse: true, trackParents: false,
         wantPasses, eMax,
+        maximize, maxEdgeCost,
       });
       energy = new Float32Array(N);
       for (let i = 0; i < N; i++) {
@@ -751,6 +987,7 @@ self.onmessage = (ev) => {
           penalty: pen, usedCount,
           repulsionMode, distUsed,
           eMax,
+          maximize, maxEdgeCost,
         });
         if (!res.path) break;
         let shared = 0;
@@ -774,6 +1011,48 @@ self.onmessage = (ev) => {
 
     // Path length for the single non-top-N output
     if (path) pathLengthCells = pathLength(path);
+
+    // Length-constrained max-cost path (layered DP). Overrides the path
+    // + energy field produced by the inverted Dijkstra above. We still
+    // ran that first so the user sees *something* if the DP refuses
+    // (out-of-memory cap, no L-edge path to the goal, …); the dispatch
+    // here clobbers those only on success. The routes array from top-N
+    // is also dropped — "L-constrained top-N" isn't a thing in this
+    // implementation, the path you get is the single optimum.
+    if (maximize && maximizeLength > 0 && wantPath) {
+      const dp = maxCostPathOfLength({
+        height, mask: effMask, H, W,
+        startR: seedR, startC: seedC,
+        goalR, goalC,
+        alpha, beta, eta, dx, dy,
+        L: maximizeLength,
+      });
+      // Always log the DP outcome to the console so it's clear whether the
+      // length constraint actually kicked in.
+      console.info(
+        "[maximize/dp]",
+        dp.error
+          ? `failed: ${dp.error}`
+          : `L=${maximizeLength}, energy=${dp.energy.toFixed(2)}, length=${dp.length.toFixed(0)} m`,
+      );
+      if (dp.error) {
+        // Surface the failure to the UI; main thread routes 'warning'
+        // through the status bar. Keep the inverted-Dijkstra outputs
+        // so the user still sees the field.
+        postMessage({
+          kind: "warning",
+          message: `Length-constrained DP did not run (${dp.error}). ` +
+                   `Showing the inverted-Dijkstra path instead — try a larger L ` +
+                   `(at minimum ~Chebyshev distance between src and dst).`,
+        });
+      } else if (dp.path) {
+        path = dp.path;
+        pathEnergy = dp.energy;
+        pathLengthCells = dp.length;
+        if (dp.energyField) energy = dp.energyField;
+        routes = null; // top-N is meaningless under a length constraint
+      }
+    }
 
     // Optional: GDAL-style IDW fill of non-network cells. 8-ray search to
     // network seeds capped at interpMaxDistance, 1/d² weighting, then up

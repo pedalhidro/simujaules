@@ -1,15 +1,10 @@
 #!/usr/bin/env bash
-# Build the wasm bundle and deploy the static site to
-# gs://pedal-hidrografico/telhas/simujoules.
+# Deploy the static site to gs://pedal-hidrografico/telhas/simujoules.
 #
-# Requires: rust toolchain + wasm-pack (for the wasm build), and
-# gsutil (or `gcloud storage`) authenticated against a project that
-# has write access to the pedal-hidrografico bucket.
+# Requires: gsutil (or `gcloud storage`) authenticated against a project
+# that has write access to the pedal-hidrografico bucket.
 #
-# Usage: ./deploy.sh [--skip-wasm]
-#   --skip-wasm   skip the `wasm-pack build` step (useful when you
-#                 only changed HTML/JS and the existing wasm/pkg/
-#                 is still good).
+# Usage: ./deploy.sh
 
 set -euo pipefail
 
@@ -27,43 +22,20 @@ INVALIDATE_PATH="/simujoules/*"
 
 cd "$(dirname "$0")"
 
-SKIP_WASM=0
-for arg in "$@"; do
-  case "$arg" in
-    --skip-wasm) SKIP_WASM=1 ;;
-    *) echo "unknown flag: $arg" >&2; exit 2 ;;
-  esac
-done
-
-# 1. Build the wasm bundle (writes wasm/pkg/{energy_wasm.js, energy_wasm_bg.wasm}).
-if [[ "$SKIP_WASM" -eq 0 ]]; then
-  echo ">> Building wasm bundle…"
-  if ! command -v wasm-pack >/dev/null 2>&1; then
-    echo "wasm-pack not on PATH. Install with: cargo install wasm-pack" >&2
-    exit 1
-  fi
-  (cd wasm && wasm-pack build --target web --release --no-typescript --out-dir pkg)
-else
-  echo ">> Skipping wasm build."
-  if [[ ! -f wasm/pkg/energy_wasm.js ]] || [[ ! -f wasm/pkg/energy_wasm_bg.wasm ]]; then
-    echo "wasm/pkg/ is empty — drop --skip-wasm and re-run." >&2
-    exit 1
-  fi
+if [[ $# -gt 0 ]]; then
+  echo "deploy.sh takes no arguments; got: $*" >&2
+  exit 2
 fi
 
-# 2. Stage the deploy. Keeps source-only files (Rust crate, QGIS plugins,
+# 1. Stage the deploy. Keeps source-only files (QGIS plugins,
 #    test harnesses, this script) out of the public bucket.
 echo ">> Staging files…"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
-cp index.html app.js energy-worker.js energy-worker-wasm.js "$STAGE/"
+cp index.html app.js energy-worker.js "$STAGE/"
 mkdir -p "$STAGE/dem"
 cp -r dem/ "$STAGE/dem"
-mkdir -p "$STAGE/wasm/pkg"
-cp wasm/pkg/energy_wasm.js          "$STAGE/wasm/pkg/"
-cp wasm/pkg/energy_wasm_bg.wasm     "$STAGE/wasm/pkg/"
-# wasm-pack also writes a package.json + README we don't need to ship.
 
 # JSON-LD vocab document referenced by SIMU_CONTEXT["@vocab"] — bundles point
 # at this URL, so it has to be present at every deploy or @vocab 404s.
@@ -111,23 +83,15 @@ if grep -qE '^(Copying|Removing) ' "$RSYNC_LOG"; then
   CHANGED=1
 fi
 
-# 4. Set headers. .wasm needs the right Content-Type or browsers refuse
-#    to compile it; HTML gets a short cache so deploys propagate quickly,
-#    everything else gets an hour. Skip when nothing changed — the headers
-#    persist from the previous deploy.
+# 4. Set headers. HTML gets a short cache so deploys propagate quickly,
+#    JS gets an hour. Skip when nothing changed — the headers persist
+#    from the previous deploy.
 if [[ "$CHANGED" -eq 1 ]]; then
   echo ">> Setting headers…"
   gsutil -m setmeta \
-    -h "Content-Type: application/wasm" \
-    -h "Cache-Control: public, max-age=3600" \
-    "$BUCKET/wasm/pkg/energy_wasm_bg.wasm"
-
-  gsutil -m setmeta \
     -h "Cache-Control: public, max-age=3600" \
     "$BUCKET/app.js" \
-    "$BUCKET/energy-worker.js" \
-    "$BUCKET/energy-worker-wasm.js" \
-    "$BUCKET/wasm/pkg/energy_wasm.js"
+    "$BUCKET/energy-worker.js"
 
   # The vocab is consumed by RDF tools that content-negotiate; tag it as
   # application/ld+json (gsutil otherwise infers application/json from the

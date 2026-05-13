@@ -22,8 +22,15 @@ const STRINGS = {
   // ---- Header / chrome --------------------------------------------------
   "title":               { pt: "Simulador bici-geo-energético",       en: "Bicycling Energy Field Simulator" },
   "lang.toggle.title":   { pt: "Idioma — clique para alternar PT/EN", en: "Language — click to switch PT/EN" },
-  "engine.toggle.title": { pt: "Motor de cálculo — clique para alternar JS / wasm", en: "Compute engine — click to toggle JS / wasm" },
-  "engine.no_wasm.title":{ pt: "Wasm não compilado — só JS. Rode wasm/build.sh e recarregue.", en: "Wasm not built — JS only. Run wasm/build.sh and reload." },
+  // (engine.* strings removed along with the engine-tag pill.)
+  "locate.title":        { pt: "Centralizar na minha localização",     en: "Center on my location" },
+  "locate.requesting":   { pt: "Buscando localização…",                 en: "Locating…" },
+  "locate.centered":     { pt: "Centralizado em {0}, {1}.",             en: "Centred at {0}, {1}." },
+  "locate.denied":       { pt: "Acesso à localização negado.",          en: "Location access denied." },
+  "locate.unavailable":  { pt: "Localização indisponível.",             en: "Location unavailable." },
+  "locate.timeout":      { pt: "Tempo esgotado ao buscar localização.", en: "Location lookup timed out." },
+  "locate.error":        { pt: "Erro ao buscar localização.",           en: "Location lookup failed." },
+  "locate.unsupported":  { pt: "Geolocalização não suportada.",         en: "Geolocation not supported." },
   "help.title":          { pt: "Como funciona", en: "How it works" },
 
   // ---- Group: Load DEM --------------------------------------------------
@@ -71,6 +78,9 @@ const STRINGS = {
   "param.want_passes":   { pt: "Calcular contagem de passagens", en: "Compute passes count (route density)" },
   "param.want_topn":     { pt: "Calcular top-N rotas", en: "Compute top-N routes" },
   "param.want_density":  { pt: "Calcular densidade multi-referência", en: "Compute multi-reference density" },
+  "param.maximize":      { pt: "Maximizar energia (inverter otimização)", en: "Maximize energy (reverse optimization)" },
+  "param.max_length":    { pt: "Comprimento L (arestas, 0 = sem restrição)", en: "Path length L (edges, 0 = unconstrained)" },
+  "param.max_length.hint": { pt: "0: Dijkstra invertido (geometricamente curto, custo denso). L>0: DP em camadas encontra o caminho de custo máximo com exatamente L arestas entre src e dst. Limite de memória ≈ 256 MB ⇒ L·H·W precisa caber; DEMs grandes limitam L a poucas dezenas.", en: "0: inverted Dijkstra (geometrically short, cost-dense). L>0: layered DP finds the max-cost path of exactly L edges from src to dst. Memory cap ≈ 256 MB ⇒ L·H·W must fit; large DEMs limit L to a few dozen." },
   "param.n_refs":        { pt: "N referências", en: "N references" },
   "param.ref_source":    { pt: "Origem das referências", en: "Reference source" },
   "ref.click":           { pt: "clicar no mapa", en: "click on map" },
@@ -157,11 +167,17 @@ const STRINGS = {
   "help.p.interp":       { pt: "Visualização opcional: preenche células fora da rede com a média dos valores da rede em redor, usando o mesmo algoritmo do GDAL <code>fillnodata</code>. Para cada célula vazia, busca em 8 direções até achar uma célula de rede dentro de <strong>distância máx</strong> (em células); calcula a média ponderada por <code>1/d²</code> dos acertos. Em seguida, aplica <strong>suavizações</strong> passes de média 3×3 sobre o preenchimento — preservando os valores originais da rede.", en: 'Optional visualisation: fills off-network cells with a weighted mean of nearby on-network values, using the same algorithm as GDAL <code>fillnodata</code>. For each empty cell, scan 8 directions for a network cell within <strong>max distance</strong> (cells); compute a <code>1/d²</code>-weighted mean of the hits. Then apply <strong>smoothing iters</strong> 3×3 mean passes over the fill, preserving the original network values.' },
   "help.p.interp_only":  { pt: "Apenas para visualização; a análise (Dijkstra, top-N, densidade) continua estritamente sobre a rede.", en: 'For visualisation only; the analysis (Dijkstra, top-N, density) stays strictly on the network.' },
   "help.h.impl":         { pt: "Implementação", en: "Implementation" },
-  "help.p.impl":         { pt: "Dois engines: JS (Dijkstra com heap binário sobre <code>Float64Array</code>) e Wasm (Rust compilado, mesmo algoritmo, ~3–5× mais rápido). O Wasm cobre só o caminho energy-only; passes / top-N / densidade / orçamento ainda rodam no JS.", en: 'Two engines: JS (Dijkstra on a binary heap over <code>Float64Array</code>) and Wasm (compiled Rust, same algorithm, ~3–5× faster). Wasm covers only the energy-only fast path; passes / top-N / density / budget still run on JS.' },
+  "help.p.impl":         { pt: "JS puro, em Web Worker: Dijkstra 8-conectada com heap binária sobre arrays tipados (<code>Float64Array</code> de prioridades + <code>Int32Array</code> de payloads). Tudo o que precisa de Δh assimétrico, passes count, top-N e densidade roda no mesmo motor.", en: 'Pure JS in a Web Worker: 8-connected Dijkstra on a binary heap over typed arrays (<code>Float64Array</code> for priorities + <code>Int32Array</code> for payloads). Everything — asymmetric Δh, passes count, top-N, density — runs on the same engine.' },
 };
 
-let currentLang = (typeof localStorage !== "undefined" && localStorage.getItem("simu-lang")) || "pt";
-if (currentLang !== "pt" && currentLang !== "en") currentLang = "pt";
+// localStorage access can throw in iOS Safari Private Browsing — feature
+// detection via `typeof` isn't enough, since the object exists but the
+// getter throws SecurityError.
+let currentLang = "pt";
+try {
+  const saved = localStorage.getItem("simu-lang");
+  if (saved === "pt" || saved === "en") currentLang = saved;
+} catch {}
 
 function t(key, ...args) {
   const entry = STRINGS[key];
@@ -190,11 +206,6 @@ function applyTranslations() {
   if (pill) pill.textContent = currentLang === "pt" ? "EN" : "PT";
   // Update <title> on the document so the OS / tab bar reflects the choice.
   document.title = t("title");
-  // Engine-tag tooltip depends on whether wasm is available — refresh both.
-  const eng = document.getElementById("engine-tag");
-  if (eng) {
-    eng.title = t(eng.disabled ? "engine.no_wasm.title" : "engine.toggle.title");
-  }
 }
 
 function setLang(lang) {
@@ -204,52 +215,13 @@ function setLang(lang) {
   applyTranslations();
 }
 
-// ------- Wasm engine probe -------
-// At startup we try to construct the wasm worker once. If it sends back
-// `ready`, every Compute will use the wasm worker. If it fails (browser
-// doesn't support module workers, wasm/pkg/ wasn't built, etc.) we fall
-// back to the JS worker. Probe result is cached for the session.
-const WASM_WORKER_URL = "./energy-worker-wasm.js";
-const JS_WORKER_URL = "./energy-worker.js";
-const wasmAvailable = probeWasmEngine();
-
-function probeWasmEngine() {
-  return new Promise((resolve) => {
-    let w;
-    try {
-      w = new Worker(WASM_WORKER_URL, { type: "module" });
-    } catch (e) {
-      console.info("[engine] wasm worker unavailable (constructor):", e?.message ?? e);
-      resolve(false);
-      return;
-    }
-    const timeout = setTimeout(() => {
-      console.info("[engine] wasm probe timed out — falling back to JS");
-      try { w.terminate(); } catch {}
-      resolve(false);
-    }, 4000);
-    w.onmessage = (ev) => {
-      const m = ev.data || {};
-      if (m.kind === "ready") {
-        clearTimeout(timeout);
-        try { w.terminate(); } catch {}
-        console.info("[engine] wasm worker ready");
-        resolve(true);
-      } else if (m.kind === "wasm_failed") {
-        clearTimeout(timeout);
-        try { w.terminate(); } catch {}
-        console.info("[engine] wasm load failed:", m.reason);
-        resolve(false);
-      }
-    };
-    w.onerror = (e) => {
-      clearTimeout(timeout);
-      try { w.terminate(); } catch {}
-      console.info("[engine] wasm worker errored during probe:", e?.message ?? e);
-      resolve(false);
-    };
-  });
-}
+// ------- Compute worker -------
+// Single JS worker for all compute paths. Wasm support was removed: it
+// covered only the energy-only fast path (passes/top-N/density/budget
+// all fell back to JS anyway) and the Rust toolchain was a maintenance
+// tax for a 3–5× win on one mode. One engine is easier to reason about,
+// easier to deploy, and the heap is comparable for typical DEMs.
+const WORKER_URL = "./energy-worker.js";
 
 // ------- Map setup -------
 // "Refresh style" dirty bookkeeping.
@@ -293,30 +265,8 @@ function clearStyleDirty() {
   }
 }
 
-// Engine selection.
-//  - state.enginePreference: user's choice ("js" or "wasm"). Initialised
-//    in the state object below; defaults to "js" even when wasm is
-//    available since wasm is energy-only. The button toggles it.
-//  - state.engine: which engine the LAST compute actually ran on. Set by
-//    the run handler after deciding wasm vs JS based on preference + the
-//    feature toggles (passes/topN/density/budget force JS).
-wasmAvailable.then((ok) => {
-  state.wasmAvailable = ok;
-  const el = document.getElementById("engine-tag");
-  if (!el) return;
-  el.textContent = state.enginePreference;
-  el.disabled = !ok;
-  // Tooltip text comes from the i18n table so it tracks the language toggle.
-  // applyTranslations() also re-reads .disabled to pick the right key.
-  el.title = t(ok ? "engine.toggle.title" : "engine.no_wasm.title");
-  el.addEventListener("click", () => {
-    if (!state.wasmAvailable) return;
-    state.enginePreference = state.enginePreference === "wasm" ? "js" : "wasm";
-    el.textContent = state.enginePreference;
-    estimateRunTime();
-  });
-  estimateRunTime();
-});
+// (Engine-tag pill removed — JS is the only compute engine now.
+// state.engine = "js" is set in the state object below.)
 
 // Wire the colormap selector and the manual range inputs. Any change
 // re-renders the cached energy field — no recompute needed.
@@ -436,6 +386,15 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   // Top-N toggle reveals N + penalty + repulsion inputs
   const topnCheck = document.getElementById("want-topn");
+  // Maximise toggle reveals the L-length input. Sync once on load so the
+  // panel state matches the checkbox after a bundle reload too.
+  const maxCheck = document.getElementById("maximize");
+  const maxExtra = document.getElementById("maximize-extra");
+  if (maxCheck && maxExtra) {
+    const sync = () => { maxExtra.style.display = maxCheck.checked ? "" : "none"; estimateRunTime(); };
+    maxCheck.addEventListener("change", sync);
+    sync();
+  }
   const topnExtra = document.getElementById("topn-extra");
   if (topnCheck && topnExtra) {
     const sync = () => { topnExtra.style.display = topnCheck.checked ? "" : "none"; estimateRunTime(); };
@@ -538,6 +497,9 @@ document.addEventListener("DOMContentLoaded", () => {
       loadFabdemForView();
     });
   }
+  // Locate-me floating button. Lives on the map (not in the drawer),
+  // so it's reachable on mobile without opening the controls panel.
+  document.getElementById("locate-btn")?.addEventListener("click", centerOnUserLocation);
   // Vector-network upload + clear.
   const vecFile = document.getElementById("vector-file");
   if (vecFile) {
@@ -718,6 +680,42 @@ function fabdemTileName(lat, lon) {
   const ns = lat >= 0 ? "N" : "S";
   const ew = lon >= 0 ? "E" : "W";
   return `${ns}${String(Math.abs(lat)).padStart(2, "0")}${ew}${String(Math.abs(lon)).padStart(3, "0")}_FABDEM_V1-2.tif`;
+}
+
+// Browser geolocation → pan the map to the user's coordinates without
+// touching the zoom. The user typically frames their area before
+// clicking, so we respect whatever zoom they're already at.
+function centerOnUserLocation() {
+  // Trace point for the "nothing happens when I click" reports — a single
+  // log here isolates click-routing problems from geolocation failures.
+  console.info("[locate] click handler invoked");
+  if (!navigator.geolocation) {
+    status.innerHTML = `<span style="color:#ff6b6b">${t("locate.unsupported")}</span>`;
+    return;
+  }
+  status.textContent = t("locate.requesting");
+  const btn = document.getElementById("locate-btn");
+  if (btn) btn.disabled = true;
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      if (btn) btn.disabled = false;
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      // panTo keeps the current zoom; setView would force a zoom change.
+      map.panTo([lat, lng]);
+      status.textContent = t("locate.centered", lat.toFixed(4), lng.toFixed(4));
+    },
+    (err) => {
+      if (btn) btn.disabled = false;
+      // err.code: 1 PERMISSION_DENIED, 2 POSITION_UNAVAILABLE, 3 TIMEOUT
+      let key = "locate.error";
+      if (err.code === 1) key = "locate.denied";
+      else if (err.code === 2) key = "locate.unavailable";
+      else if (err.code === 3) key = "locate.timeout";
+      status.innerHTML = `<span style="color:#ff6b6b">${t(key)}</span>`;
+    },
+    { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 },
+  );
 }
 
 async function loadFabdemForView() {
@@ -1042,15 +1040,26 @@ async function loadDemFromArrayBuffer(buf, label) {
   // about a second; the user already paid for the DEM load so the extra
   // delay is rolled into that. The relief overlay is wired into the
   // standard layer-controls; it stays hidden until the user toggles it.
-  try {
-    state.demSlope = computeSlope(height, mask, H, W,
-                                  state.dem.dxM, state.dem.dyM);
-    state.demReliefDataUrl = renderReliefToDataURL(state.dem, state.demSlope);
-    applyDemReliefOverlay();
-  } catch (err) {
-    console.warn("[relief] failed to build hillshade:", err);
-    state.demSlope = null;
-    state.demReliefDataUrl = null;
+  // Skip the (expensive) relief build on non-geographic DEMs — the
+  // imageOverlay path is gated on isGeographic too, so we'd just be
+  // burning a few seconds of slope/render compute and a 5–20 MB
+  // PNG that never gets displayed.
+  if (state.dem.isGeographic) {
+    try {
+      // Slope array is 4·H·W bytes — for a 135 M-cell DEM that's 540 MB.
+      // We compute it, hand it to the renderer once, then drop the reference
+      // immediately. The render output is a tiny PNG dataURL; the raw slope
+      // grid is never read again unless the user reloads the DEM.
+      const slopeArr = computeSlope(height, mask, H, W,
+                                    state.dem.dxM, state.dem.dyM);
+      state.demReliefDataUrl = renderReliefToDataURL(state.dem, slopeArr);
+      state.demSlope = null;  // free the float buffer after render
+      applyDemReliefOverlay();
+    } catch (err) {
+      console.warn("[relief] failed to build hillshade:", err);
+      state.demSlope = null;
+      state.demReliefDataUrl = null;
+    }
   }
   // Reveal the layer-block now that the data exists.
   const reliefRow = document.getElementById("relief-row");
@@ -1618,6 +1627,15 @@ runBtn.addEventListener("click", async () => {
   const nRoutes    = Math.max(1, Math.min(20, parseInt(document.getElementById("n-routes")?.value, 10) || 3));
   const penalty    = Math.max(0, parseFloat(document.getElementById("penalty")?.value) || 2.0);
   const repulsionMode = document.getElementById("repulsion-mode")?.value || "per-cell";
+  // Reverse-optimization: flip the cost function so Dijkstra finds the
+  // most expensive (under the original metric) routes rather than the
+  // cheapest. The worker does the inversion against a precomputed
+  // MAX_EDGE_COST = α·diagonal + β·(maxH − minH).
+  // maximizeLength > 0 activates a length-constrained layered-DP path
+  // search instead of the inverted Dijkstra. Memory-bounded; the worker
+  // refuses if L·H·W exceeds the cap.
+  const maximize       = !!document.getElementById("maximize")?.checked;
+  const maximizeLength = Math.max(0, parseInt(document.getElementById("maximize-length")?.value, 10) || 0);
   // Density follows the global Mode select instead of having its own
   // direction toggle.
   const densityMode  = mode;
@@ -1667,17 +1685,9 @@ runBtn.addEventListener("click", async () => {
   // Tear down old worker if any (we can't re-use after transferred buffers)
   if (state.worker) state.worker.terminate();
 
-  // Wasm worker doesn't yet implement passes / top-N / density / budget.
-  // Force JS for those; the energy-only fast path uses wasm only when
-  // the user has flipped the engine chip to "wasm".
-  const wasmOk = await wasmAvailable;
-  const wantsWasm = state.enginePreference === "wasm";
-  const useWasm =
-    wantsWasm && wasmOk && !wantPasses && !wantTopN && !wantDensity && eMax === 0;
-  state.worker = useWasm
-    ? new Worker(WASM_WORKER_URL, { type: "module" })
-    : new Worker(JS_WORKER_URL);
-  state.engine = useWasm ? "wasm" : "js";
+  // Single JS worker — wasm support has been removed.
+  state.worker = new Worker(WORKER_URL);
+  state.engine = "js";
 
   status.textContent = "Computing…";
   progress.classList.add("active");
@@ -1719,12 +1729,18 @@ runBtn.addEventListener("click", async () => {
       updateRunButtonState();
       state.computeStartedAt = 0;
       renderResult(m);
-      status.textContent = `Done in ${m.elapsedMs.toFixed(0)} ms (${state.engine}).`;
+      status.textContent = `Done in ${m.elapsedMs.toFixed(0)} ms.`;
     } else if (m.kind === "error") {
       progress.classList.remove("active");
       updateRunButtonState();
       state.computeStartedAt = 0;
       status.innerHTML = `<span style="color:#ff6b6b">Worker error: ${m.message}</span>`;
+    } else if (m.kind === "warning") {
+      // Non-fatal — the worker is still going and will follow up with
+      // a `done` message. Yellow-tint the status; the next progress
+      // tick will overwrite it.
+      console.warn("[worker]", m.message);
+      status.innerHTML = `<span style="color:#ffb86b">${m.message}</span>`;
     }
   };
 
@@ -1762,6 +1778,8 @@ runBtn.addEventListener("click", async () => {
       wantNetworkInterp,
       interpMaxDistance,
       interpSmoothing,
+      maximize,
+      maximizeLength,
     },
     [heightCopy.buffer, maskCopy.buffer, ...(networkMaskCopy ? [networkMaskCopy.buffer] : [])]
   );
@@ -1784,10 +1802,23 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
   rerenderCachedResult();
 
   const meta = [];
-  meta.push(`max E: <span class="v">${autoMax.toExponential(2)}</span>`);
+  // rerenderCachedResult populates state.lastAutoMax /
+  // state.lastPassesAutoMax with the renderer's resolved upper bounds
+  // (after percentile clipping etc.). Earlier code referenced bare
+  // `autoMax` / `passesMax` here, which were never declared — left over
+  // from a refactor that broke the metadata line silently until the
+  // length-DP path actually triggered the renderer in a state that
+  // exposed the unhandled exception.
+  const eHi = state.lastAutoMax;
+  if (Number.isFinite(eHi)) {
+    meta.push(`max E: <span class="v">${eHi.toExponential(2)}</span>`);
+  }
   meta.push(`time: <span class="v">${elapsedMs.toFixed(0)} ms</span>`);
   if (passes) {
-    meta.push(`max passes: <span class="v">${passesMax.toExponential(2)}</span>`);
+    const pHi = state.lastPassesAutoMax;
+    if (Number.isFinite(pHi)) {
+      meta.push(`max passes: <span class="v">${pHi.toExponential(2)}</span>`);
+    }
   }
   if (routes && routes.length) {
     meta.push(`<span class="v">${routes.length}</span> route${routes.length === 1 ? "" : "s"}:`);
@@ -1987,15 +2018,32 @@ function renderFieldToDataURL(field, W, H, opts) {
   let autoLo = Infinity, autoHi = 0;
   if (opts.usePercentileBounds) {
     const [pLo, pHi] = opts.percentiles || [10, 90];
-    const samples = [];
+    // Reservoir-sample valid cells into a fixed-size Float32Array.
+    // Pushing every valid value into a regular Array OOMs the tab on
+    // 100M+-cell DEMs (multi-GB heap) — the typed-array reservoir
+    // gives sub-1% percentile accuracy at 100k samples regardless
+    // of N. Same pattern as renderReliefToDataURL.
+    const SAMPLE_CAP = 100_000;
+    const samples = new Float32Array(SAMPLE_CAP);
+    let collected = 0;
+    let seen = 0;
     for (let i = 0; i < N; i++) {
       const v = work[i];
-      if (Number.isFinite(v) && (!opts.treatZeroAsTransparent || v > 0)) samples.push(v);
+      if (!Number.isFinite(v) || (opts.treatZeroAsTransparent && v <= 0)) continue;
+      if (collected < SAMPLE_CAP) {
+        samples[collected++] = v;
+      } else {
+        const j = Math.floor(Math.random() * (seen + 1));
+        if (j < SAMPLE_CAP) samples[j] = v;
+      }
+      seen++;
     }
-    samples.sort((a, b) => a - b);
-    if (samples.length) {
-      autoLo = samples[Math.floor(samples.length * pLo / 100)];
-      autoHi = samples[Math.floor(samples.length * pHi / 100)];
+    if (collected > 0) {
+      // Float32Array.sort sorts numerically by default; a comparator would
+      // box every value to a Number wrapper.
+      const sorted = samples.subarray(0, collected).slice().sort();
+      autoLo = sorted[Math.floor(sorted.length * pLo / 100)];
+      autoHi = sorted[Math.floor(sorted.length * pHi / 100)];
     }
   } else {
     for (let i = 0; i < N; i++) {
@@ -2122,27 +2170,64 @@ function computeSlope(height, mask, H, W, dxM, dyM) {
   return slope;
 }
 
+// Sample size for percentile estimation. 100k samples gives a sub-1 %
+// error on p5/p80 of a smooth distribution — well below the visual
+// resolution of the colormap. Using regular JS arrays here would balloon
+// to multi-gig heaps on a 135 M-cell DEM (the "Sampa Sítio Urbano" case)
+// and OOM the tab; typed arrays at fixed size keep this <1 MB regardless.
+const RELIEF_PERCENTILE_SAMPLES = 100_000;
+
+// Cap on the canvas backing buffer. Above ~10 M pixels Chrome refuses
+// to allocate ImageData, and even when it succeeds the toDataURL cost
+// dominates. We downsample by an integer stride and let Leaflet's
+// imageOverlay scale the result up to the DEM extent — Leaflet uses
+// CSS image-rendering, so the texture maps cleanly across the bounds.
+const RELIEF_MAX_CANVAS_PX = 10 * 1024 * 1024;
+
 function renderReliefToDataURL(dem, slope) {
   const { H, W, height, mask } = dem;
   const N = H * W;
 
-  // Collect valid samples once for both percentile lookups. Sorting two
-  // arrays of size N is the dominant cost — ~300 ms on a 5 M-cell DEM.
-  const validH = [];
-  const validS = [];
+  // ---- Reservoir-sample valid (height, slope) pairs for percentiles --
+  const eSamples = new Float32Array(RELIEF_PERCENTILE_SAMPLES);
+  const sSamples = new Float32Array(RELIEF_PERCENTILE_SAMPLES);
+  let collected = 0;
+  let seen = 0; // count of valid cells visited
   for (let i = 0; i < N; i++) {
-    if (mask[i]) {
-      validH.push(height[i]);
-      validS.push(slope[i]);
+    if (!mask[i]) continue;
+    if (collected < RELIEF_PERCENTILE_SAMPLES) {
+      eSamples[collected] = height[i];
+      sSamples[collected] = slope[i];
+      collected++;
+    } else {
+      // Standard reservoir step: replace position j (uniform in [0, seen])
+      // with probability k/seen; here that simplifies to "pick a slot".
+      const j = Math.floor(Math.random() * (seen + 1));
+      if (j < RELIEF_PERCENTILE_SAMPLES) {
+        eSamples[j] = height[i];
+        sSamples[j] = slope[i];
+      }
     }
+    seen++;
   }
-  if (!validH.length) return null;
-  validH.sort((a, b) => a - b);
-  validS.sort((a, b) => a - b);
-  const elevMin  = percentileFromSorted(validH, 5);
-  const elevMax  = percentileFromSorted(validH, 80);
-  const slopeMax = Math.max(1e-9, percentileFromSorted(validS, 80));
+  if (collected === 0) return null;
+
+  // Float32Array.sort sorts numerically by default — no comparator needed
+  // (and passing one would coerce values to objects, defeating the point).
+  const eSorted = eSamples.subarray(0, collected).slice().sort();
+  const sSorted = sSamples.subarray(0, collected).slice().sort();
+  const elevMin  = percentileFromSorted(eSorted, 5);
+  const elevMax  = percentileFromSorted(eSorted, 80);
+  const slopeMax = Math.max(1e-9, percentileFromSorted(sSorted, 80));
   const elevSpan = elevMax - elevMin;
+
+  // ---- Decide canvas size — downsample if the DEM is too big -------
+  let stride = 1;
+  if (N > RELIEF_MAX_CANVAS_PX) {
+    stride = Math.ceil(Math.sqrt(N / RELIEF_MAX_CANVAS_PX));
+  }
+  const outW = Math.max(1, Math.floor(W / stride));
+  const outH = Math.max(1, Math.floor(H / stride));
 
   // cmo_phase is cyclic — values that wrap past 1.0 alias to the same
   // hue as 0.0, which is fine since we clip to [0, 1].
@@ -2150,49 +2235,55 @@ function renderReliefToDataURL(dem, slope) {
   const phaseN = phaseMap.length - 1;
 
   const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
+  canvas.width = outW;
+  canvas.height = outH;
   const ctx = canvas.getContext("2d");
-  const imageData = ctx.createImageData(W, H);
+  const imageData = ctx.createImageData(outW, outH);
   const data = imageData.data;
 
   const invGamma = 1 / 1.2;
 
-  for (let i = 0; i < N; i++) {
-    const j = i * 4;
-    if (!mask[i]) {
-      data[j + 3] = 0; // transparent over nodata
-      continue;
-    }
+  // ---- Render at the (possibly downsampled) output resolution ------
+  for (let or = 0; or < outH; or++) {
+    const srcR = or * stride;
+    for (let oc = 0; oc < outW; oc++) {
+      const srcC = oc * stride;
+      const srcI = srcR * W + srcC;
+      const j = (or * outW + oc) * 4;
+      if (!mask[srcI]) {
+        data[j + 3] = 0; // transparent over nodata
+        continue;
+      }
 
-    // -- Elevation lookup
-    let er = 0, eg = 0, eb = 0;
-    if (elevSpan > 0) {
-      const t = Math.max(0, Math.min(1, (height[i] - elevMin) / elevSpan));
-      const f = t * phaseN;
-      const k = Math.floor(f);
-      const frac = f - k;
-      const a = phaseMap[Math.min(k, phaseN)];
-      const b = phaseMap[Math.min(k + 1, phaseN)];
-      er = a[0] + (b[0] - a[0]) * frac;
-      eg = a[1] + (b[1] - a[1]) * frac;
-      eb = a[2] + (b[2] - a[2]) * frac;
-    } else {
-      // Pathological DEM (all same elevation) — paint mid-colormap.
-      const a = phaseMap[Math.floor(phaseN / 2)];
-      er = a[0]; eg = a[1]; eb = a[2];
-    }
+      // -- Elevation lookup
+      let er, eg, eb;
+      if (elevSpan > 0) {
+        const t = Math.max(0, Math.min(1, (height[srcI] - elevMin) / elevSpan));
+        const f = t * phaseN;
+        const k = Math.floor(f);
+        const frac = f - k;
+        const a = phaseMap[Math.min(k, phaseN)];
+        const b = phaseMap[Math.min(k + 1, phaseN)];
+        er = a[0] + (b[0] - a[0]) * frac;
+        eg = a[1] + (b[1] - a[1]) * frac;
+        eb = a[2] + (b[2] - a[2]) * frac;
+      } else {
+        // Pathological DEM (all same elevation) — paint mid-colormap.
+        const a = phaseMap[Math.floor(phaseN / 2)];
+        er = a[0]; eg = a[1]; eb = a[2];
+      }
 
-    // -- Slope as gamma-corrected white→black multiplier.
-    //    slope=0   → factor 1.0 (multiplying by white leaves elev alone)
-    //    slope=p80 → factor 0.0 (multiplying by black collapses to black)
-    const sNorm = Math.min(1, slope[i] / slopeMax);
-    const sGamma = Math.pow(sNorm, invGamma);
-    const slopeFactor = 1 - sGamma;
-    data[j]     = Math.round(er * slopeFactor);
-    data[j + 1] = Math.round(eg * slopeFactor);
-    data[j + 2] = Math.round(eb * slopeFactor);
-    data[j + 3] = 255;
+      // -- Slope as gamma-corrected white→black multiplier.
+      //    slope=0   → factor 1.0 (multiplying by white leaves elev alone)
+      //    slope=p80 → factor 0.0 (multiplying by black collapses to black)
+      const sNorm = Math.min(1, slope[srcI] / slopeMax);
+      const sGamma = Math.pow(sNorm, invGamma);
+      const slopeFactor = 1 - sGamma;
+      data[j]     = Math.round(er * slopeFactor);
+      data[j + 1] = Math.round(eg * slopeFactor);
+      data[j + 2] = Math.round(eb * slopeFactor);
+      data[j + 3] = 255;
+    }
   }
 
   ctx.putImageData(imageData, 0, 0);
@@ -2345,7 +2436,6 @@ function syncRangePlaceholders() {
 // ~0.5× of a Dijkstra (A* terminates at goal). Distance-transform-based
 // repulsion modes add ~0.3× per iteration.
 const RATE_CELLS_PER_MS_JS   = 3300;
-const RATE_CELLS_PER_MS_WASM = 12000;
 
 function estimateRunTime() {
   const out = document.getElementById("time-estimate");
@@ -2353,16 +2443,11 @@ function estimateRunTime() {
   if (!state.dem) { out.textContent = ""; return; }
 
   const N = state.dem.H * state.dem.W;
-  // Estimate uses the user's engine preference, modulated by feature
-  // toggles (any of them forces JS).
   const wantPasses = !!document.getElementById("want-passes")?.checked;
   const wantTopN   = !!document.getElementById("want-topn")?.checked;
   const wantDensity = !!document.getElementById("want-density")?.checked;
-  const eMaxRaw = parseFloat(document.getElementById("e-max")?.value);
-  const hasBudget = Number.isFinite(eMaxRaw) && eMaxRaw > 0;
-  const wantsWasm = state.enginePreference === "wasm" && state.wasmAvailable;
-  const eff = (wantsWasm && !wantPasses && !wantTopN && !wantDensity && !hasBudget) ? "wasm" : "js";
-  const rate = eff === "wasm" ? RATE_CELLS_PER_MS_WASM : RATE_CELLS_PER_MS_JS;
+  // Single (JS) engine — rate constant is fixed.
+  const rate = RATE_CELLS_PER_MS_JS;
 
   let ms = N / rate;
   const mode = document.getElementById("mode")?.value || "from";
@@ -2394,7 +2479,7 @@ function estimateRunTime() {
     const smoothingIters = parseInt(document.getElementById("net-interp-smoothing")?.value, 10) || 0;
     ms += (N / rate) * (0.3 + 0.05 * smoothingIters);
   }
-  out.textContent = `≈ ${formatDuration(ms)} (${eff})`;
+  out.textContent = `≈ ${formatDuration(ms)}`;
 }
 
 function formatDuration(ms) {
@@ -2724,6 +2809,8 @@ function buildMetadata(result, withOutputs = true) {
     wantDensity:   !!document.getElementById("want-density")?.checked,
     nRefs:         parseInt(document.getElementById("n-refs")?.value, 10) || 10,
     refSource:     document.getElementById("ref-source")?.value || "click",
+    maximize:      !!document.getElementById("maximize")?.checked,
+    maximizeLength: parseInt(document.getElementById("maximize-length")?.value, 10) || 0,
     // refPoints carries the actual placed points so reload can re-stamp
     // the green markers exactly where they were.
     refPoints:     Array.isArray(state.refPoints) ? state.refPoints.slice() : [],
@@ -2778,8 +2865,9 @@ function buildMetadata(result, withOutputs = true) {
     // instead of raw .bin dumps, so the unzipped bundle drops directly into
     // QGIS. v2 bundles with .bin still load — see loadBundleFile fallback.
     schemaVersion:        3,
-    engine:               state.engine || "js",
-    enginePreference:     state.enginePreference || "js",
+    // engine is always "js" now (wasm removed). Kept in the metadata for
+    // round-trip compatibility with older bundle readers.
+    engine:               "js",
     elapsedMs:            result?.elapsedMs ?? null,
     dem: {
       label:        state.demLabel || null,
@@ -2989,6 +3077,8 @@ function applyMetadataToUI(md, bin = {}) {
   set("penalty", p.penalty);
   set("repulsion-mode", p.repulsionMode);
   check("want-density", p.wantDensity);
+  check("maximize", p.maximize);
+  set("maximize-length", p.maximizeLength);
   set("n-refs", p.nRefs);
   set("ref-source", p.refSource);
 
@@ -3035,23 +3125,8 @@ function applyMetadataToUI(md, bin = {}) {
   set("net-interp-max-dist", net.interpMaxDistance);
   set("net-interp-smoothing", net.interpSmoothing);
 
-  // ---- Engine preference -------------------------------------------------
-  // Honour a wasm preference only when wasm is actually available — bundles
-  // saved on a build-with-wasm machine shouldn't break the loader on a
-  // build-without-wasm one.
-  //
-  // Caveat: state.wasmAvailable is set by an async probe that resolves a few
-  // ms after page load. Bundles loaded inside that window silently fall back
-  // to JS even when the bundle says "wasm". This is the safe failure mode —
-  // the run-time path also gates on wasmAvailable — but worth knowing if the
-  // engine tag isn't sticking.
-  if (md.enginePreference === "wasm" && state.wasmAvailable) {
-    state.enginePreference = "wasm";
-  } else if (md.enginePreference === "js") {
-    state.enginePreference = "js";
-  }
-  const engineEl = document.getElementById("engine-tag");
-  if (engineEl) engineEl.textContent = state.enginePreference;
+  // (Engine preference is no longer user-selectable — JS only.
+  // md.enginePreference from older bundles is read but ignored.)
 
   // Trigger UI sync for toggles that reveal/hide their option groups —
   // top-N exposes the routes-count + repulsion controls, density swaps

@@ -27,7 +27,29 @@
 //            mobile drawer, sidebar tightening.
 //   v2 → v3: PT/EN i18n toggle, FABDEM viewport loader,
 //            astar mask-relaxation fix.
-const VERSION  = "v3";
+//   v3 → v4: Locate-me button, hamburger to bottom-left on mobile,
+//            DEM relief (cmocean.phase + slope multiply) layer.
+//   v4 → v5: Relief OOM fix on huge DEMs — reservoir-sampled
+//            percentiles, stride-downsampled canvas, drop slope array
+//            after render. Locate button uses panTo (no zoom change).
+//   v5 → v6: Same OOM fix in renderFieldToDataURL (energy/passes),
+//            drawer-toggle z-index fix so close-via-hamburger works,
+//            skip relief render on non-geographic DEMs, harden
+//            localStorage access for iOS private-browsing.
+//   v6 → v7: Wasm support removed entirely — energy-worker-wasm.js and
+//            wasm/pkg/* dropped from precache.
+//   v7 → v8: Reverse-optimisation toggle (maximize energy) in the
+//            Parameters group; worker now accepts a maximize flag and
+//            inverts edge costs against a precomputed MAX_EDGE_COST.
+//   v8 → v9: Length-constrained max-cost path via layered DP (L > 0
+//            input under the Maximize toggle).
+//   v9 → v10: Surface DP failures (unreachable, memory cap) to the UI
+//             via a "warning" message instead of silently console.warn.
+//   v10 → v11: Fix layered-DP backtrack sign error (was reading the
+//              direction array but subtracting the offset, sending the
+//              walk the wrong way → spurious "backtrack_fail"). Fix
+//              ReferenceError on autoMax/passesMax in renderResult.
+const VERSION  = "v11";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
@@ -43,9 +65,6 @@ const PRECACHE_URLS = [
   "./index.html",
   "./app.js",
   "./energy-worker.js",
-  "./energy-worker-wasm.js",
-  "./wasm/pkg/energy_wasm.js",
-  "./wasm/pkg/energy_wasm_bg.wasm",
   "./manifest.webmanifest",
   "./icons/icon.svg",
   "./icons/icon-192.png",

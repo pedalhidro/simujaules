@@ -6,12 +6,14 @@
        part of the UX. Some devices add their own zoom controls when the
        app is "installed" — that's fine. -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Simulador bicigeoenergético</title>
+  <!-- Replaced at runtime by applyTranslations() (PT/EN). This is just
+       what crawlers and the OS task-bar see before JS runs. -->
+  <title>Simulador bici-geo-energético</title>
 
   <!-- PWA wiring. The manifest drives Add-to-Home-Screen on Android/Chrome;
        the apple-touch-icon and the iOS-specific meta tags do the same job
        on iOS Safari (which still ignores parts of the manifest spec). -->
-  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="manifest" href="./manifest.json" />
   <meta name="theme-color" content="#0f1115" />
   <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
@@ -64,7 +66,10 @@
       position: fixed;
       top: 8px;
       left: 8px;
-      z-index: 900;
+      /* Strictly above the panel (z-index 900) so the user can tap the
+         hamburger to close the drawer once it's open. Same DOM position
+         + same z-index would lose to the later-in-DOM panel. */
+      z-index: 950;
       width: 44px;
       height: 44px;
       padding: 0;
@@ -90,6 +95,40 @@
     }
     .drawer-backdrop.active { display: block; opacity: 1; }
 
+    /* Floating "locate me" button at the top-right of the map. Mirrors
+       the drawer-toggle's styling so the two corners feel symmetrical
+       when the drawer is open on mobile. The browser geolocation API
+       requires HTTPS (or localhost), so this button silently no-ops
+       on file:// — geolocation isn't available there anyway. */
+    .locate-button {
+      position: fixed;
+      top: 8px;
+      right: 8px;
+      /* Above panel (900) and Leaflet controls (800), below the help
+         modal (1000). Same level as drawer-toggle so neither obscures
+         the other on mobile. */
+      z-index: 950;
+      pointer-events: auto;
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      cursor: pointer;
+    }
+    .locate-button:hover { color: var(--accent-2); border-color: var(--accent-2); }
+    .locate-button:disabled { opacity: 0.5; cursor: progress; }
+    /* SVG and its children must not intercept clicks — without this,
+       Safari/iOS sometimes routes the click to the inner <circle> or
+       <line> instead of bubbling up to the <button>. */
+    .locate-button svg, .locate-button svg * { display: block; pointer-events: none; }
+
     @media (max-width: 860px) {
       /* Single-column grid on mobile. CRITICAL: position:fixed removes
          #panel from grid auto-placement, so if we kept two columns the
@@ -109,7 +148,22 @@
         padding-top: 56px;
       }
       #panel.open { transform: translateX(0); }
-      .drawer-toggle { display: inline-flex; }
+      /* On phones the top-left corner is awkward to reach with the
+         right thumb; move both floating buttons to the bottom row. */
+      .drawer-toggle {
+        display: inline-flex;
+        top: auto;
+        bottom: 16px;
+        left: 16px;
+        box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.4);
+      }
+      .locate-button {
+        top: auto;
+        /* Sits above Leaflet's attribution strip at the bottom-right. */
+        bottom: 50px;
+        right: 16px;
+        box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.4);
+      }
       /* Once the drawer is open, swap the icon to an × via the data-attr.
          The button stays where it is so the user can close from the same
          spot they opened it from. */
@@ -454,11 +508,26 @@
   <button type="button" class="drawer-toggle" id="drawer-toggle" aria-label="Toggle controls" aria-expanded="false">☰</button>
   <div class="drawer-backdrop" id="drawer-backdrop" aria-hidden="true"></div>
 
+  <!-- Locate-me button. Crosshair icon is recognised across map UIs;
+       SVG inline so it inherits currentColor and renders consistently
+       across browsers without an emoji-font dependency. -->
+  <button type="button" class="locate-button" id="locate-btn"
+          data-i18n-title="locate.title" title="Center on my location"
+          aria-label="Center on my location">
+    <svg viewBox="0 0 20 20" width="20" height="20" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <circle cx="10" cy="10" r="2.5"/>
+      <circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4"/>
+      <line x1="10" y1="0"    x2="10" y2="3"    stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="10" y1="17"   x2="10" y2="20"   stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="0"  y1="10"   x2="3"  y2="10"   stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="17" y1="10"   x2="20" y2="10"   stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+    </svg>
+  </button>
+
   <div id="app">
     <aside id="panel">
       <h1 data-i18n="title">Simulador bici-geo-energético</h1>
       <div class="header-actions">
-        <button type="button" class="engine-tag" id="engine-tag" data-i18n-title="engine.toggle.title" title="Compute engine — click to toggle">js</button>
         <button type="button" class="engine-tag" id="lang-tag" data-i18n-title="lang.toggle.title" title="Language — click to switch">EN</button>
         <button type="button" class="help-button" id="help-btn" aria-label="Help" data-i18n-title="help.title" title="How it works">?</button>
       </div>
@@ -568,6 +637,15 @@
           <input type="checkbox" id="want-density" />
           <span data-i18n="param.want_density">Compute multi-reference density</span>
         </label>
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 3px;">
+          <input type="checkbox" id="maximize" />
+          <span data-i18n="param.maximize">Maximize energy (reverse optimization)</span>
+        </label>
+        <div id="maximize-extra" style="display: none;">
+          <label data-i18n="param.max_length">Path length L (edges, 0 = unconstrained)</label>
+          <input type="number" id="maximize-length" value="0" min="0" max="5000" step="1" />
+          <div class="hint" data-i18n="param.max_length.hint">0: inverted Dijkstra (geometrically short, cost-dense). L&gt;0: layered DP finds the max-cost path of exactly L edges from src to dst. Memory cap ≈ 256 MB ⇒ L·H·W must fit; large DEMs limit L to a few dozen.</div>
+        </div>
         <div id="density-extra" style="display: none;">
           <div class="row">
             <div>
