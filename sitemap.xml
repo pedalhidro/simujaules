@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Single-page app: one canonical URL. Submit this file in Search Console
+     (it lives under /simujoules/, not the domain root, so it must be
+     submitted explicitly rather than discovered via robots.txt). -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://telhas.pedalhidrografi.co/simujoules/</loc>
+    <changefreq>monthly</changefreq>
+  </url>
+</urlset>

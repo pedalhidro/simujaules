@@ -52,6 +52,17 @@ const STRINGS = {
   "net.line_width":      { pt: "largura da linha (células)", en: "line width (cells)" },
   "net.snap_radius":     { pt: "raio de snap (células)", en: "snap radius (cells)" },
   "net.clear":           { pt: "Limpar rede",  en: "Clear network" },
+  "net.render":          { pt: "Desenhar rede (linhas pretas)", en: "Draw network (black lines)" },
+  "net.render_width":    { pt: "largura da linha (m)", en: "line width (m)" },
+  "net.render_opacity":  { pt: "opacidade da linha", en: "line opacity" },
+  "net.constrain":       { pt: "Restringir cálculo à rede", en: "Constrain compute to network" },
+  "net.osm":             { pt: "Puxar ruas do OSM (highway=*)", en: "Pull streets from OSM (highway=*)" },
+  "net.osm_hint":        { pt: "Consulta o Overpass sobre a vista atual ∩ extensão do DEM. Áreas grandes podem demorar ou estourar limites do Overpass — aproxime o zoom primeiro.", en: "Queries Overpass over the current map view ∩ DEM extent. Large areas can take a while or hit Overpass limits — zoom in first." },
+  "net.compare":         { pt: "Comparar com cenário sem rede", en: "Compare with unconstrained" },
+  "layer.energy_source": { pt: "Campo de energia exibido", en: "Displayed energy field" },
+  "esrc.constrained":    { pt: "restrito à rede", en: "network-constrained" },
+  "esrc.unconstrained":  { pt: "sem restrição", en: "unconstrained" },
+  "esrc.difference":     { pt: "diferença (custo da rede)", en: "difference (network cost)" },
   "net.interp":          { pt: "Interpolar entre células fora da rede", en: "Interpolate across non-network cells" },
   "net.max_distance":    { pt: "distância máx (células)", en: "max distance (cells)" },
   "net.smoothing":       { pt: "suavizações", en: "smoothing iters" },
@@ -75,9 +86,16 @@ const STRINGS = {
   "param.beta":          { pt: "β (por metro de subida)", en: "β (per metre uphill)" },
   "param.eta":           { pt: "η (recuperação descida)", en: "η (downhill recovery)" },
   "param.budget":        { pt: "Orçamento de energia (≤0 = ∞)", en: "Energy budget (≤0 = ∞)" },
+  "param.budget_mode":   { pt: "Orçamento aplica-se a", en: "Budget applies to" },
+  "budget.leg":          { pt: "cada perna (ida OU volta)", en: "each leg (out OR back)" },
+  "budget.total":        { pt: "ida e volta (total)", en: "round trip (total)" },
+  "budget_mode.hint":    { pt: "Só no modo ida-e-volta. \"Cada perna\": célula visível se ida ≤ orçamento E volta ≤ orçamento (total pode chegar a 2×). \"Total\": ida + volta ≤ orçamento. A contagem de passagens conta apenas trajetos até células exibidas (dentro do orçamento); células-corredor ainda acumulam os trajetos que passam por elas.", en: 'Round-trip mode only. "Each leg": a cell is shown if out ≤ budget AND back ≤ budget (totals can reach 2×). "Total": out + back ≤ budget. The passes count only counts trajectories to displayed (within-budget) cells; corridor cells still accumulate the trajectories passing through them.' },
   "param.want_passes":   { pt: "Calcular contagem de passagens", en: "Compute passes count (route density)" },
   "param.want_topn":     { pt: "Calcular top-N rotas", en: "Compute top-N routes" },
   "param.want_density":  { pt: "Calcular densidade multi-referência", en: "Compute multi-reference density" },
+  "param.use_backend":   { pt: "Usar backend nativo (Rust)", en: "Use native backend (Rust)" },
+  "param.backend_url":   { pt: "URL do backend", en: "Backend URL" },
+  "backend.hint":        { pt: "Servidor local opcional (backend/ no repositório, cargo run --release). Execuções de densidade são enviadas para lá e computadas em todos os núcleos; se inacessível, o app volta silenciosamente para o pool de workers do navegador.", en: "Optional local server (backend/ in the repo, cargo run --release). Density runs are sent there and computed on all cores; if unreachable, the app silently falls back to the in-browser worker pool." },
   "param.maximize":      { pt: "Maximizar energia (inverter otimização)", en: "Maximize energy (reverse optimization)" },
   "param.max_length":    { pt: "Comprimento L (arestas, 0 = sem restrição)", en: "Path length L (edges, 0 = unconstrained)" },
   "param.max_length.hint": { pt: "0: Dijkstra invertido (geometricamente curto, custo denso). L>0: DP em camadas encontra o caminho de custo máximo com exatamente L arestas entre src e dst. Limite de memória ≈ 256 MB ⇒ L·H·W precisa caber; DEMs grandes limitam L a poucas dezenas.", en: "0: inverted Dijkstra (geometrically short, cost-dense). L>0: layered DP finds the max-cost path of exactly L edges from src to dst. Memory cap ≈ 256 MB ⇒ L·H·W must fit; large DEMs limit L to a few dozen." },
@@ -87,6 +105,11 @@ const STRINGS = {
   "ref.random":          { pt: "aleatórias", en: "random" },
   "ref.direction_hint":  { pt: "A direção segue o Modo acima.", en: "Direction follows the Mode above." },
   "ref.place_random":    { pt: "Distribuir aleatórias", en: "Place random" },
+  "param.sampling":      { pt: "Estratégia de amostragem", en: "Sampling strategy" },
+  "sampling.random":     { pt: "pseudoaleatória", en: "pseudo-random" },
+  "sampling.sobol":      { pt: "Sobol (quase-aleatória)", en: "Sobol (quasi-random)" },
+  "sampling.halton":     { pt: "Halton (quase-aleatória)", en: "Halton (quasi-random)" },
+  "sampling.hint":       { pt: "Sequências quase-aleatórias (QMC) cobrem a área uniformemente sem aglomerados nem vazios — melhor convergência da densidade com menos referências. Cliques sucessivos continuam a sequência em vez de repeti-la.", en: "Quasi-random (QMC) sequences cover the area evenly, without the clumps and gaps of pseudo-random — the density converges with fewer references. Successive clicks continue the sequence rather than repeat it." },
   "ref.clear":           { pt: "Limpar referências", en: "Clear refs" },
   "ref.none":            { pt: "nenhuma referência marcada", en: "no references placed" },
   "param.n_routes":      { pt: "N (1–20)", en: "N (1–20)" },
@@ -116,6 +139,22 @@ const STRINGS = {
   "vmax.passes":         { pt: "max (auto = p90)", en: "max (auto = p90)" },
   "energy.range_hint":   { pt: "Auto = sqrt-stretched; pino qualquer limite para linear com clamping.", en: "Auto = sqrt-stretched; pin either bound for linear with clamping." },
   "layer.passes":        { pt: "Passagens (overlay)", en: "Passes (overlay)" },
+  "layer.basemap":       { pt: "Mapa base", en: "Basemap" },
+  "basemap.osm":         { pt: "OSM (padrão)", en: "OSM (default)" },
+  "basemap.dark":        { pt: "OSM minimalista preto", en: "OSM minimalist black" },
+  "basemap.light":       { pt: "OSM minimalista branco", en: "OSM minimalist white" },
+  "basemap.black":       { pt: "sem mapa base (tudo preto)", en: "no basemap (all black)" },
+  "basemap.white":       { pt: "sem mapa base (tudo branco)", en: "no basemap (all white)" },
+  "basemap.gray":        { pt: "sem mapa base (tudo cinza)", en: "no basemap (all gray)" },
+  "order.open":          { pt: "Ordem de empilhamento das camadas…", en: "Layer stacking order…" },
+  "order.title":         { pt: "Ordem de empilhamento", en: "Layer stacking order" },
+  "order.hint":          { pt: "O topo da lista é desenhado por cima. Marcadores e tooltips ficam sempre acima. Aplicado na hora; lembrado neste dispositivo.", en: "Top of the list is drawn on top. Markers and tooltips always stay above. Applied immediately; remembered on this device." },
+  "order.reset":         { pt: "Restaurar padrão", en: "Reset to default" },
+  "order.relief":        { pt: "Relevo (DEM)", en: "Relief (DEM)" },
+  "order.energy":        { pt: "Energia", en: "Energy" },
+  "order.network":       { pt: "Rede vetorial (linhas)", en: "Vector network (lines)" },
+  "order.passes":        { pt: "Passagens", en: "Passes" },
+  "order.routes":        { pt: "Rotas / caminho", en: "Routes / path" },
   "passes.gamma":        { pt: "γ gama (1 = sem mudança)", en: "γ gamma (1 = no change)" },
   "passes.mean_window":  { pt: "filtro média N", en: "mean filter N" },
   "passes.blend":        { pt: "Blend", en: "Blend" },
@@ -124,9 +163,11 @@ const STRINGS = {
   "blend.screen":        { pt: "screen", en: "screen" },
   "blend.multiply":      { pt: "multiply", en: "multiply" },
   "blend.overlay":       { pt: "overlay", en: "overlay" },
-  "passes.hint":         { pt: "Rampa cinza; com modo \"soma\", células de alta passagem clareiam o campo de energia abaixo. Mesmo comportamento auto/pinado da Energia.", en: 'Greyscale ramp; with "add" mode high-pass cells brighten the energy field beneath. Same auto / pinned-range behaviour as Energy.' },
+  "blend.energy":        { pt: "cor da energia (passagens = opacidade)", en: "energy color (passes = opacity)" },
+  "passes.hint":         { pt: "Rampa cinza; com modo \"soma\", células de alta passagem clareiam o campo de energia abaixo. \"Cor da energia\" pinta os corredores com o colormap do campo de energia e usa as passagens como opacidade — min/max/γ moldam a rampa de alfa. Mesmo comportamento auto/pinado da Energia.", en: 'Greyscale ramp; with "add" mode high-pass cells brighten the energy field beneath. "Energy color" paints corridors with the energy field\'s colormap and uses passes for opacity — min/max/γ shape the alpha ramp. Same auto / pinned-range behaviour as Energy.' },
   "btn.range_reset":     { pt: "Reset auto", en: "Reset ranges to auto" },
   "btn.download_bundle": { pt: "Baixar bundle (.zip)", en: "Download bundle (.zip)" },
+  "btn.export_rendered": { pt: "Exportar imagens renderizadas (.zip)", en: "Export rendered images (.zip)" },
   "credit":              { pt: "feito por Cláudio e dirigido pelos neogeógrafos geomorfológicos", en: "made by Cláudio, directed by the geomorphological neo-geographers" },
 
   // ---- Help modal -------------------------------------------------------
@@ -166,6 +207,7 @@ const STRINGS = {
   "help.h.interp":       { pt: "Interpolação fora da rede", en: "Off-network interpolation" },
   "help.p.interp":       { pt: "Visualização opcional: preenche células fora da rede com a média dos valores da rede em redor, usando o mesmo algoritmo do GDAL <code>fillnodata</code>. Para cada célula vazia, busca em 8 direções até achar uma célula de rede dentro de <strong>distância máx</strong> (em células); calcula a média ponderada por <code>1/d²</code> dos acertos. Em seguida, aplica <strong>suavizações</strong> passes de média 3×3 sobre o preenchimento — preservando os valores originais da rede.", en: 'Optional visualisation: fills off-network cells with a weighted mean of nearby on-network values, using the same algorithm as GDAL <code>fillnodata</code>. For each empty cell, scan 8 directions for a network cell within <strong>max distance</strong> (cells); compute a <code>1/d²</code>-weighted mean of the hits. Then apply <strong>smoothing iters</strong> 3×3 mean passes over the fill, preserving the original network values.' },
   "help.p.interp_only":  { pt: "Apenas para visualização; a análise (Dijkstra, top-N, densidade) continua estritamente sobre a rede.", en: 'For visualisation only; the analysis (Dijkstra, top-N, density) stays strictly on the network.' },
+  "help.h.changelog":    { pt: "Histórico de versões (changelog)", en: "Changelog" },
   "help.h.impl":         { pt: "Implementação", en: "Implementation" },
   "help.p.impl":         { pt: "JS puro, em Web Worker: Dijkstra 8-conectada com heap binária sobre arrays tipados (<code>Float64Array</code> de prioridades + <code>Int32Array</code> de payloads). Tudo o que precisa de Δh assimétrico, passes count, top-N e densidade roda no mesmo motor.", en: 'Pure JS in a Web Worker: 8-connected Dijkstra on a binary heap over typed arrays (<code>Float64Array</code> for priorities + <code>Int32Array</code> for payloads). Everything — asymmetric Δh, passes count, top-N, density — runs on the same engine.' },
 };
@@ -215,12 +257,12 @@ function setLang(lang) {
   applyTranslations();
 }
 
-// ------- Compute worker -------
-// Single JS worker for all compute paths. Wasm support was removed: it
-// covered only the energy-only fast path (passes/top-N/density/budget
-// all fell back to JS anyway) and the Rust toolchain was a maintenance
-// tax for a 3–5× win on one mode. One engine is easier to reason about,
-// easier to deploy, and the heap is comparable for typical DEMs.
+// ------- Compute workers -------
+// All compute runs in energy-worker.js instances: one worker for regular
+// runs, a pool of them for multi-reference density (each ref's Dijkstra is
+// independent — see the density pool in the Compute handler). An optional
+// native Rust backend (backend/ in the repo, OFF by default) can take over
+// density runs; everything else always stays in-browser.
 const WORKER_URL = "./energy-worker.js";
 
 // ------- Map setup -------
@@ -253,7 +295,7 @@ function markStyleDirty() {
   const btn = document.getElementById("refresh-style");
   if (btn) {
     btn.dataset.dirty = "1";
-    btn.textContent = "Refresh style ●";
+    btn.textContent = `${t("btn.refresh_style")} ●`;
   }
 }
 function clearStyleDirty() {
@@ -261,12 +303,11 @@ function clearStyleDirty() {
   const btn = document.getElementById("refresh-style");
   if (btn) {
     btn.dataset.dirty = "";
-    btn.textContent = "Refresh style";
+    btn.textContent = t("btn.refresh_style");
   }
 }
 
-// (Engine-tag pill removed — JS is the only compute engine now.
-// state.engine = "js" is set in the state object below.)
+// (Engine-tag pill removed — JS is the only compute engine now.)
 
 // Wire the colormap selector and the manual range inputs. Any change
 // re-renders the cached energy field — no recompute needed.
@@ -293,7 +334,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!COLORMAPS[k]) continue;
         const opt = document.createElement("option");
         opt.value = k;
-        opt.textContent = k.replace("CET_", "CET-");
+        opt.textContent = k === "cmo_phase" ? "cmocean.phase" : k.replace("CET_", "CET-");
         og.appendChild(opt);
       }
       sel.appendChild(og);
@@ -376,7 +417,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!COLORMAPS[k]) continue;
         const opt = document.createElement("option");
         opt.value = k;
-        opt.textContent = k.replace("CET_", "CET-");
+        opt.textContent = k === "cmo_phase" ? "cmocean.phase" : k.replace("CET_", "CET-");
         og.appendChild(opt);
       }
       routesSel.appendChild(og);
@@ -400,6 +441,40 @@ document.addEventListener("DOMContentLoaded", () => {
     const sync = () => { topnExtra.style.display = topnCheck.checked ? "" : "none"; estimateRunTime(); };
     topnCheck.addEventListener("change", sync);
     sync();
+  }
+  // Budget-mode select is only meaningful in round-trip mode (a single leg
+  // IS the total in from/to) — hide it elsewhere.
+  const modeSel = document.getElementById("mode");
+  const budgetModeRow = document.getElementById("e-max-mode-row");
+  if (modeSel && budgetModeRow) {
+    const syncBudgetMode = () => {
+      budgetModeRow.style.display = modeSel.value === "round" ? "" : "none";
+    };
+    modeSel.addEventListener("change", syncBudgetMode);
+    syncBudgetMode();
+  }
+  // Basemap selector — swaps the base tile layer / solid background.
+  const basemapSel = document.getElementById("basemap-select");
+  if (basemapSel) {
+    basemapSel.addEventListener("change", () => applyBasemap(basemapSel.value));
+  }
+  // Vector-network rendering toggle — pure overlay add/remove, no recompute.
+  document.getElementById("vec-render")?.addEventListener("change", applyNetworkLinesOverlay);
+  // Width/opacity restyle the existing polylines in place (live).
+  for (const id of ["vec-render-width", "vec-render-opacity"]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.addEventListener("input", updateNetworkLineStyle);
+    el.addEventListener("change", updateNetworkLineStyle);
+  }
+  // Native-backend toggle (inside the density panel) reveals the URL input.
+  // Off by default — the in-browser worker pool is always the fallback.
+  const backendCheck = document.getElementById("use-backend");
+  const backendExtra = document.getElementById("backend-extra");
+  if (backendCheck && backendExtra) {
+    const syncBackend = () => { backendExtra.style.display = backendCheck.checked ? "" : "none"; };
+    backendCheck.addEventListener("change", syncBackend);
+    syncBackend();
   }
   // Density toggle reveals the multi-ref controls and locks out the
   // single-source toggles (wantPasses / wantTopN) that don't compose
@@ -511,7 +586,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch (err) {
         console.error(err);
         progress.classList.remove("active");
-        status.innerHTML = `<span style="color:#ff6b6b">.gpkg load failed: ${err.message}</span>`;
+        status.innerHTML = `<span style="color:#ff6b6b">.gpkg load failed: ${escapeHtml(err.message)}</span>`;
       }
       // Reset the input so re-picking the same file fires `change` again.
       ev.target.value = "";
@@ -519,10 +594,19 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   const vecClearBtn = document.getElementById("vec-clear");
   if (vecClearBtn) vecClearBtn.addEventListener("click", clearVectorNetwork);
+  document.getElementById("vec-osm")?.addEventListener("click", loadOsmNetwork);
+  // Switching the displayed energy field (constrained / unconstrained /
+  // difference) re-renders cached arrays — never recomputes.
+  document.getElementById("energy-source")?.addEventListener("change", () => {
+    rerenderCachedResult();
+    clearStyleDirty();
+  });
 
   // Bundle download / reload
   const dlBtn = document.getElementById("download-bundle");
   if (dlBtn) dlBtn.addEventListener("click", downloadBundle);
+  const exportImgBtn = document.getElementById("export-rendered");
+  if (exportImgBtn) exportImgBtn.addEventListener("click", exportRenderedImages);
   const reloadInput = document.getElementById("bundle-file");
   if (reloadInput) {
     reloadInput.addEventListener("change", (ev) => {
@@ -554,23 +638,163 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && helpModal?.classList.contains("active")) closeHelp();
   });
+
+  // Layer-stacking-order modal: list rendered top-of-screen-first, rows
+  // moved with ↑/↓, applied immediately to the pane z-indices and
+  // persisted. Rebuilt on every open so labels follow the language toggle.
+  const orderModal = document.getElementById("layer-order-modal");
+  const orderList = document.getElementById("layer-order-list");
+  const renderOrderList = () => {
+    if (!orderList) return;
+    orderList.innerHTML = "";
+    const topToBottom = layerOrder.slice().reverse();
+    topToBottom.forEach((key, di) => {
+      const row = document.createElement("div");
+      row.style.cssText =
+        "display:flex;align-items:center;gap:6px;padding:4px 8px;" +
+        "border:1px solid var(--border);border-radius:4px;margin-top:4px;";
+      const name = document.createElement("span");
+      name.style.flex = "1";
+      name.textContent = t(`order.${key}`);
+      row.appendChild(name);
+      const mkBtn = (label, disabled, delta) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "secondary";
+        b.textContent = label;
+        b.disabled = disabled;
+        b.style.cssText = "width:30px;padding:2px 0;margin:0;";
+        b.addEventListener("click", () => {
+          // Visually "up" = drawn on top of more layers = later in the
+          // bottom→top layerOrder array.
+          const i = layerOrder.indexOf(key);
+          const j = i + delta;
+          if (j < 0 || j >= layerOrder.length) return;
+          [layerOrder[i], layerOrder[j]] = [layerOrder[j], layerOrder[i]];
+          applyLayerOrder();
+          renderOrderList();
+        });
+        return b;
+      };
+      row.appendChild(mkBtn("↑", di === 0, +1));
+      row.appendChild(mkBtn("↓", di === topToBottom.length - 1, -1));
+      orderList.appendChild(row);
+    });
+  };
+  const openOrder = () => { renderOrderList(); orderModal?.classList.add("active"); };
+  const closeOrder = () => orderModal?.classList.remove("active");
+  document.getElementById("layer-order-btn")?.addEventListener("click", openOrder);
+  document.getElementById("layer-order-close")?.addEventListener("click", closeOrder);
+  orderModal?.addEventListener("click", (e) => {
+    if (e.target === orderModal) closeOrder();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && orderModal?.classList.contains("active")) closeOrder();
+  });
+  document.getElementById("layer-order-reset")?.addEventListener("click", () => {
+    layerOrder = DEFAULT_LAYER_ORDER.slice();
+    applyLayerOrder();
+    renderOrderList();
+  });
 });
 
 const map = L.map("map", { preferCanvas: true }).setView([-23.55, -46.63], 12);
-L.tileLayer(
-  "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-  {
-    attribution: "© OpenStreetMap contributors",
-    maxZoom: 19,
+
+// Explicit stacking for the analysis layers, between Leaflet's default
+// overlayPane (z 400) and markerPane (z 600). Without dedicated panes all
+// of these share overlayPane and the z-order is whatever DOM order the
+// rebuilds produce — notably the drawn vector network used to land above
+// or below the passes overlay depending on which was refreshed last.
+// The order is user-editable via the "Layer stacking order" modal and
+// persisted to localStorage. Default, bottom → top:
+// relief < energy < network lines < passes < routes/path.
+const LAYER_PANES = {
+  relief:  "reliefPane",
+  energy:  "energyPane",
+  network: "networkPane",
+  passes:  "passesPane",
+  routes:  "routesPane",
+};
+const DEFAULT_LAYER_ORDER = ["relief", "energy", "network", "passes", "routes"]; // bottom → top
+let layerOrder = DEFAULT_LAYER_ORDER.slice();
+try {
+  const saved = JSON.parse(localStorage.getItem("simu-layer-order") || "null");
+  if (
+    Array.isArray(saved) &&
+    saved.length === DEFAULT_LAYER_ORDER.length &&
+    DEFAULT_LAYER_ORDER.every((k) => saved.includes(k))
+  ) {
+    layerOrder = saved;
   }
-).addTo(map);
+} catch {}
+for (const pane of Object.values(LAYER_PANES)) map.createPane(pane);
+
+function applyLayerOrder() {
+  layerOrder.forEach((key, i) => {
+    const pane = map.getPane(LAYER_PANES[key]);
+    if (pane) pane.style.zIndex = String(401 + i);
+  });
+  try { localStorage.setItem("simu-layer-order", JSON.stringify(layerOrder)); } catch {}
+}
+applyLayerOrder();
+
+// ------- Basemap -------
+// Selectable via the #basemap-select dropdown. Tile entries swap the base
+// tile layer; "none-*" entries remove it and paint the map container a
+// solid colour (overlays, markers and the optional rmsampa-v2 tiles are
+// unaffected — they live in higher panes).
+const BASEMAPS = {
+  "osm": {
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    options: { attribution: "© OpenStreetMap contributors", maxZoom: 19 },
+  },
+  "carto-dark": {
+    url: "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png",
+    options: {
+      attribution: "© OpenStreetMap contributors © CARTO",
+      subdomains: "abcd",
+      maxZoom: 20,
+    },
+  },
+  "carto-light": {
+    url: "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+    options: {
+      attribution: "© OpenStreetMap contributors © CARTO",
+      subdomains: "abcd",
+      maxZoom: 20,
+    },
+  },
+  "none-black": { color: "#000000" },
+  "none-white": { color: "#ffffff" },
+  "none-gray":  { color: "#808080" },
+};
+
+let baseTileLayer = null;
+function applyBasemap(key) {
+  const def = BASEMAPS[key] || BASEMAPS.osm;
+  if (baseTileLayer) { baseTileLayer.remove(); baseTileLayer = null; }
+  const container = document.getElementById("map");
+  if (def.url) {
+    baseTileLayer = L.tileLayer(def.url, def.options).addTo(map);
+    if (container) container.style.background = "";
+  } else if (container) {
+    container.style.background = def.color;
+  }
+}
+applyBasemap("osm");
 
 // ------- State -------
 const state = {
   dem: null, // { height, mask, H, W, dx, dy, bbox, originX, originY }
   src: null, // [r, c]
   dst: null, // [r, c]
-  worker: null,
+  // All live compute workers (1 for regular runs, N for the density pool).
+  // computeGen is bumped on every run start AND every cancellation — a
+  // worker message whose captured generation doesn't match is stale (the
+  // user loaded a new DEM / network mid-compute) and must be dropped, not
+  // rendered against the new grid.
+  workers: [],
+  computeGen: 0,
   // Stacked overlays — z-order from bottom up:
   //   OSM basemap → tileOverlay (rmsampa-v2) → energyOverlay → passesOverlay
   tileOverlay: null,
@@ -582,10 +806,6 @@ const state = {
   dstMarker: null,
   // Optional XYZ tile overlay (rmsampa-v2). Initialised below.
   tileOverlayActive: false,
-  // Engine preference (user-toggleable via the title-bar chip). Default
-  // is JS so users without wasm built still get a working app.
-  enginePreference: "js",
-  wasmAvailable: false,
   // Outline rectangle drawn to show the loaded DEM's extent.
   demRect: null,
   // Optional rasterised vector network. When non-null, AND'd with the
@@ -594,14 +814,52 @@ const state = {
   networkMask: null,
   networkSrsId: null,
   networkFeatureCount: 0,
+  // Parsed network geometry in WGS84 ([[lat,lng], …] per line), kept so the
+  // optional "draw network" toggle can render true vector lines at a fixed
+  // ground width. null when over the vertex cap (drawing disabled).
+  networkLines: null,
+  networkLinesLayer: null,
   // Multi-reference density: list of [r, c] pixel coords plus their map markers.
   refPoints: [],
   refMarkers: [],
+  // Position in the quasi-random (Sobol/Halton) sequence used by "Place
+  // random". Persists across clicks so each batch continues the sequence;
+  // reset whenever the refs are cleared or the DEM changes.
+  qmcIndex: 0,
   // Live-ETA bookkeeping (set on Compute, cleared on done/error).
   computeStartedAt: 0,
   estimatedTotalMs: 0,
-  etaTimer: 0,
+  // Bundle loaded before (or against the wrong) DEM: held here — including
+  // its binary rasters — and re-applied by loadDemFromArrayBuffer once a
+  // DEM with matching dimensions arrives. Without this, loading the DEM
+  // second wiped everything the bundle had just restored (src/dst, refs)
+  // and the rasters were lost, making bundle-then-DEM order useless.
+  pendingBundle: null,
 };
+
+// Escape user-derived text (file parse errors, worker messages, …) before
+// it's interpolated into status.innerHTML — bundles and DEMs are shareable
+// artifacts, so error strings echoing their content are attacker-reachable.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (ch) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]
+  ));
+}
+
+// Terminate every in-flight compute worker and invalidate their pending
+// messages via the generation bump. Safe to call when idle. Must run before
+// anything that changes the grid a result would be rendered against (DEM
+// load, network load/clear) — see state.computeGen above.
+function cancelActiveCompute() {
+  state.computeGen++;
+  for (const w of state.workers) w.terminate();
+  state.workers = [];
+  if (state.computeStartedAt) {
+    state.computeStartedAt = 0;
+    progress.classList.remove("active");
+    updateRunButtonState();
+  }
+}
 
 // ------- DEM loading -------
 const demFile = document.getElementById("dem-file");
@@ -631,7 +889,7 @@ demFile.addEventListener("change", async (e) => {
     await loadDemFromArrayBuffer(buf, file.name);
   } catch (err) {
     console.error(err);
-    status.innerHTML = `<span style="color:#ff6b6b">Error: ${err.message}</span>`;
+    status.innerHTML = `<span style="color:#ff6b6b">Error: ${escapeHtml(err.message)}</span>`;
   }
 });
 
@@ -655,7 +913,7 @@ async function loadDemFromUrl(url, label) {
     await loadDemFromArrayBuffer(buf, label);
   } catch (err) {
     console.error(err);
-    status.innerHTML = `<span style="color:#ff6b6b">Error: ${err.message}</span>`;
+    status.innerHTML = `<span style="color:#ff6b6b">Error: ${escapeHtml(err.message)}</span>`;
   }
 }
 
@@ -890,13 +1148,16 @@ async function loadFabdemForView() {
     await loadDemFromArrayBuffer(buf, `FABDEM ${outW}×${outH} (${opened.length} tile${opened.length === 1 ? "" : "s"})`);
   } catch (err) {
     console.error(err);
-    status.innerHTML = `<span style="color:#ff6b6b">FABDEM load failed: ${err.message}</span>`;
+    status.innerHTML = `<span style="color:#ff6b6b">FABDEM load failed: ${escapeHtml(err.message)}</span>`;
   } finally {
     progress.classList.remove("active");
   }
 }
 
 async function loadDemFromArrayBuffer(buf, label) {
+  // A compute still running against the previous DEM would render arrays
+  // sized to the old H×W onto the new grid — kill it before anything else.
+  cancelActiveCompute();
   status.textContent = `Loading ${label}…`;
   const tiff = await GeoTIFF.fromArrayBuffer(buf);
   const image = await tiff.getImage();
@@ -1003,6 +1264,7 @@ async function loadDemFromArrayBuffer(buf, label) {
   }
   state.refMarkers = [];
   state.refPoints = [];
+  state.qmcIndex = 0;
   state.src = null;
   state.dst = null;
   state.lastResult = null;
@@ -1065,6 +1327,24 @@ async function loadDemFromArrayBuffer(buf, label) {
   const reliefRow = document.getElementById("relief-row");
   if (reliefRow) reliefRow.style.display = state.demReliefDataUrl ? "" : "none";
   applyLayerControls();
+
+  // A bundle was loaded before this DEM (or against a mismatched one) and
+  // is waiting in state.pendingBundle. If this DEM matches its grid,
+  // re-apply it now — parameters, src/dst/ref markers, and the cached
+  // rasters all come back without a recompute.
+  if (state.pendingBundle) {
+    const pb = state.pendingBundle;
+    const bH = pb.md.dem?.H, bW = pb.md.dem?.W;
+    const dimsKnown = Number.isFinite(bH) && Number.isFinite(bW);
+    if (!dimsKnown || (H === bH && W === bW)) {
+      state.pendingBundle = null; // applyMetadataToUI re-stashes only on mismatch
+      applyMetadataToUI(pb.md, pb.bin);
+    } else {
+      status.innerHTML =
+        `<span style="color:#ff9d3d">DEM loaded (${W}×${H}) doesn't match the ` +
+        `pending bundle (${bW}×${bH}) — load the matching DEM to restore it.</span>`;
+    }
+  }
 }
 
 // ------- Vector network loader (GeoPackage) -------
@@ -1102,15 +1382,29 @@ function parseGpkgGeom(blob) {
   return parseWKB(view, wkbStart);
 }
 
+// Decode a WKB geometry-type word into the 2-D base type and the per-vertex
+// byte stride. Handles both dimension encodings in the wild:
+//   ISO/OGC: base + 1000·Z + 2000·M + 3000·ZM  (LineString Z = 1002 — what
+//            QGIS writes into GeoPackages by default for 3-D sources)
+//   EWKB:    flag bits 0x80000000 (Z) / 0x40000000 (M)
+// The old code masked with `t & 0x0fff`, which left ISO-typed geometries
+// (1002, 1005, …) unrecognised — 3-D .gpkg files silently rasterised to an
+// empty network.
+function wkbTypeInfo(t) {
+  const code = t & 0x0fffffff;       // drop EWKB flag bits
+  const base = code % 1000;          // ISO offsets: 1002 → 2, 3005 → 5
+  const isoDim = Math.floor(code / 1000) | 0;
+  const hasZ = (t & 0x80000000) !== 0 || isoDim === 1 || isoDim === 3;
+  const hasM = (t & 0x40000000) !== 0 || isoDim === 2 || isoDim === 3;
+  return { base, stride: 16 + (hasZ ? 8 : 0) + (hasM ? 8 : 0) };
+}
+
 function parseWKB(view, off) {
   const le = view.getUint8(off) === 1;
   off += 1;
   const t = view.getUint32(off, le);
   off += 4;
-  const baseType = t & 0x0fff;            // strip Z/M flags
-  const hasZ = (t & 0x80000000) || (t & 0x1000) || baseType !== t && (Math.floor(t / 1000) === 1 || Math.floor(t / 1000) === 3);
-  const hasM = (t & 0x40000000) || (t & 0x2000) || baseType !== t && (Math.floor(t / 1000) === 2 || Math.floor(t / 1000) === 3);
-  const stride = 16 + (hasZ ? 8 : 0) + (hasM ? 8 : 0);
+  const { base: baseType, stride } = wkbTypeInfo(t);
 
   if (baseType === 2) {
     // LineString
@@ -1129,11 +1423,8 @@ function parseWKB(view, off) {
     for (let j = 0; j < k; j++) {
       const subLE = view.getUint8(off) === 1; off += 1;
       const subT = view.getUint32(off, subLE); off += 4;
-      const subBase = subT & 0x0fff;
+      const { base: subBase, stride: subStride } = wkbTypeInfo(subT);
       if (subBase !== 2) return null;
-      const subStride = 16
-        + ((subT & 0x80000000 || Math.floor(subT / 1000) === 1 || Math.floor(subT / 1000) === 3) ? 8 : 0)
-        + ((subT & 0x40000000 || Math.floor(subT / 1000) === 2 || Math.floor(subT / 1000) === 3) ? 8 : 0);
       const n = view.getUint32(off, subLE); off += 4;
       const ln = new Array(n);
       for (let i = 0; i < n; i++) {
@@ -1214,10 +1505,14 @@ async function loadVectorNetwork(file) {
   progressBar.style.width = "50%";
 
   try {
-    const cont = db.exec("SELECT table_name, srs_id FROM gpkg_geometry_columns LIMIT 1");
+    const cont = db.exec("SELECT table_name, column_name, srs_id FROM gpkg_geometry_columns LIMIT 1");
     if (!cont.length) throw new Error("No gpkg_geometry_columns entry — not a valid .gpkg?");
     const tableName = cont[0].values[0][0];
-    const srsId     = cont[0].values[0][1];
+    // Geometry column name from the metadata — QGIS/ogr2ogr default to
+    // "geom", but "geometry"/"shape" exist in the wild; hardcoding "geom"
+    // made those files fail to load.
+    const geomCol   = cont[0].values[0][1] || "geom";
+    const srsId     = cont[0].values[0][2];
 
     // Resolve source CRS for proj4. WGS84 is built in; everything else
     // uses the WKT/PROJ string from gpkg_spatial_ref_sys.
@@ -1253,7 +1548,7 @@ async function loadVectorNetwork(file) {
 
     // Try the rtree-filtered query first; fall back to a full scan if the
     // table isn't there.
-    const rtree = `rtree_${tableName}_geom`;
+    const rtree = `rtree_${tableName}_${geomCol}`;
     let stmt, totalFeatures = 0, useRtree = true;
     try {
       // Pre-count for the progress bar.
@@ -1265,7 +1560,7 @@ async function loadVectorNetwork(file) {
       totalFeatures = cnt.get()[0] | 0;
       cnt.free();
       stmt = db.prepare(`
-        SELECT t.geom FROM "${tableName}" t
+        SELECT t."${geomCol}" FROM "${tableName}" t
         WHERE t.fid IN (
           SELECT id FROM "${rtree}"
           WHERE minx <= ? AND maxx >= ? AND miny <= ? AND maxy >= ?
@@ -1281,7 +1576,7 @@ async function loadVectorNetwork(file) {
         totalFeatures = cnt.get()[0] | 0;
         cnt.free();
       } catch {}
-      stmt = db.prepare(`SELECT geom FROM "${tableName}"`);
+      stmt = db.prepare(`SELECT "${geomCol}" FROM "${tableName}"`);
     }
 
     const lineWidth = Math.max(1, parseInt(document.getElementById("vec-width")?.value, 10) || 1);
@@ -1291,6 +1586,12 @@ async function loadVectorNetwork(file) {
     const project = isSrcWgs ? (xy) => xy : (xy) => proj4(`EPSG:${srsId}`, "EPSG:4326", xy);
 
     let scanned = 0, rasterised = 0;
+    // Collect WGS84 geometry for the optional vector rendering. Capped so a
+    // monster network can't blow up memory / the Leaflet canvas — past the
+    // cap we keep rasterising but stop storing, and disable the draw toggle.
+    const VEC_RENDER_VERTEX_CAP = 2_000_000;
+    let storedVertices = 0;
+    let collected = [];
     while (stmt.step()) {
       const row = stmt.get();
       const blob = row[0];
@@ -1298,9 +1599,12 @@ async function loadVectorNetwork(file) {
       const lines = parseGpkgGeom(blob);
       if (!lines) continue;
       for (const coords of lines) {
+        const lineLatLngs = collected !== null && storedVertices < VEC_RENDER_VERTEX_CAP
+          ? [] : null;
         let prevR = null, prevC = null;
         for (const xy of coords) {
           const [lng, lat] = project(xy);
+          if (lineLatLngs) { lineLatLngs.push([lat, lng]); storedVertices++; }
           const c = Math.floor((lng - originX) / dx);
           const r = Math.floor((originY - lat) / dy);
           if (prevR !== null) {
@@ -1315,6 +1619,11 @@ async function loadVectorNetwork(file) {
             }
           }
           prevR = r; prevC = c;
+        }
+        if (lineLatLngs && lineLatLngs.length > 1) collected.push(lineLatLngs);
+        if (storedVertices >= VEC_RENDER_VERTEX_CAP && collected !== null) {
+          console.warn(`[network] geometry over ${VEC_RENDER_VERTEX_CAP} vertices — vector rendering disabled, raster mask unaffected.`);
+          collected = null;
         }
         rasterised++;
       }
@@ -1333,6 +1642,20 @@ async function loadVectorNetwork(file) {
     let networkCells = 0;
     for (let i = 0; i < networkMask.length; i++) if (networkMask[i]) networkCells++;
 
+    if (networkCells === 0) {
+      // Rasterised to nothing — almost always a CRS or geometry-type
+      // mismatch with the DEM. DON'T store the mask: an empty mask AND'd
+      // with the DEM would make every click un-snappable and Compute
+      // unusable. Say so loudly instead.
+      document.getElementById("vec-meta").innerHTML =
+        `EPSG:${srsId} · scanned <span class="v">${scanned}</span> features, ` +
+        `drew ${rasterised} — <span style="color:#ff6b6b">0 cells on this DEM</span>`;
+      status.innerHTML =
+        '<span style="color:#ff6b6b">Network rasterised to 0 cells on this DEM — not applied. ' +
+        'Check the .gpkg CRS and that it contains LineString geometry overlapping the DEM extent.</span>';
+      return;
+    }
+
     state.networkMask = networkMask;
     state.networkSrsId = srsId;
     state.networkFeatureCount = rasterised;
@@ -1341,48 +1664,258 @@ async function loadVectorNetwork(file) {
       `<span class="v">${networkCells.toLocaleString()}</span> network cells (${(100 * networkCells / (W * H)).toFixed(1)}% of grid)`;
     status.textContent = "Network loaded.";
     state.lastResult = null; // previous compute used the un-constrained mask
+    cancelActiveCompute();   // …and so would an in-flight one
+    state.networkLines = collected;
+    applyNetworkLinesOverlay();
   } finally {
     db.close();
     progress.classList.remove("active");
   }
 }
 
+// Rasterise an array of WGS84 polylines ([[lat,lng], …] each) onto the DEM
+// grid and install the result as the active network (mask, meta, rendering,
+// compute invalidation). Shared tail for non-gpkg network sources (OSM).
+function installNetworkFromLines(lines, srsId, sourceLabel) {
+  const { originX, originY, H, W, dx, dy } = state.dem;
+  const lineWidth = Math.max(1, parseInt(document.getElementById("vec-width")?.value, 10) || 1);
+  const halfWidth = (lineWidth - 1) >> 1;
+  const networkMask = new Uint8Array(W * H);
+  let rasterised = 0;
+  for (const coords of lines) {
+    let prevR = null, prevC = null;
+    for (const [lat, lng] of coords) {
+      const c = Math.floor((lng - originX) / dx);
+      const r = Math.floor((originY - lat) / dy);
+      if (prevR !== null && !(
+        (prevR < 0 && r < 0) || (prevR >= H && r >= H) ||
+        (prevC < 0 && c < 0) || (prevC >= W && c >= W)
+      )) {
+        rasterLine(prevR, prevC, r, c, networkMask, W, H, halfWidth);
+      }
+      prevR = r; prevC = c;
+    }
+    rasterised++;
+  }
+
+  let networkCells = 0;
+  for (let i = 0; i < networkMask.length; i++) if (networkMask[i]) networkCells++;
+  if (networkCells === 0) {
+    status.innerHTML =
+      `<span style="color:#ff6b6b">${sourceLabel}: rasterised to 0 cells on this DEM — not applied.</span>`;
+    return false;
+  }
+
+  state.networkMask = networkMask;
+  state.networkSrsId = srsId;
+  state.networkFeatureCount = rasterised;
+  document.getElementById("vec-meta").innerHTML =
+    `${escapeHtml(sourceLabel)} · <span class="v">${rasterised}</span> lines drawn<br/>` +
+    `<span class="v">${networkCells.toLocaleString()}</span> network cells (${(100 * networkCells / (W * H)).toFixed(1)}% of grid)`;
+  status.textContent = "Network loaded.";
+  state.lastResult = null;
+  cancelActiveCompute();
+  // Keep geometry for the optional vector rendering, same cap as the gpkg path.
+  let vertices = 0;
+  let kept = [];
+  for (const ln of lines) {
+    vertices += ln.length;
+    if (vertices > 2_000_000) { kept = null; break; }
+    kept.push(ln);
+  }
+  state.networkLines = kept;
+  applyNetworkLinesOverlay();
+  return true;
+}
+
+// Pull the street network (highway=*) from OpenStreetMap via the Overpass
+// API, over the intersection of the current map view and the DEM extent.
+const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+
+async function loadOsmNetwork() {
+  if (!state.dem) {
+    status.innerHTML = '<span style="color:#ff6b6b">Load a DEM first.</span>';
+    return;
+  }
+  const { originX, originY, H, W, dx, dy } = state.dem;
+  const b = map.getBounds();
+  const south = Math.max(b.getSouth(), originY - H * dy);
+  const north = Math.min(b.getNorth(), originY);
+  const west  = Math.max(b.getWest(),  originX);
+  const east  = Math.min(b.getEast(),  originX + W * dx);
+  if (!(south < north && west < east)) {
+    status.innerHTML = '<span style="color:#ff6b6b">The current map view doesn\'t intersect the DEM — pan to the DEM first.</span>';
+    return;
+  }
+  const osmBtn = document.getElementById("vec-osm");
+  if (osmBtn) osmBtn.disabled = true;
+  progress.classList.add("active");
+  progressBar.style.width = "20%";
+  status.textContent = "Querying OSM (Overpass) for highway=* …";
+  try {
+    // `out geom` inlines each way's coordinates — no separate node lookups.
+    const query =
+      `[out:json][timeout:90];way["highway"](${south.toFixed(6)},${west.toFixed(6)},${north.toFixed(6)},${east.toFixed(6)});out geom;`;
+    const resp = await fetch(OVERPASS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "data=" + encodeURIComponent(query),
+    });
+    if (!resp.ok) throw new Error(`Overpass HTTP ${resp.status} (busy? try again in a minute)`);
+    progressBar.style.width = "60%";
+    status.textContent = "Parsing OSM response…";
+    const json = await resp.json();
+    const lines = [];
+    for (const el of json.elements || []) {
+      if (el.type === "way" && Array.isArray(el.geometry) && el.geometry.length > 1) {
+        lines.push(el.geometry.map((g) => [g.lat, g.lon]));
+      }
+    }
+    if (!lines.length) throw new Error("Overpass returned no highway=* ways in this extent.");
+    progressBar.style.width = "80%";
+    status.textContent = `Rasterising ${lines.length.toLocaleString()} OSM ways…`;
+    // Let the status paint before the synchronous rasterise.
+    await new Promise((r) => setTimeout(r, 0));
+    installNetworkFromLines(lines, 4326, "OSM highway=*");
+  } catch (err) {
+    console.error("[osm]", err);
+    status.innerHTML = `<span style="color:#ff6b6b">OSM network pull failed: ${escapeHtml(err.message)}</span>`;
+  } finally {
+    progress.classList.remove("active");
+    if (osmBtn) osmBtn.disabled = false;
+  }
+}
+
 function clearVectorNetwork() {
+  cancelActiveCompute(); // in-flight runs are constrained to the old network
   state.networkMask = null;
   state.networkSrsId = null;
   state.networkFeatureCount = 0;
+  state.networkLines = null;
+  if (state.networkLinesLayer) { state.networkLinesLayer.remove(); state.networkLinesLayer = null; }
   const meta = document.getElementById("vec-meta");
   if (meta) meta.innerHTML = "No network loaded.";
   const inp = document.getElementById("vector-file");
   if (inp) inp.value = "";
 }
 
-// Snap a (row, col) pixel to the nearest network cell within radius (in
-// cell units). Returns the original RC if the network is off, the radius
-// is 0, or no network cell exists in the search box.
+// ---- Optional vector-network rendering (black lines, fixed ground width) --
+// Leaflet polyline weights are in CSS pixels, so a fixed ground width needs
+// a per-zoom conversion: metres per CSS pixel in Web Mercator at zoom z is
+// 156543.03 · cos(lat) / 2^z. Re-applied on zoomend and on width/opacity
+// input changes (live setStyle on the existing layers — no rebuild).
+
+function networkLineWidthM() {
+  const v = parseFloat(document.getElementById("vec-render-width")?.value);
+  return Number.isFinite(v) && v > 0 ? v : 4;
+}
+
+function networkLineOpacity() {
+  const v = parseFloat(document.getElementById("vec-render-opacity")?.value);
+  return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1;
+}
+
+function networkLineWeightPx() {
+  const zoom = map.getZoom();
+  const lat = map.getCenter().lat;
+  const mPerPx = 156543.03392 * Math.abs(Math.cos((lat * Math.PI) / 180)) / 2 ** zoom;
+  // Floor at 0.75 px so the network stays visible when zoomed far out.
+  return Math.max(0.75, networkLineWidthM() / mPerPx);
+}
+
+function applyNetworkLinesOverlay() {
+  if (state.networkLinesLayer) { state.networkLinesLayer.remove(); state.networkLinesLayer = null; }
+  const on = !!document.getElementById("vec-render")?.checked;
+  if (!on) return;
+  if (!state.networkLines || !state.networkLines.length) {
+    if (state.networkMask) {
+      // Mask exists but geometry wasn't kept (over the vertex cap).
+      status.textContent = "Network too large for vector rendering (raster mask still active).";
+    }
+    return;
+  }
+  // One shared canvas renderer — thousands of SVG paths would crawl.
+  const renderer = L.canvas({ padding: 0.3, pane: "networkPane" });
+  const weight = networkLineWeightPx();
+  const opacity = networkLineOpacity();
+  const group = L.layerGroup();
+  for (const line of state.networkLines) {
+    group.addLayer(L.polyline(line, {
+      color: "#000",
+      weight,
+      opacity,
+      interactive: false,
+      renderer,
+    }));
+  }
+  group.addTo(map);
+  state.networkLinesLayer = group;
+}
+
+function updateNetworkLineStyle() {
+  if (!state.networkLinesLayer) return;
+  const weight = networkLineWeightPx();
+  const opacity = networkLineOpacity();
+  state.networkLinesLayer.eachLayer((l) => l.setStyle({ weight, opacity }));
+}
+
+map.on("zoomend", updateNetworkLineStyle);
+
+// Whether the loaded network actually constrains the NEXT compute. The
+// "Constrain compute to network" checkbox lets a network stay loaded —
+// e.g. for the vector line rendering — without restricting the search
+// graph (or snapping clicks, or gating src/dst).
+function networkConstraintActive() {
+  return !!state.networkMask && (document.getElementById("vec-constrain")?.checked ?? true);
+}
+
+// Snap a (row, col) pixel to the nearest network cell. Expanding-ring
+// search with NO hard cutoff (capped only by the grid): the old version
+// gave up at the snap-radius input, which on sparse networks turned every
+// map click into a rejection — src never set, Compute permanently
+// disabled. The radius input is now the "silent zone": snaps within it
+// are quiet, snaps beyond it work too but the caller can tell the user
+// how far the point moved (see snapToNetwork.lastDistance).
+// Returns the original RC when the network is off / not constraining /
+// genuinely empty.
 function snapToNetwork(rc) {
-  if (!state.networkMask || !state.dem) return rc;
-  const radius = Math.max(0, parseInt(document.getElementById("vec-snap")?.value, 10) || 0);
-  if (radius === 0) return rc;
+  snapToNetwork.lastDistance = 0;
+  if (!networkConstraintActive() || !state.dem) return rc;
   const [r, c] = rc;
   const { W, H, mask } = state.dem;
   if (r < 0 || r >= H || c < 0 || c >= W) return rc;
   if (state.networkMask[r * W + c]) return rc;
-  let bestD2 = Infinity, bestRC = null;
-  for (let dr = -radius; dr <= radius; dr++) {
-    const rr = r + dr;
-    if (rr < 0 || rr >= H) continue;
-    for (let dc = -radius; dc <= radius; dc++) {
-      const cc = c + dc;
-      if (cc < 0 || cc >= W) continue;
-      const i = rr * W + cc;
-      if (state.networkMask[i] && mask[i]) {
-        const d2 = dr * dr + dc * dc;
-        if (d2 < bestD2) { bestD2 = d2; bestRC = [rr, cc]; }
+  const net = state.networkMask;
+  const maxRing = Math.max(H, W);
+  for (let ring = 1; ring <= maxRing; ring++) {
+    let bestD2 = Infinity, bestRC = null;
+    // Walk the square ring at Chebyshev distance `ring`. The first ring
+    // containing network cells holds the Euclidean nearest among rings
+    // ≤ ring+1; checking one extra ring after a hit keeps it exact enough
+    // for snapping purposes (cells, not metres).
+    const scanRing = (rg) => {
+      for (let dc = -rg; dc <= rg; dc++) {
+        for (const dr of (Math.abs(dc) === rg
+          ? Array.from({ length: 2 * rg + 1 }, (_, k) => k - rg)
+          : [-rg, rg])) {
+          const rr = r + dr, cc = c + dc;
+          if (rr < 0 || rr >= H || cc < 0 || cc >= W) continue;
+          const i = rr * W + cc;
+          if (net[i] && mask[i]) {
+            const d2 = dr * dr + dc * dc;
+            if (d2 < bestD2) { bestD2 = d2; bestRC = [rr, cc]; }
+          }
+        }
       }
+    };
+    scanRing(ring);
+    if (bestRC) {
+      scanRing(Math.min(maxRing, ring + 1));
+      snapToNetwork.lastDistance = Math.sqrt(bestD2);
+      return bestRC;
     }
   }
-  return bestRC || rc;
+  return rc; // empty network — caller handles the message
 }
 
 // ------- Map clicks: set points -------
@@ -1435,16 +1968,25 @@ map.on("click", (e) => {
     status.textContent = "Clicked cell is nodata.";
     return;
   }
-  if (state.networkMask && !state.networkMask[r * state.dem.W + c]) {
-    status.innerHTML = '<span style="color:#ff6b6b">No network cell within snap radius — increase the radius or click closer to a line.</span>';
+  if (networkConstraintActive() && !state.networkMask[r * state.dem.W + c]) {
+    // Snap searches the whole grid now, so this only fires when the network
+    // rasterised to zero usable cells (CRS/geometry mismatch with the DEM).
+    status.innerHTML = '<span style="color:#ff6b6b">The loaded network has no usable cells on this DEM (check its CRS/geometry) — clicks can\'t be snapped. Untick "Constrain compute to network" or clear the network to continue.</span>';
     return;
   }
-  // Density mode in "click" placement: every click adds a reference point.
-  // src/dst are left alone in this mode.
+  // Density mode: clicks add reference points ("click" placement) or do
+  // nothing ("random" placement). They must never fall through to the
+  // src/dst branch below — density runs ignore src/dst, so a silently-set
+  // source marker would contradict the "— density —" displays and leak a
+  // stale seed into the compute message.
   const densityOn = !!document.getElementById("want-density")?.checked;
-  const densityClick = (document.getElementById("ref-source")?.value || "click") === "click";
-  if (densityOn && densityClick) {
-    addRefPoint([r, c]);
+  if (densityOn) {
+    const densityClick = (document.getElementById("ref-source")?.value || "click") === "click";
+    if (densityClick) {
+      addRefPoint([r, c]);
+    } else {
+      status.textContent = 'Ref placement is set to "random" — use "Place random" or switch placement to clicks.';
+    }
     return;
   }
   if (!state.src) {
@@ -1558,22 +2100,95 @@ function clearRefPoints() {
   for (const m of state.refMarkers) m.remove();
   state.refMarkers = [];
   state.refPoints = [];
+  state.qmcIndex = 0;
   syncRefDisplay();
+}
+
+// ---- Quasi-Monte-Carlo point sets for reference placement ----------------
+// Low-discrepancy sequences cover the DEM evenly (no clumps/gaps), so the
+// density field converges with fewer reference points than pseudo-random
+// placement. Both generators are indexed (stateless given i), and the app
+// keeps a persistent counter (state.qmcIndex) so successive "Place random"
+// clicks CONTINUE the sequence — re-starting at i=0 every click would drop
+// the same points on top of the previous batch.
+
+// Bit-reversal of a u32 = van der Corput base-2 radical inverse, which is
+// both the Halton base-2 axis and Sobol dimension 1.
+function bitReverse32(x) {
+  x = ((x & 0x55555555) << 1) | ((x >>> 1) & 0x55555555);
+  x = ((x & 0x33333333) << 2) | ((x >>> 2) & 0x33333333);
+  x = ((x & 0x0f0f0f0f) << 4) | ((x >>> 4) & 0x0f0f0f0f);
+  x = ((x & 0x00ff00ff) << 8) | ((x >>> 8) & 0x00ff00ff);
+  return ((x << 16) | (x >>> 16)) >>> 0;
+}
+
+// Sobol dimension-2 direction numbers (primitive polynomial x²+x+1; the
+// recurrence reproduces the canonical m = 1, 3, 5, 15, 17, … table).
+const SOBOL_DIM2_V = (() => {
+  const v = new Uint32Array(32);
+  v[0] = 0x80000000;
+  for (let j = 1; j < 32; j++) v[j] = (v[j - 1] ^ (v[j - 1] >>> 1)) >>> 0;
+  return v;
+})();
+
+// i-th 2-D Sobol point, i ≥ 1 (i = 0 is the degenerate (0,0) corner).
+// First points: (.5,.5) (.25,.75) (.75,.25) (.125,.625) …
+function sobolPoint2D(i) {
+  const u = bitReverse32(i >>> 0) / 2 ** 32;
+  let x = 0;
+  for (let j = 0; j < 32; j++) {
+    if ((i >>> j) & 1) x = (x ^ SOBOL_DIM2_V[j]) >>> 0;
+  }
+  return [u, x / 2 ** 32];
+}
+
+// i-th 2-D Halton point (bases 2 and 3), i ≥ 1.
+function haltonPoint2D(i) {
+  const u = bitReverse32(i >>> 0) / 2 ** 32;
+  let v = 0, f = 1 / 3, k = i;
+  while (k > 0) {
+    v += (k % 3) * f;
+    k = (k / 3) | 0;
+    f /= 3;
+  }
+  return [u, v];
 }
 
 function placeRandomRefPoints(n) {
   if (!state.dem) return;
   const { mask, H, W } = state.dem;
   // Reservoir of valid cell indices is too big to enumerate for huge DEMs;
-  // rejection sampling is fine for typical mask densities (~99% valid).
+  // rejection sampling is fine for typical mask densities (~99% valid) and
+  // preserves the QMC sequences' even coverage over the masked subset.
   const want = Math.max(1, Math.min(2000, n | 0));
+  const sampling = document.getElementById("ref-sampling")?.value || "random";
+  const nextUV =
+    sampling === "sobol"  ? () => sobolPoint2D(++state.qmcIndex) :
+    sampling === "halton" ? () => haltonPoint2D(++state.qmcIndex) :
+    () => [Math.random(), Math.random()];
   let attempts = 0;
   const cap = want * 200;
   const placed = [];
+  const seen = new Set();
+  // With a constraining network, snap each sample to its nearest network
+  // cell (grid-wide) — sampling the raw mask and rejecting would need
+  // ~1/density attempts on sparse networks, and compute-time snapping
+  // would silently move the points anyway. Snapped samples can collide,
+  // hence the dedupe.
+  const constrained = networkConstraintActive();
   while (placed.length < want && attempts++ < cap) {
-    const r = (Math.random() * H) | 0;
-    const c = (Math.random() * W) | 0;
-    if (mask[r * W + c]) placed.push([r, c]);
+    const [u, v] = nextUV();
+    let r = (v * H) | 0;
+    let c = (u * W) | 0;
+    if (!mask[r * W + c]) continue;
+    if (constrained) {
+      [r, c] = snapToNetwork([r, c]);
+      if (!state.networkMask[r * W + c]) continue; // empty network
+    }
+    const key = r * W + c;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    placed.push([r, c]);
   }
   for (const rc of placed) addRefPoint(rc);
 }
@@ -1620,6 +2235,9 @@ runBtn.addEventListener("click", async () => {
   const eta = parseFloat(document.getElementById("eta").value);
   const eMaxRaw = parseFloat(document.getElementById("e-max")?.value);
   const eMax = Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0;
+  // Round mode only: budget caps each leg ("leg", default — totals reach
+  // 2·eMax) or the round-trip sum ("total").
+  const eMaxMode = document.getElementById("e-max-mode")?.value || "leg";
 
   // Optional extras (default off — energy-only is the fast path)
   const wantPasses = !!document.getElementById("want-passes")?.checked;
@@ -1645,20 +2263,27 @@ runBtn.addEventListener("click", async () => {
     return;
   }
 
-  // If a network is loaded, src/dst must lie on it — otherwise the Dijkstra
-  // is constrained to network cells and can't relax through them. Re-snap
-  // here defensively: covers the case where the user clicked points BEFORE
-  // loading the .gpkg, and the case where snap-radius was 0 at click time.
-  // If a point can't be snapped (no network cell within radius) we abort
-  // with a clear message rather than silently producing empty routes.
-  if (state.networkMask && state.dem) {
+  // Whether the loaded network constrains THIS run (checkbox can disable
+  // the constraint while keeping the network loaded for rendering).
+  const constrainNet = networkConstraintActive();
+
+  // If a constraining network is loaded, src/dst must lie on it — otherwise
+  // the Dijkstra is constrained to network cells and can't relax through
+  // them. Re-snap here defensively: covers the case where the user clicked
+  // points BEFORE loading the .gpkg, and the case where snap-radius was 0
+  // at click time. If a point can't be snapped (no network cell within
+  // radius) we abort with a clear message rather than silently producing
+  // empty routes.
+  if (constrainNet && state.dem) {
     const W = state.dem.W;
     const offNet = (rc) => rc && !state.networkMask[rc[0] * W + rc[1]];
     const reSnapAndUpdate = (rc, marker, displayId, label) => {
       if (!rc || !offNet(rc)) return rc;
       const snapped = snapToNetwork(rc);
       if (offNet(snapped)) {
-        status.innerHTML = `<span style="color:#ff6b6b">${label} isn't on the network and no network cell is within snap radius — increase the radius or move the point closer to a line.</span>`;
+        // Snap is grid-wide now — this means the network has no usable
+        // cells at all on this DEM.
+        status.innerHTML = `<span style="color:#ff6b6b">${label} can't be snapped — the loaded network has no usable cells on this DEM (check its CRS/geometry), or untick "Constrain compute to network".</span>`;
         return null;
       }
       // Move the marker so the user sees where compute actually started.
@@ -1672,123 +2297,448 @@ runBtn.addEventListener("click", async () => {
       }
       return snapped;
     };
-    const newSrc = reSnapAndUpdate(state.src, state.srcMarker, "src-display", "Source");
-    if (newSrc === null) return;
-    state.src = newSrc;
+    // Gate each point on its existence: state.src is ALWAYS null in
+    // density mode, and the old unconditional call returned that null
+    // through `if (newSrc === null) return;` — silently aborting every
+    // density compute whenever a constraining network was loaded.
+    if (state.src) {
+      const newSrc = reSnapAndUpdate(state.src, state.srcMarker, "src-display", "Source");
+      if (newSrc === null) return;
+      state.src = newSrc;
+    }
     if (state.dst) {
       const newDst = reSnapAndUpdate(state.dst, state.dstMarker, "dst-display", "Destination");
       if (newDst === null) return;
       state.dst = newDst;
     }
+    // Density refs get the same defensive re-snap: refs placed before the
+    // network loaded (or via random placement over the whole DEM) may sit
+    // off-network; their per-ref Dijkstras would start from isolated
+    // seeds. Markers follow their snapped cells.
+    if (wantDensity && state.refPoints?.length) {
+      for (let i = 0; i < state.refPoints.length; i++) {
+        const rc = state.refPoints[i];
+        if (!offNet(rc)) continue;
+        const snapped = snapToNetwork(rc);
+        if (offNet(snapped)) {
+          status.innerHTML = '<span style="color:#ff6b6b">Reference points can\'t be snapped — the loaded network has no usable cells on this DEM, or untick "Constrain compute to network".</span>';
+          return;
+        }
+        state.refPoints[i] = snapped;
+        const m = state.refMarkers[i];
+        if (m) {
+          const ll = pixelToLatLng(snapped[0], snapped[1]);
+          if (ll) m.setLatLng(ll);
+          m.unbindTooltip().bindTooltip(`ref ${i + 1} · r=${snapped[0]}, c=${snapped[1]}`);
+        }
+      }
+    }
   }
 
-  // Tear down old worker if any (we can't re-use after transferred buffers)
-  if (state.worker) state.worker.terminate();
-
-  // Single JS worker — wasm support has been removed.
-  state.worker = new Worker(WORKER_URL);
-  state.engine = "js";
+  // Cancel any in-flight run, then capture this run's generation. Every
+  // worker callback below checks it — a mismatch means the run was
+  // superseded (new Compute click, new DEM/network) and the message is
+  // dropped instead of rendered against the wrong grid.
+  cancelActiveCompute();
+  const gen = state.computeGen;
 
   status.textContent = "Computing…";
   progress.classList.add("active");
   progressBar.style.width = "0%";
   runBtn.disabled = true;
 
-  // ETA bookkeeping. The wasm worker doesn't emit progress messages; for
-  // it we just show "Computing…" and the static estimate. The JS worker
-  // emits progress every ~N/50 cells, which gives a usable ETA after the
-  // first few percent.
+  // ETA bookkeeping. The worker emits progress every ~N/50 cells, which
+  // gives a usable ETA after the first few percent.
   state.computeStartedAt = performance.now();
   state.estimatedTotalMs = 0;
   // Cache density's expected ref count so the progress text reads
-  // "ref X/N" while the worker is iterating.
+  // "ref X/N" while the workers are iterating.
   state.computeRefTotal = wantDensity ? state.refPoints.length : 0;
 
-  state.worker.onmessage = (ev) => {
-    const m = ev.data;
-    if (m.kind === "progress") {
-      const pct = Math.min(100, m.progress * 100);
-      progressBar.style.width = `${pct.toFixed(1)}%`;
-      // Live ETA: linear extrapolation. Skip the noisy first 5% of the run.
-      if (m.progress > 0.05) {
-        const elapsed = performance.now() - state.computeStartedAt;
-        const total = elapsed / m.progress;
-        const remaining = Math.max(0, total - elapsed);
-        let label;
-        if (state.computeRefTotal > 0) {
-          // Density: progress fraction is (k+1)/N_refs after each ref.
-          const cur = Math.max(1, Math.min(state.computeRefTotal, Math.ceil(m.progress * state.computeRefTotal)));
-          label = `Computing density: ref ${cur}/${state.computeRefTotal} (${pct.toFixed(0)}%)`;
-        } else {
-          label = `Computing… ${pct.toFixed(0)}%`;
-        }
-        status.textContent = `${label} — ${formatDuration(remaining)} left`;
-      }
-    } else if (m.kind === "done") {
-      progress.classList.remove("active");
-      updateRunButtonState();
-      state.computeStartedAt = 0;
-      renderResult(m);
-      status.textContent = `Done in ${m.elapsedMs.toFixed(0)} ms.`;
-    } else if (m.kind === "error") {
-      progress.classList.remove("active");
-      updateRunButtonState();
-      state.computeStartedAt = 0;
-      status.innerHTML = `<span style="color:#ff6b6b">Worker error: ${m.message}</span>`;
-    } else if (m.kind === "warning") {
-      // Non-fatal — the worker is still going and will follow up with
-      // a `done` message. Yellow-tint the status; the next progress
-      // tick will overwrite it.
-      console.warn("[worker]", m.message);
-      status.innerHTML = `<span style="color:#ffb86b">${m.message}</span>`;
-    }
-  };
-
-  // Transfer the DEM to the worker (clone, since we need to keep our copy).
-  // For very large DEMs you'd transfer ownership and re-load on each run.
-  const heightCopy = new Float32Array(state.dem.height);
-  const maskCopy = new Uint8Array(state.dem.mask);
-  // Send the network mask separately. The worker AND's it with the DEM
-  // mask for Dijkstra, but keeps the original DEM mask available for
-  // post-Dijkstra interpolation across non-network cells.
-  const networkMaskCopy = state.networkMask ? new Uint8Array(state.networkMask) : null;
+  const { H, W } = state.dem;
+  const N = H * W;
   const wantNetworkInterp = !!document.getElementById("net-interp")?.checked;
   const interpMaxDistance = Math.max(1, parseInt(document.getElementById("net-interp-max-dist")?.value, 10) || 50);
   const interpSmoothing   = Math.max(0, parseInt(document.getElementById("net-interp-smoothing")?.value, 10) || 0);
 
-  state.worker.postMessage(
+  const computeFailed = (message) => {
+    if (gen !== state.computeGen) return;
+    cancelActiveCompute();
+    status.innerHTML = `<span style="color:#ff6b6b">Worker error: ${escapeHtml(message)}</span>`;
+  };
+
+  const computeDone = (m) => {
+    if (gen !== state.computeGen) return;
+    // Terminate now rather than waiting for the next run — finished
+    // workers pin their DEM copy + Dijkstra buffers otherwise.
+    for (const w of state.workers) w.terminate();
+    state.workers = [];
+    progress.classList.remove("active");
+    updateRunButtonState();
+    state.computeStartedAt = 0;
+    renderResult(m);
+    status.textContent = `Done in ${m.elapsedMs.toFixed(0)} ms.`;
+  };
+
+  const reportProgress = (frac) => {
+    if (gen !== state.computeGen) return;
+    const pct = Math.min(100, frac * 100);
+    progressBar.style.width = `${pct.toFixed(1)}%`;
+    // Live ETA: linear extrapolation. Skip the noisy first 5% of the run.
+    if (frac > 0.05) {
+      const elapsed = performance.now() - state.computeStartedAt;
+      const total = elapsed / frac;
+      const remaining = Math.max(0, total - elapsed);
+      let label;
+      if (state.computeRefTotal > 0) {
+        const cur = Math.max(1, Math.min(state.computeRefTotal, Math.ceil(frac * state.computeRefTotal)));
+        label = `Computing density: ref ${cur}/${state.computeRefTotal} (${pct.toFixed(0)}%)`;
+      } else {
+        label = `Computing… ${pct.toFixed(0)}%`;
+      }
+      status.textContent = `${label} — ${formatDuration(remaining)} left`;
+    }
+  };
+
+  // A worker-load failure (404, parse error) or an exception outside the
+  // worker's own try/catch surfaces as an `error` event, not a message —
+  // without these handlers the UI used to stay stuck on "Computing…".
+  const spawnWorker = (onMessage) => {
+    const w = new Worker(WORKER_URL);
+    w.onmessage = (ev) => { if (gen === state.computeGen) onMessage(ev.data); };
+    w.onerror = (e) => computeFailed(e.message || "worker failed to load or crashed");
+    w.onmessageerror = () => computeFailed("worker message could not be deserialised");
+    state.workers.push(w);
+    return w;
+  };
+
+  // Per-worker DEM clones — buffers are transferred, so each worker needs
+  // its own copy. The pool sizing below accounts for this memory.
+  const demPayload = () => {
+    const height = new Float32Array(state.dem.height);
+    const mask = new Uint8Array(state.dem.mask);
+    const networkMask = constrainNet ? new Uint8Array(state.networkMask) : null;
+    const transfer = [height.buffer, mask.buffer];
+    if (networkMask) transfer.push(networkMask.buffer);
+    return { height, mask, networkMask, transfer };
+  };
+
+  const baseMsg = {
+    kind: "run",
+    H, W,
+    dx: state.dem.dxM,
+    dy: state.dem.dyM,
+    seedR: state.src ? state.src[0] : (state.refPoints[0] ? state.refPoints[0][0] : -1),
+    seedC: state.src ? state.src[1] : (state.refPoints[0] ? state.refPoints[0][1] : -1),
+    goalR: state.dst ? state.dst[0] : -1,
+    goalC: state.dst ? state.dst[1] : -1,
+    mode, alpha, beta, eta, eMax, eMaxMode,
+    wantPasses, wantTopN, nRoutes, penalty, repulsionMode,
+    wantDensity,
+    refPoints: wantDensity ? state.refPoints.slice() : null,
+    densityMode,
+    wantNetworkInterp,
+    interpMaxDistance,
+    interpSmoothing,
+    maximize,
+    maximizeLength,
+  };
+
+  // Shared tail for the density paths (pool and native backend): optional
+  // IDW fill as a follow-up worker task (the fill helpers live in the
+  // worker; per-slice filling would be wrong), then computeDone.
+  const finishDensityOutputs = (energy, density) => {
+    const finalize = (energyOut) => computeDone({
+      energy: energyOut, passes: density,
+      path: null, pathEnergy: null, pathLengthM: null, routes: null,
+      elapsedMs: performance.now() - state.computeStartedAt,
+    });
+    if (wantNetworkInterp && constrainNet) {
+      // This phase can take minutes on large DEMs (O(N·maxDist) ray
+      // walking) — say so and stream its progress, or it reads as a hang
+      // after the density part already finished.
+      status.textContent = "Interpolating across the network…";
+      progressBar.style.width = "0%";
+      // Lean payload — the fill only needs the masks, not the heights.
+      const mask = new Uint8Array(state.dem.mask);
+      const networkMask = new Uint8Array(state.networkMask);
+      const w = spawnWorker((m) => {
+        if (m.kind === "progress") {
+          progressBar.style.width = `${Math.min(100, m.progress * 100).toFixed(1)}%`;
+        } else if (m.kind === "interp-done") finalize(m.energy);
+        else if (m.kind === "error") computeFailed(m.message);
+      });
+      w.postMessage(
+        {
+          kind: "interp", energy, networkMask, mask, H, W,
+          dx: state.dem.dxM, dy: state.dem.dyM,
+          interpMaxDistance, interpSmoothing,
+        },
+        [energy.buffer, mask.buffer, networkMask.buffer],
+      );
+    } else {
+      finalize(energy);
+    }
+  };
+
+  // ---- Density worker pool -------------------------------------------------
+  // Each reference point's Dijkstra is independent, so density runs split
+  // the refs across min(cores − 1, K, memory-cap) workers — near-linear
+  // wall-clock speedup. Workers return raw accumulators (densityPartial);
+  // the merge + final normalisation happens here. Sizing: each worker
+  // resident set is ≈ 32 bytes/cell (5 DEM copy + ~27 Dijkstra internals),
+  // capped so the pool stays under ~3 GB — huge DEMs degrade to 1 worker,
+  // which is exactly the old single-worker behaviour.
+  const K = wantDensity ? state.refPoints.length : 0;
+  const cores = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
+  const memCap = Math.max(1, Math.floor(3e9 / (32 * N)));
+  const poolN = wantDensity ? Math.max(1, Math.min(K, cores, memCap)) : 1;
+
+  const startDensityPool = () => {
+    const density = new Float64Array(N);
+    const energySum = new Float64Array(N);
+    const energyCount = new Int32Array(N);
+    const workerFrac = new Float64Array(poolN);
+    const sliceLen = new Float64Array(poolN);
+    let remaining = poolN;
+
+    const poolProgress = () => {
+      let acc = 0;
+      for (let i = 0; i < poolN; i++) acc += workerFrac[i] * sliceLen[i];
+      reportProgress(acc / K);
+    };
+
+    const finishDensity = () => {
+      // Second density normalisation (the per-ref /N happened worker-side).
+      for (let i = 0; i < N; i++) density[i] /= N;
+      const energy = new Float32Array(N);
+      for (let i = 0; i < N; i++) {
+        energy[i] = energyCount[i] > 0 ? energySum[i] / energyCount[i] : Infinity;
+      }
+      finishDensityOutputs(energy, density);
+    };
+
+    for (let p = 0; p < poolN; p++) {
+      const lo = Math.floor(p * K / poolN);
+      const hi = Math.floor((p + 1) * K / poolN);
+      sliceLen[p] = hi - lo;
+      const slot = p;
+      const w = spawnWorker((m) => {
+        if (m.kind === "progress") {
+          workerFrac[slot] = m.progress;
+          poolProgress();
+        } else if (m.kind === "done") {
+          for (let i = 0; i < N; i++) density[i] += m.density[i];
+          for (let i = 0; i < N; i++) energySum[i] += m.energySum[i];
+          for (let i = 0; i < N; i++) energyCount[i] += m.energyCount[i];
+          workerFrac[slot] = 1;
+          poolProgress();
+          if (--remaining === 0) finishDensity();
+        } else if (m.kind === "error") {
+          computeFailed(m.message);
+        }
+      });
+      const { height, mask, networkMask, transfer } = demPayload();
+      w.postMessage(
+        {
+          ...baseMsg,
+          height, mask, networkMask,
+          refPoints: state.refPoints.slice(lo, hi),
+          densityPartial: true,
+          // Interp (if any) runs after the merge, never per-slice.
+          wantNetworkInterp: false,
+        },
+        transfer,
+      );
+    }
+  };
+
+  const startSingleWorker = () => {
+    // Single worker: regular from/to/round runs, top-N, maximize, and
+    // density with one ref (or when memory caps the pool at 1).
+    const w = spawnWorker((m) => {
+      if (m.kind === "progress") {
+        reportProgress(m.progress);
+      } else if (m.kind === "done") {
+        computeDone(m);
+      } else if (m.kind === "error") {
+        computeFailed(m.message);
+      } else if (m.kind === "warning") {
+        // Non-fatal — the worker is still going and will follow up with
+        // a `done` message. Yellow-tint the status; the next progress
+        // tick will overwrite it.
+        console.warn("[worker]", m.message);
+        status.innerHTML = `<span style="color:#ffb86b">${escapeHtml(m.message)}</span>`;
+      }
+    });
+    const { height, mask, networkMask, transfer } = demPayload();
+    w.postMessage({ ...baseMsg, height, mask, networkMask }, transfer);
+  };
+
+  // ---- Optional native backend (density only, OFF by default) --------------
+  // Sends the DEM + params to the local Rust server (backend/ in the repo)
+  // which runs the per-ref Dijkstras on all cores. Any failure — server not
+  // running, version mismatch, network error — falls back to the in-browser
+  // pool. Protocol documented in backend/src/main.rs.
+  const startDensityBackend = async (baseUrl) => {
+    progressBar.style.width = "10%"; // no streaming progress from the backend
+    // Liveness ticker: large runs take a while server-side and fetch gives
+    // no progress events — an elapsed counter shows the app isn't hung.
+    const t0 = performance.now();
+    status.textContent = "Computing on native backend…";
+    const ticker = setInterval(() => {
+      if (gen !== state.computeGen) { clearInterval(ticker); return; }
+      status.textContent =
+        `Computing on native backend… ${formatDuration(performance.now() - t0)} elapsed`;
+    }, 1000);
+    try {
+      const params = {
+        h: H, w: W,
+        dx: state.dem.dxM, dy: state.dem.dyM,
+        alpha, beta, eta, eMax, eMaxMode,
+        densityMode,
+        refPoints: state.refPoints.map(([r, c]) => [r, c]),
+        hasNetwork: constrainNet,
+        maximize,
+      };
+      const json = new TextEncoder().encode(JSON.stringify(params));
+      const head = new Uint8Array(4);
+      new DataView(head.buffer).setUint32(0, json.length, true);
+      const body = new Blob([
+        head, json, state.dem.height, state.dem.mask,
+        ...(constrainNet ? [state.networkMask] : []),
+      ]);
+      const resp = await fetch(`${baseUrl}/density`, { method: "POST", body });
+      if (!resp.ok) throw new Error(`backend HTTP ${resp.status}`);
+      const buf = await resp.arrayBuffer();
+      if (gen !== state.computeGen) return;
+
+      // From here on the backend HAS answered — a parsing/allocation error
+      // must surface as a failure, NOT fall through to the browser-pool
+      // fallback (silently recomputing a huge DEM there looks like a hang).
+      try {
+        const dv = new DataView(buf);
+        const jlen = dv.getUint32(0, true);
+        const expect = 4 + jlen + 8 * N + 4 * N;
+        if (buf.byteLength !== expect) {
+          throw new Error(`backend response ${buf.byteLength} B, expected ${expect} B`);
+        }
+        let off = 4 + jlen;
+        // Current backends pad the meta JSON so the payload is 8-byte
+        // aligned — views straight onto the response buffer, zero copies.
+        // Unaligned (older backend): slice-copy to realign.
+        const aligned = off % 8 === 0;
+        const density = aligned
+          ? new Float64Array(buf, off, N)
+          : new Float64Array(buf.slice(off, off + 8 * N));
+        off += 8 * N;
+        // The interp step transfers the energy buffer to a worker; a view
+        // would drag (and detach) the whole response buffer with it, so
+        // copy in that case.
+        const willInterp = wantNetworkInterp && constrainNet;
+        const energy = (aligned && !willInterp)
+          ? new Float32Array(buf, off, N)
+          : new Float32Array(buf.slice(off, off + 4 * N));
+        progressBar.style.width = "100%";
+        finishDensityOutputs(energy, density);
+      } catch (err) {
+        console.error("[backend] response handling failed:", err);
+        computeFailed(`backend response handling failed: ${err.message}`);
+      }
+    } finally {
+      clearInterval(ticker);
+    }
+  };
+
+  // ---- Constrained vs unconstrained comparison ------------------------------
+  // Two workers in parallel: the primary run exactly as configured (network
+  // mask, passes, top-N, path, interp), plus a secondary energy-only run
+  // WITHOUT the network. The difference field (constrained − unconstrained,
+  // clamped at 0 — a constraint can never reduce cost) quantifies what the
+  // network costs in energy. Progress reports come from the primary.
+  const startComparePair = () => {
+    let primary = null, secondary = null;
+    const maybeFinish = () => {
+      if (!primary || !secondary) return;
+      const diff = new Float32Array(N);
+      for (let i = 0; i < N; i++) {
+        const a = primary.energy[i], b = secondary.energy[i];
+        diff[i] = (Number.isFinite(a) && Number.isFinite(b)) ? Math.max(0, a - b) : Infinity;
+      }
+      primary.energyAlt = { unconstrained: secondary.energy, difference: diff };
+      computeDone(primary);
+    };
+    const wA = spawnWorker((m) => {
+      if (m.kind === "progress") reportProgress(m.progress);
+      else if (m.kind === "done") { primary = m; maybeFinish(); }
+      else if (m.kind === "error") computeFailed(m.message);
+      else if (m.kind === "warning") {
+        console.warn("[worker]", m.message);
+        status.innerHTML = `<span style="color:#ffb86b">${escapeHtml(m.message)}</span>`;
+      }
+    });
     {
-      kind: "run",
-      height: heightCopy,
-      mask: maskCopy,
-      H: state.dem.H,
-      W: state.dem.W,
-      dx: state.dem.dxM,
-      dy: state.dem.dyM,
-      seedR: state.src ? state.src[0] : (state.refPoints[0] ? state.refPoints[0][0] : -1),
-      seedC: state.src ? state.src[1] : (state.refPoints[0] ? state.refPoints[0][1] : -1),
-      goalR: state.dst ? state.dst[0] : -1,
-      goalC: state.dst ? state.dst[1] : -1,
-      mode, alpha, beta, eta, eMax,
-      wantPasses, wantTopN, nRoutes, penalty, repulsionMode,
-      wantDensity,
-      refPoints: wantDensity ? state.refPoints.slice() : null,
-      densityMode,
-      networkMask: networkMaskCopy,
-      wantNetworkInterp,
-      interpMaxDistance,
-      interpSmoothing,
-      maximize,
-      maximizeLength,
-    },
-    [heightCopy.buffer, maskCopy.buffer, ...(networkMaskCopy ? [networkMaskCopy.buffer] : [])]
-  );
+      const { height, mask, networkMask, transfer } = demPayload();
+      wA.postMessage({ ...baseMsg, height, mask, networkMask }, transfer);
+    }
+    const wB = spawnWorker((m) => {
+      if (m.kind === "done") { secondary = m; maybeFinish(); }
+      else if (m.kind === "error") computeFailed(m.message);
+    });
+    {
+      // Energy-only, no network, no extras — same mode/cost/budget.
+      const height = new Float32Array(state.dem.height);
+      const mask = new Uint8Array(state.dem.mask);
+      wB.postMessage(
+        {
+          ...baseMsg,
+          height, mask, networkMask: null,
+          goalR: -1, goalC: -1,
+          wantPasses: false, wantTopN: false,
+          wantNetworkInterp: false,
+          maximizeLength: 0,
+        },
+        [height.buffer, mask.buffer],
+      );
+    }
+  };
+
+  const compareNet = constrainNet && !wantDensity &&
+    !!document.getElementById("vec-compare")?.checked;
+
+  const backendOn = !!document.getElementById("use-backend")?.checked;
+  const backendUrl = (document.getElementById("backend-url")?.value || "http://127.0.0.1:8077")
+    .trim().replace(/\/+$/, "");
+
+  if (wantDensity && backendOn) {
+    startDensityBackend(backendUrl).catch((err) => {
+      if (gen !== state.computeGen) return;
+      console.warn("[backend] falling back to in-browser workers:", err);
+      status.textContent = "Native backend unavailable — using browser workers…";
+      if (poolN > 1) startDensityPool();
+      else startSingleWorker();
+    });
+  } else if (wantDensity && poolN > 1) {
+    startDensityPool();
+  } else if (compareNet) {
+    startComparePair();
+  } else {
+    startSingleWorker();
+  }
 });
 
 // ------- Render -------
-function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs }) {
+function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs, energyAlt }) {
   // Cache for live re-render on colormap / view / range changes.
-  state.lastResult = { energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs };
+  state.lastResult = { energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs, energyAlt: energyAlt || null };
+
+  // The displayed-field selector only makes sense after a compare run.
+  const srcRow = document.getElementById("energy-source-row");
+  if (srcRow) srcRow.style.display = energyAlt ? "" : "none";
+  if (!energyAlt) {
+    const sel = document.getElementById("energy-source");
+    if (sel) sel.value = "constrained";
+  }
 
   // Auto bounds (state.lastAutoMin/Max and lastPassesAutoMin/Max) are
   // populated by renderFieldToDataURL during rerenderCachedResult below
@@ -1843,8 +2793,16 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
 function rerenderCachedResult() {
   const r = state.lastResult;
   if (!r || !state.dem) return;
-  const { energy, passes, path, routes } = r;
+  const { passes, path, routes } = r;
   const { H, W, originX, originY, dx, dy, isGeographic } = state.dem;
+
+  // After a compare run, the energy layer can display the constrained
+  // field (default), the unconstrained one, or their difference (the
+  // energy cost of the network). Pure re-render — no recompute.
+  const energySel = document.getElementById("energy-source")?.value || "constrained";
+  const energy = (r.energyAlt && energySel !== "constrained" && r.energyAlt[energySel])
+    ? r.energyAlt[energySel]
+    : r.energy;
 
   // -- Energy layer. In density mode this is the per-cell mean energy
   // across reference points (Infinity where unreachable from every ref);
@@ -1877,6 +2835,11 @@ function rerenderCachedResult() {
     const blend = document.getElementById("passes-blend")?.value || "plus-lighter";
     const gamma = parseFloat(document.getElementById("passes-gamma")?.value);
     const win = parseInt(document.getElementById("passes-mean-window")?.value, 10);
+    // "energy" blend: corridors take the energy field's colour (same
+    // resolved lo/hi as the energy layer, rendered just above) and the
+    // passes intensity drives the OPACITY — vmin/vmax/gamma shape the
+    // alpha ramp. Falls back to greyscale when no energy field exists.
+    const energyColor = blend === "energy" && energy && Number.isFinite(state.lastAutoMin);
     const out = renderFieldToDataURL(passes, W, H, {
       // p10/p90 default; passes counts are heavily long-tailed and a few
       // "highway" cells would otherwise dominate the stretch.
@@ -1886,7 +2849,10 @@ function rerenderCachedResult() {
       userMax: readRangeInput("passes-vmax", null),
       gamma: Number.isFinite(gamma) ? gamma : 1,
       meanWindow: Number.isFinite(win) && win > 1 ? win : 1,
-      useGreyscale: true,
+      useGreyscale: !energyColor,
+      colorField: energyColor
+        ? { field: energy, lo: state.lastAutoMin, hi: state.lastAutoMax }
+        : null,
       solidAlpha: blend === "normal",
       treatZeroAsTransparent: true,
     });
@@ -1926,13 +2892,13 @@ function rerenderCachedResult() {
       const weight = Math.max(2.5, 5 - i * 0.4);
       const opacity = Math.max(0.55, 0.95 - i * 0.05);
       const ln = L.polyline(pathToLatLngs(r.path), {
-        color: colour, weight, opacity,
+        color: colour, weight, opacity, pane: "routesPane",
       }).bindTooltip(`route ${i + 1} · E ${r.energy.toExponential(2)} · ${(r.length / 1000).toFixed(2)} km`).addTo(map);
       state.routeLines.push(ln);
     }
   } else if (path && path.length > 0 && isGeographic) {
     state.pathLine = L.polyline(pathToLatLngs(path), {
-      color: "#4cc9f0", weight: 4, opacity: 0.95,
+      color: "#4cc9f0", weight: 4, opacity: 0.95, pane: "routesPane",
     }).addTo(map);
   }
 
@@ -2042,8 +3008,10 @@ function renderFieldToDataURL(field, W, H, opts) {
       // Float32Array.sort sorts numerically by default; a comparator would
       // box every value to a Number wrapper.
       const sorted = samples.subarray(0, collected).slice().sort();
-      autoLo = sorted[Math.floor(sorted.length * pLo / 100)];
-      autoHi = sorted[Math.floor(sorted.length * pHi / 100)];
+      // Clamp: p=100 would otherwise index sorted[length] (undefined).
+      const at = (p) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p / 100))];
+      autoLo = at(pLo);
+      autoHi = at(pHi);
     }
   } else {
     for (let i = 0; i < N; i++) {
@@ -2074,6 +3042,23 @@ function renderFieldToDataURL(field, W, H, opts) {
   const ctx = canvas.getContext("2d");
   const img = ctx.createImageData(W, H);
 
+  // Optional second field driving the COLOUR while the primary field
+  // drives the ALPHA ("energy color" passes blend): hue from
+  // colormap((colorField - lo) / span) with the caller-supplied bounds
+  // (the energy layer's resolved lo/hi, so corridors match its legend),
+  // opacity from the primary t (so passes vmin/vmax/gamma shape the
+  // alpha ramp). Cells where the colour field is Infinity but the
+  // primary is drawn (e.g. over-budget corridor cells in round/total
+  // mode) clamp to the top colour — they're beyond the displayed max.
+  const cfField = opts.colorField ? opts.colorField.field : null;
+  let cfLo = 0, cfSpan = 1;
+  if (opts.colorField) {
+    cfLo = opts.colorField.lo;
+    cfSpan = opts.colorField.hi - opts.colorField.lo;
+    if (!Number.isFinite(cfLo)) cfLo = 0;
+    if (!Number.isFinite(cfSpan) || cfSpan <= 0) cfSpan = 1;
+  }
+
   for (let i = 0; i < N; i++) {
     const v = work[i];
     const unsettled =
@@ -2090,10 +3075,17 @@ function renderFieldToDataURL(field, W, H, opts) {
     }
     if (t < 0) t = 0;
     else if (t > 1) t = 1;
-    // Gamma adjustment: t' = t^(1+γ). γ=0 leaves the mapping unchanged.
+    // Gamma adjustment: t' = t^γ. γ=1 leaves the mapping unchanged.
     if (gammaExp !== 1) t = Math.pow(t, gammaExp);
     let r2, g2, b2, a2;
-    if (opts.useGreyscale) {
+    if (cfField) {
+      const cv = cfField[i];
+      let tc = Number.isFinite(cv) ? (cv - cfLo) / cfSpan : 1;
+      if (tc < 0) tc = 0;
+      else if (tc > 1) tc = 1;
+      [r2, g2, b2] = colormap(tc);
+      a2 = Math.round(t * 255);
+    } else if (opts.useGreyscale) {
       const g = Math.round(t * 255);
       r2 = g2 = b2 = g;
       // For additive-style blends (plus-lighter, screen, multiply, etc.)
@@ -2301,7 +3293,7 @@ function applyDemReliefOverlay() {
   state.demReliefOverlay = L.imageOverlay(
     state.demReliefDataUrl,
     bounds,
-    { opacity: 0.85 },
+    { opacity: 0.85, pane: "reliefPane" },
   ).addTo(map);
 }
 
@@ -2324,19 +3316,18 @@ function applyEnergyOverlay() {
   if (!state.dem || !state.dem.isGeographic || !state.energyDataUrl) return;
   const { H, W, originX, originY, dx, dy } = state.dem;
   const bounds = [[originY - H * dy, originX], [originY, originX + W * dx]];
-  state.energyOverlay = L.imageOverlay(state.energyDataUrl, bounds, { opacity: 0.85 }).addTo(map);
+  state.energyOverlay = L.imageOverlay(state.energyDataUrl, bounds, { opacity: 0.85, pane: "energyPane" }).addTo(map);
 }
 
-// Build the passes-layer Leaflet imageOverlay (always above energy).
+// Build the passes-layer Leaflet imageOverlay. Its pane (z 404) sits above
+// energy (402) AND the drawn vector network (403), so corridors paint over
+// the black network lines.
 function applyPassesOverlay() {
   if (state.passesOverlay) { state.passesOverlay.remove(); state.passesOverlay = null; }
   if (!state.dem || !state.dem.isGeographic || !state.passesDataUrl) return;
   const { H, W, originX, originY, dx, dy } = state.dem;
   const bounds = [[originY - H * dy, originX], [originY, originX + W * dx]];
-  state.passesOverlay = L.imageOverlay(state.passesDataUrl, bounds, { opacity: 0.7 }).addTo(map);
-  // Bump the passes overlay to the top of the imageOverlay pane so it sits
-  // visually above the energy overlay.
-  state.passesOverlay.bringToFront();
+  state.passesOverlay = L.imageOverlay(state.passesDataUrl, bounds, { opacity: 0.7, pane: "passesPane" }).addTo(map);
 }
 
 // Apply the live UI controls (visibility, opacity, blend mode) to whichever
@@ -2377,7 +3368,9 @@ function applyLayerControls() {
     state.passesOverlay.setOpacity(visible ? op : 0);
     const blend = document.getElementById("passes-blend")?.value || "normal";
     const el = state.passesOverlay.getElement();
-    if (el) el.style.mixBlendMode = blend;
+    // "energy" is a render mode (colour baked into the canvas), not a CSS
+    // blend — composite it normally.
+    if (el) el.style.mixBlendMode = blend === "energy" ? "normal" : blend;
   }
 }
 
@@ -2475,7 +3468,7 @@ function estimateRunTime() {
   // The 0.3 / 0.05 multipliers are rough rule-of-thumb fits from runs on
   // the 5e6-cell DEM; tune if they drift.
   const wantNetInterp = !!document.getElementById("net-interp")?.checked;
-  if (wantNetInterp && state.networkMask) {
+  if (wantNetInterp && networkConstraintActive()) {
     const smoothingIters = parseInt(document.getElementById("net-interp-smoothing")?.value, 10) || 0;
     ms += (N / rate) * (0.3 + 0.05 * smoothingIters);
   }
@@ -2847,10 +3840,13 @@ function buildMetadata(result, withOutputs = true) {
   // saved separately as `network.bin` (see downloadBundle).
   const network = {
     enabled:           !!state.networkMask,
+    constrain:         !!document.getElementById("vec-constrain")?.checked,
     srsId:             state.networkSrsId || null,
     featureCount:      state.networkFeatureCount || 0,
     lineWidth:         parseInt(document.getElementById("vec-width")?.value, 10) || 1,
     snapRadius:        parseInt(document.getElementById("vec-snap")?.value, 10) || 10,
+    renderWidthM:      networkLineWidthM(),
+    renderOpacity:     networkLineOpacity(),
     wantInterp:        !!document.getElementById("net-interp")?.checked,
     interpMaxDistance: parseInt(document.getElementById("net-interp-max-dist")?.value, 10) || 50,
     interpSmoothing:   parseInt(document.getElementById("net-interp-smoothing")?.value, 10) || 0,
@@ -2930,6 +3926,70 @@ function buildMetadata(result, withOutputs = true) {
   return md;
 }
 
+// Export the already-rendered energy / passes PNGs (colormap, range, gamma
+// and mean filter baked in — byte-identical to what the map overlays show)
+// as a zip with ESRI world files (.pgw) + .prj, so they drop into QGIS
+// georeferenced. Complements the bundle export, which carries the RAW
+// fields as GeoTIFFs.
+//
+// Deliberately excluded: the relief render (stride-downsampled on huge
+// DEMs, so the DEM's dx/dy world file would be wrong for it), and CSS
+// blend effects (plus-lighter etc. happen at compositing time in the
+// browser, not in the PNG — the "energy color" passes mode IS baked in,
+// since that one is painted into the canvas).
+const WGS84_WKT =
+  'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],' +
+  'PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433],AUTHORITY["EPSG","4326"]]';
+
+async function exportRenderedImages() {
+  try {
+    if (!state.dem || !state.lastResult) {
+      status.textContent = "Nothing rendered yet — run a compute first.";
+      return;
+    }
+    const items = [];
+    if (state.energyDataUrl) items.push(["energy_rendered", state.energyDataUrl]);
+    if (state.passesDataUrl) items.push(["passes_rendered", state.passesDataUrl]);
+    if (!items.length) {
+      status.textContent = "No rendered layers to export.";
+      return;
+    }
+    if (typeof JSZip === "undefined") throw new Error("JSZip didn't load");
+
+    const { dx, dy, originX, originY, isGeographic } = state.dem;
+    // World file: pixel size, rotation terms, centre of the top-left pixel.
+    const worldFile =
+      `${dx}\n0\n0\n${-dy}\n${originX + dx / 2}\n${originY - dy / 2}\n`;
+
+    const zip = new JSZip();
+    for (const [name, url] of items) {
+      zip.file(`${name}.png`, url.split(",")[1], { base64: true });
+      zip.file(`${name}.pgw`, worldFile);
+      // Only stamp a CRS we actually know. Projected DEMs still get the
+      // world file (correct pixel grid); assign the CRS manually in QGIS.
+      if (isGeographic) zip.file(`${name}.prj`, WGS84_WKT);
+    }
+
+    const blob = await zip.generateAsync({ type: "blob" });
+    const url = URL.createObjectURL(blob);
+    const ts = new Date().toISOString().replace(/[:.]/g, "-").replace(/-Z?$/, "");
+    const slug = state.demLabel
+      ? state.demLabel.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._-]/g, "_") + "-"
+      : "";
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `simujoules-rendered-${slug}${ts}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+    status.textContent =
+      `Exported ${items.length} rendered layer${items.length === 1 ? "" : "s"} (${(blob.size / 1024 / 1024).toFixed(1)} MB).`;
+  } catch (err) {
+    console.error("[export-rendered] failed:", err);
+    status.innerHTML = `<span style="color:#ff6b6b">Export failed: ${escapeHtml(err.message)}</span>`;
+  }
+}
+
 async function downloadBundle() {
   console.info("[bundle] download click — lastResult?", !!state.lastResult, "dem?", !!state.dem, "JSZip?", typeof JSZip);
   if (!state.dem) {
@@ -2990,7 +4050,7 @@ async function downloadBundle() {
     status.textContent = `Saved bundle (${(blob.size / 1024 / 1024).toFixed(1)} MB).`;
   } catch (err) {
     console.error("[bundle] download failed:", err);
-    status.innerHTML = `<span style="color:#ff6b6b">Download failed: ${err.message}</span>`;
+    status.innerHTML = `<span style="color:#ff6b6b">Download failed: ${escapeHtml(err.message)}</span>`;
   }
 }
 
@@ -3040,7 +4100,7 @@ async function loadBundleFile(file) {
     applyMetadataToUI(md, bin);
   } catch (err) {
     console.error(err);
-    status.innerHTML = `<span style="color:#ff6b6b">Reload failed: ${err.message}</span>`;
+    status.innerHTML = `<span style="color:#ff6b6b">Reload failed: ${escapeHtml(err.message)}</span>`;
   }
 }
 
@@ -3065,6 +4125,11 @@ function applyMetadataToUI(md, bin = {}) {
       `loaded ${state.dem.W}×${state.dem.H}. Skipping binary replay.`
     );
   }
+
+  // No DEM yet (or the wrong one): hold the full bundle — rasters included —
+  // so loadDemFromArrayBuffer can re-apply it when a matching DEM lands.
+  // A successful full application clears the slot.
+  state.pendingBundle = (!state.dem || demDimsMatch === false) ? { md, bin } : null;
 
   set("mode", p.mode);
   set("alpha", p.alpha);
@@ -3122,8 +4187,12 @@ function applyMetadataToUI(md, bin = {}) {
   set("vec-width", net.lineWidth);
   set("vec-snap", net.snapRadius);
   check("net-interp", net.wantInterp);
+  check("vec-constrain", net.constrain);
   set("net-interp-max-dist", net.interpMaxDistance);
   set("net-interp-smoothing", net.interpSmoothing);
+  set("vec-render-width", net.renderWidthM);
+  set("vec-render-opacity", net.renderOpacity);
+  updateNetworkLineStyle();
 
   // (Engine preference is no longer user-selectable — JS only.
   // md.enginePreference from older bundles is read but ignored.)
@@ -3240,7 +4309,7 @@ function applyMetadataToUI(md, bin = {}) {
   } else if (state.dem && (state.src || (p.wantDensity && state.refPoints?.length))) {
     status.textContent = "Bundle parameters loaded. Click Compute to reproduce.";
   } else if (!state.dem) {
-    const hint = md.dem?.sourceUrl ? ` (try ${md.dem.sourceUrl})` : "";
+    const hint = md.dem?.sourceUrl ? ` (try ${escapeHtml(md.dem.sourceUrl)})` : "";
     status.innerHTML = `<span style="opacity:0.85">Bundle loaded. Now load the matching DEM${hint} and click Compute.</span>`;
   } else {
     status.textContent = "Bundle loaded. Click on the map to set source point.";

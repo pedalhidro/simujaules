@@ -1,0 +1,64 @@
+# Simujoules — Simulador bici-geo-energético
+
+> Free, browser-based simulator of cycling energy fields over digital
+> elevation models (DEMs). Everything runs client-side (Web Workers); no
+> account, no upload — DEM data never leaves the machine. Interface in
+> Brazilian Portuguese and English. App: https://telhas.pedalhidrografi.co/simujoules/
+
+## What it computes
+
+- **Energy field**: for every DEM cell, the minimum energy to ride from (or
+  to, or round trip via) an anchor point, via Dijkstra on an 8-connected
+  grid. The cost of moving between adjacent cells with height difference
+  Δh over ground distance d is:
+  - uphill/flat: `α·d + β·Δh`
+  - downhill: `max(0, α·d − η·β·|Δh|)`
+  - α = cost per flat metre, β = cost per metre climbed, η ∈ [0,1] =
+    fraction of climb energy recovered on descent. With the defaults
+    (α = 0.008, β = 1.0) one energy unit ≈ the energy to climb 1 m
+    (≈ 0.8–1 kJ of mechanical work for a ~85 kg rider + bike).
+- **Passes count** ("natural corridors"): for each cell, how many optimal
+  paths traverse it — the subtree size in the shortest-path tree. Highlights
+  the terrain's natural highways. In round-trip mode only completable
+  (within-budget) trajectories are counted.
+- **Top-N alternative routes** between two points, with per-cell / linear /
+  quadratic repulsion penalties so alternatives genuinely diverge.
+- **Multi-reference density**: passes counts averaged over K reference
+  points (placed by clicking or sampled pseudo-randomly / quasi-randomly
+  via Sobol or Halton sequences), normalised to a density field. Computed
+  on a multi-core worker pool; an optional native Rust backend exists for
+  large runs (off by default).
+- **Energy budgets**: prune the search at a maximum energy; in round-trip
+  mode the budget can cap each leg or the out-plus-back total.
+- **Maximize mode**: invert the optimisation to find the most expensive
+  routes, optionally length-constrained (layered dynamic programming).
+
+## Inputs and outputs
+
+- **Input DEM**: georeferenced GeoTIFF (EPSG:4326 recommended), or the
+  built-in FABDEM viewport loader (fetches 30 m global elevation tiles for
+  the visible map area). Example DEMs for São Paulo are bundled.
+- **Optional network constraint**: GeoPackage (.gpkg) line layers,
+  rasterised onto the DEM grid; analysis can be confined to the network,
+  with IDW interpolation for visualising off-network cells.
+- **Outputs**: reproducible bundle (.zip) containing georeferenced GeoTIFF
+  rasters (energy.tif Float32, passes.tif Float64, network.tif uint8),
+  routes/path GeoJSON, and a metadata.jsonld with every parameter
+  (vocabulary: https://telhas.pedalhidrografi.co/simujoules/vocab/simujoules.jsonld).
+  Rendered map layers (colormap/range/filter applied) export as PNG +
+  world files. All outputs open directly in QGIS.
+
+## Links
+
+- [App](https://telhas.pedalhidrografi.co/simujoules/): the simulator (PWA, works offline after first load)
+- [Changelog](https://telhas.pedalhidrografi.co/simujoules/CHANGELOG.md): version history
+- [JSON-LD vocabulary](https://telhas.pedalhidrografi.co/simujoules/vocab/simujoules.jsonld): terms used in exported bundle metadata
+
+## Notes for automated agents
+
+- The app is a static PWA: `index.html` + `app.js` + `energy-worker.js`,
+  no build step, no server-side compute. Parameters and results round-trip
+  through the bundle format, so runs are fully reproducible from the
+  metadata.jsonld alone (plus the same DEM).
+- Coordinates in bundles are DEM pixel (row, col); the GeoTIFFs carry the
+  georeferencing.

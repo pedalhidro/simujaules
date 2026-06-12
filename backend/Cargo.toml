@@ -1,0 +1,16 @@
+[package]
+name = "simujoules-backend"
+version = "0.1.0"
+edition = "2021"
+description = "Optional native compute backend for the Simujoules density mode (off by default in the app)"
+
+[dependencies]
+tiny_http = "0.12"
+rayon = "1.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bytemuck = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1

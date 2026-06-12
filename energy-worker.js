@@ -30,44 +30,43 @@ function heapGrow(h) {
   h.payloads = nl;
   h.capacity = newCap;
 }
+// Both sift loops move a "hole" instead of swapping pairs — one write per
+// level instead of four — and the pop path allocates nothing: callers read
+// the top via h.priorities[0] / h.payloads[0], then call heapRemoveTop(h).
+// (The old heapPop returned a fresh {priority, payload} object per call,
+// which is millions of short-lived allocations over one Dijkstra run.)
 function heapPush(h, priority, payload) {
   if (h.size >= h.capacity) heapGrow(h);
+  const pr = h.priorities, pl = h.payloads;
   let i = h.size++;
-  h.priorities[i] = priority;
-  h.payloads[i] = payload;
-  // Sift up
   while (i > 0) {
     const parent = (i - 1) >> 1;
-    if (h.priorities[parent] <= h.priorities[i]) break;
-    [h.priorities[parent], h.priorities[i]] = [h.priorities[i], h.priorities[parent]];
-    [h.payloads[parent], h.payloads[i]] = [h.payloads[i], h.payloads[parent]];
+    if (pr[parent] <= priority) break;
+    pr[i] = pr[parent];
+    pl[i] = pl[parent];
     i = parent;
   }
+  pr[i] = priority;
+  pl[i] = payload;
 }
-function heapPop(h) {
-  if (h.size === 0) return null;
-  const topPriority = h.priorities[0];
-  const topPayload = h.payloads[0];
-  h.size--;
-  if (h.size > 0) {
-    h.priorities[0] = h.priorities[h.size];
-    h.payloads[0] = h.payloads[h.size];
-    // Sift down
-    let i = 0;
-    const n = h.size;
-    while (true) {
-      const l = 2 * i + 1;
-      const r = 2 * i + 2;
-      let smallest = i;
-      if (l < n && h.priorities[l] < h.priorities[smallest]) smallest = l;
-      if (r < n && h.priorities[r] < h.priorities[smallest]) smallest = r;
-      if (smallest === i) break;
-      [h.priorities[smallest], h.priorities[i]] = [h.priorities[i], h.priorities[smallest]];
-      [h.payloads[smallest], h.payloads[i]] = [h.payloads[i], h.payloads[smallest]];
-      i = smallest;
-    }
+function heapRemoveTop(h) {
+  const n = --h.size;
+  if (n <= 0) return;
+  const pr = h.priorities, pl = h.payloads;
+  const movedP = pr[n];
+  const movedV = pl[n];
+  let i = 0;
+  while (true) {
+    let child = 2 * i + 1;
+    if (child >= n) break;
+    if (child + 1 < n && pr[child + 1] < pr[child]) child++;
+    if (pr[child] >= movedP) break;
+    pr[i] = pr[child];
+    pl[i] = pl[child];
+    i = child;
   }
-  return { priority: topPriority, payload: topPayload };
+  pr[i] = movedP;
+  pl[i] = movedV;
 }
 
 // ------- Dijkstra -------
@@ -81,7 +80,12 @@ function heapPop(h) {
 //               energy-and-passes plugin. Forces parent + settle-order
 //               tracking and runs a reverse-walk subtree accumulation at
 //               the end. Returns a Float64Array (counts can exceed 2^24).
-// Returns { E, parents, passes }. Any of parents/passes may be null.
+// wantTree:     keep parents + settle order, skip the passes accumulation —
+//               the caller runs subtreePasses() itself, optionally with an
+//               include mask (round mode filters endpoints by combined-leg
+//               feasibility, which a single run can't know).
+// Returns { E, parents, passes, order, orderLen }; parents/passes/order may
+// be null depending on the flags.
 function dijkstra(opts) {
   const {
     height, mask, H, W,
@@ -90,6 +94,12 @@ function dijkstra(opts) {
     dx, dy,
     reverse, trackParents,
     wantPasses,
+    // wantTree: keep parents + settle order and return them WITHOUT the
+    // passes accumulation. Round mode uses this so the caller can compute
+    // FILTERED passes after combining both legs' energies (the filter —
+    // "is this cell's round trip within budget?" — isn't knowable inside
+    // a single leg's run).
+    wantTree = false,
     eMax = 0,                  // 0 = no budget; >0 = stop expanding past this
     // Reverse-optimisation: when true, every edge cost is replaced with
     // (maxEdgeCost − cost) before relaxation. Dijkstra then finds the
@@ -108,18 +118,23 @@ function dijkstra(opts) {
   const N = H * W;
   const diag = Math.hypot(dx, dy);
 
-  // 8-neighbor offsets and their ground distances
-  const drs = [-1, -1, -1, 0, 0, 1, 1, 1];
-  const dcs = [-1, 0, 1, -1, 1, -1, 0, 1];
-  const dists = [diag, dy, diag, dx, dx, diag, dy, diag];
+  // 8-neighbor offsets and their ground distances. Typed arrays (not JS
+  // arrays) so the relax loop reads unboxed values, plus precomputed
+  // flat-index deltas: interior cells (~99% of the grid) skip the per-
+  // neighbor row/col bounds arithmetic entirely.
+  const drs = new Int32Array([-1, -1, -1, 0, 0, 1, 1, 1]);
+  const dcs = new Int32Array([-1, 0, 1, -1, 1, -1, 0, 1]);
+  const dists = new Float64Array([diag, dy, diag, dx, dx, diag, dy, diag]);
+  const dIdx = new Int32Array(8);
+  for (let k = 0; k < 8; k++) dIdx[k] = drs[k] * W + dcs[k];
 
   const E = new Float32Array(N);
   E.fill(Infinity);
   const seedIdx = seedR * W + seedC;
   E[seedIdx] = 0;
 
-  // wantPasses needs parent links for the subtree walk.
-  const keepParents = trackParents || wantPasses;
+  // wantPasses/wantTree need parent links for the subtree walk.
+  const keepParents = trackParents || wantPasses || wantTree;
   const parents = keepParents ? new Int32Array(N).fill(-1) : null;
   // `settled` filters stale heap entries. Using a boolean per-cell flag
   // instead of `g > E[idx]` because E is f32 and heap priorities are f64
@@ -128,7 +143,7 @@ function dijkstra(opts) {
   // reachable field at ~200 m before the heap drained.
   const settled = new Uint8Array(N);
   // Sequence of cells in pop order; required for the passes accumulation.
-  const order = wantPasses ? new Int32Array(N) : null;
+  const order = (wantPasses || wantTree) ? new Int32Array(N) : null;
   let orderLen = 0;
 
   const heap = createHeap(Math.min(N, 1 << 16));
@@ -138,9 +153,9 @@ function dijkstra(opts) {
   const reportEvery = Math.max(1000, Math.floor(N / 50));
 
   while (heap.size > 0) {
-    const top = heapPop(heap);
-    const g = top.priority;
-    const idx = top.payload;
+    const g = heap.priorities[0];
+    const idx = heap.payloads[0];
+    heapRemoveTop(heap);
     if (settled[idx]) continue;
     settled[idx] = 1;
     if (order) order[orderLen++] = idx;
@@ -156,12 +171,18 @@ function dijkstra(opts) {
     const r = (idx / W) | 0;
     const c = idx - r * W;
     const hHere = height[idx];
+    const inner = r > 0 && r < H - 1 && c > 0 && c < W - 1;
 
     for (let k = 0; k < 8; k++) {
-      const nr = r + drs[k];
-      const nc = c + dcs[k];
-      if (nr < 0 || nr >= H || nc < 0 || nc >= W) continue;
-      const nIdx = nr * W + nc;
+      let nIdx;
+      if (inner) {
+        nIdx = idx + dIdx[k];
+      } else {
+        const nr = r + drs[k];
+        const nc = c + dcs[k];
+        if (nr < 0 || nr >= H || nc < 0 || nc >= W) continue;
+        nIdx = nr * W + nc;
+      }
       if (!mask[nIdx]) continue;
       // Symmetric guard to the settled-flag staleness check: don't even
       // attempt to relax an already-settled neighbour. f32 storage of E
@@ -202,21 +223,39 @@ function dijkstra(opts) {
     }
   }
 
-  // Subtree accumulation for passes count: walk the settle order in reverse,
-  // adding each cell's count to its parent. Result: passes[c] = number of
-  // settled cells whose shortest path to the seed traverses c.
-  let passes = null;
-  if (wantPasses && order) {
-    passes = new Float64Array(N);
-    for (let j = 0; j < orderLen; j++) passes[order[j]] = 1;
-    for (let j = orderLen - 1; j >= 0; j--) {
-      const idx = order[j];
-      const p = parents[idx];
-      if (p >= 0) passes[p] += passes[idx];
-    }
-  }
+  const passes = (wantPasses && order)
+    ? subtreePasses(parents, order, orderLen, N, null)
+    : null;
 
-  return { E, parents: trackParents ? parents : null, passes };
+  return {
+    E,
+    parents: (trackParents || wantTree) ? parents : null,
+    passes,
+    order: wantTree ? order : null,
+    orderLen,
+  };
+}
+
+// Subtree accumulation for the passes count: walk the settle order in
+// reverse, adding each cell's count to its parent. Result: passes[c] =
+// number of counted cells whose shortest path to the seed traverses c.
+// `include` (optional Uint8Array of 0/1) selects which cells count as
+// trajectory ENDPOINTS — round mode passes the "round trip is within
+// budget / both legs reachable" mask, so only displayed destinations
+// contribute. Intermediate cells need no filtering: a corridor cell over
+// the budget still carries optimal legs serving within-budget cells.
+function subtreePasses(parents, order, orderLen, N, include) {
+  const passes = new Float64Array(N);
+  for (let j = 0; j < orderLen; j++) {
+    const idx = order[j];
+    passes[idx] = include ? include[idx] : 1;
+  }
+  for (let j = orderLen - 1; j >= 0; j--) {
+    const idx = order[j];
+    const p = parents[idx];
+    if (p >= 0) passes[p] += passes[idx];
+  }
+  return passes;
 }
 
 // ------- A* with iterative-penalization for top-N routes -------
@@ -244,9 +283,11 @@ function astar(opts) {
   } = opts;
   const N = H * W;
   const diag = Math.hypot(dx, dy);
-  const drs = [-1, -1, -1, 0, 0, 1, 1, 1];
-  const dcs = [-1, 0, 1, -1, 1, -1, 0, 1];
-  const dists = [diag, dy, diag, dx, dx, diag, dy, diag];
+  const drs = new Int32Array([-1, -1, -1, 0, 0, 1, 1, 1]);
+  const dcs = new Int32Array([-1, 0, 1, -1, 1, -1, 0, 1]);
+  const dists = new Float64Array([diag, dy, diag, dx, dx, diag, dy, diag]);
+  const dIdx = new Int32Array(8);
+  for (let k = 0; k < 8; k++) dIdx[k] = drs[k] * W + dcs[k];
 
   const startIdx = startR * W + startC;
   const goalIdx = goalR * W + goalC;
@@ -288,8 +329,8 @@ function astar(opts) {
   heapPush(heap, heuristic(startIdx), startIdx);
 
   while (heap.size > 0) {
-    const top = heapPop(heap);
-    const idx = top.payload;
+    const idx = heap.payloads[0];
+    heapRemoveTop(heap);
     if (settled[idx]) continue;
     settled[idx] = 1;
     if (idx === goalIdx) break;
@@ -298,12 +339,18 @@ function astar(opts) {
     const r = (idx / W) | 0;
     const c = idx - r * W;
     const hHere = height[idx];
+    const inner = r > 0 && r < H - 1 && c > 0 && c < W - 1;
 
     for (let k = 0; k < 8; k++) {
-      const nr = r + drs[k];
-      const nc = c + dcs[k];
-      if (nr < 0 || nr >= H || nc < 0 || nc >= W) continue;
-      const nIdx = nr * W + nc;
+      let nIdx;
+      if (inner) {
+        nIdx = idx + dIdx[k];
+      } else {
+        const nr = r + drs[k];
+        const nc = c + dcs[k];
+        if (nr < 0 || nr >= H || nc < 0 || nc >= W) continue;
+        nIdx = nr * W + nc;
+      }
       if (!mask[nIdx] || settled[nIdx]) continue;
 
       const hNbr = height[nIdx];
@@ -442,8 +489,8 @@ function chamferDistanceTransform(seedMask, H, W) {
 //   demMask:     1 on every cell that should be filled.
 //   maxDistance: ray search cap, in cells.
 //   smoothing:   number of 3×3 box-smooth passes over the fill (0 = none).
-function fillAcrossNetwork(E, networkMask, demMask, H, W, dx, dy, maxDistance, smoothing) {
-  const out = idwFill(E, networkMask, demMask, H, W, dx, dy, maxDistance);
+function fillAcrossNetwork(E, networkMask, demMask, H, W, dx, dy, maxDistance, smoothing, onProgress) {
+  const out = idwFill(E, networkMask, demMask, H, W, dx, dy, maxDistance, onProgress);
   let buf = out;
   for (let s = 0; s < smoothing; s++) {
     buf = boxSmoothPreserveNetwork(buf, networkMask, demMask, H, W);
@@ -451,7 +498,7 @@ function fillAcrossNetwork(E, networkMask, demMask, H, W, dx, dy, maxDistance, s
   return buf;
 }
 
-function idwFill(E, networkMask, demMask, H, W, dx, dy, maxDistance) {
+function idwFill(E, networkMask, demMask, H, W, dx, dy, maxDistance, onProgress) {
   const N = H * W;
   const out = new Float32Array(E);
   const dDiag = Math.hypot(dx, dy);
@@ -467,8 +514,10 @@ function idwFill(E, networkMask, demMask, H, W, dx, dy, maxDistance) {
     [-1, -1, dDiag],
   ];
   const max = Math.max(1, maxDistance | 0);
+  const reportEvery = Math.max(1, Math.floor(H / 25));
 
   for (let r = 0; r < H; r++) {
+    if (onProgress && r % reportEvery === 0) onProgress(r / H);
     for (let c = 0; c < W; c++) {
       const idx = r * W + c;
       if (!demMask[idx]) continue;
@@ -717,6 +766,25 @@ function maxCostPathOfLength(opts) {
 // ------- Worker message handler -------
 self.onmessage = (ev) => {
   const msg = ev.data;
+
+  // Standalone IDW-fill job. Used by the density worker pool: the pool
+  // merges per-worker partial fields on the main thread, so the optional
+  // network interpolation (which lives here, next to its helpers) runs as
+  // a follow-up task on the merged energy field.
+  if (msg.kind === "interp") {
+    try {
+      const filled = fillAcrossNetwork(
+        msg.energy, msg.networkMask, msg.mask, msg.H, msg.W, msg.dx, msg.dy,
+        msg.interpMaxDistance, msg.interpSmoothing,
+        (frac) => postMessage({ kind: "progress", progress: frac }),
+      );
+      postMessage({ kind: "interp-done", energy: filled }, [filled.buffer]);
+    } catch (err) {
+      postMessage({ kind: "error", message: err.message });
+    }
+    return;
+  }
+
   if (msg.kind !== "run") return;
 
   const t0 = performance.now();
@@ -732,9 +800,18 @@ self.onmessage = (ev) => {
     penalty = 2.0,                                       // strength of repulsion
     repulsionMode = "per-cell",                          // "per-cell" | "linear" | "square"
     eMax = 0,                                            // energy budget (0 = none)
+    eMaxMode = "leg",                                    // round mode only: "leg" caps each
+                                                         // direction at eMax (totals reach
+                                                         // 2·eMax); "total" caps the sum —
+                                                         // legs still search up to eMax each
+                                                         // (a leg can never exceed the total),
+                                                         // then over-budget sums are masked
+                                                         // to Infinity. Ignored outside round
+                                                         // (one leg IS the total there).
     wantDensity = false,                                  // multi-ref passes density
     refPoints = null,                                     // [[r0,c0],[r1,c1], …]
     densityMode = "from",                                 // mode for each ref's Dijkstra
+    densityPartial = false,                               // return un-normalised partial sums (worker pool)
     networkMask = null,                                   // optional binary mask over the DEM grid
     wantNetworkInterp = false,                            // fill non-network cells via IDW from network seeds
     interpMaxDistance = 50,                               // ray search cap, in cells
@@ -744,6 +821,10 @@ self.onmessage = (ev) => {
   } = msg;
 
   const wantPath = goalR >= 0 && goalC >= 0;
+  // Round-trip total budget (see eMaxMode above). The per-leg Dijkstras
+  // still run with eMax — a leg can never exceed the total — and the
+  // combine loops below mask sums beyond this cap to Infinity.
+  const eMaxTotalCap = (eMaxMode === "total" && eMax > 0) ? eMax : 0;
   const goalIdx = wantPath ? goalR * W + goalC : -1;
   const N = H * W;
 
@@ -832,7 +913,7 @@ self.onmessage = (ev) => {
             seedR: refR, seedC: refC,
             alpha, beta, eta, dx, dy,
             reverse: false, trackParents: false,
-            wantPasses: true, eMax,
+            wantTree: true, eMax,
             maximize, maxEdgeCost,
             progressBase: base, progressScale: slice * 0.5,
           });
@@ -841,17 +922,25 @@ self.onmessage = (ev) => {
             seedR: refR, seedC: refC,
             alpha, beta, eta, dx, dy,
             reverse: true, trackParents: false,
-            wantPasses: true, eMax,
+            wantTree: true, eMax,
             maximize, maxEdgeCost,
             progressBase: base + slice * 0.5, progressScale: slice * 0.5,
           });
-          perRefPasses = new Float64Array(N);
+          // Energy + include mask first; passes after, filtered, so only
+          // displayed (round-trip-feasible) destinations count.
           perRefEnergy = new Float32Array(N);
+          const include = new Uint8Array(N);
           for (let i = 0; i < N; i++) {
-            perRefPasses[i] = f.passes[i] + b.passes[i];
             const fi = f.E[i], bi = b.E[i];
-            perRefEnergy[i] = Number.isFinite(fi) && Number.isFinite(bi) ? fi + bi : Infinity;
+            const s = fi + bi;
+            const ok =
+              Number.isFinite(fi) && Number.isFinite(bi) && !(eMaxTotalCap > 0 && s > eMaxTotalCap);
+            perRefEnergy[i] = ok ? s : Infinity;
+            include[i] = ok ? 1 : 0;
           }
+          perRefPasses = subtreePasses(f.parents, f.order, f.orderLen, N, include);
+          const pb = subtreePasses(b.parents, b.order, b.orderLen, N, include);
+          for (let i = 0; i < N; i++) perRefPasses[i] += pb[i];
         } else {
           const r = dijkstra({
             height, mask: effMask, H, W,
@@ -880,6 +969,25 @@ self.onmessage = (ev) => {
         // monotonically; this is just a clean checkpoint.
         postMessage({ kind: "progress", progress: (k + 1) / K });
       }
+
+      // Worker-pool mode: hand back the raw accumulators (density before
+      // the second /N, energy as sum + reach-count) so the main thread can
+      // merge several workers' slices before normalising. Buffers are
+      // transferred — this worker is done with them.
+      if (densityPartial) {
+        const t1 = performance.now();
+        postMessage(
+          {
+            kind: "done",
+            partial: true,
+            density, energySum, energyCount,
+            elapsedMs: t1 - t0,
+          },
+          [density.buffer, energySum.buffer, energyCount.buffer],
+        );
+        return;
+      }
+
       // Second density normalisation.
       for (let i = 0; i < N; i++) density[i] /= N;
 
@@ -922,13 +1030,16 @@ self.onmessage = (ev) => {
         pathEnergy = energy[goalIdx];
       }
     } else {
-      // round trip: forward + reverse, sum
+      // round trip: forward + reverse, sum. Passes are computed AFTER the
+      // combine (wantTree defers the subtree walk) so that only displayed
+      // destinations — both legs reachable AND within the budget semantics
+      // — count as trajectory endpoints.
       const f = dijkstra({
         height, mask: effMask, H, W,
         seedR, seedC,
         alpha, beta, eta, dx, dy,
         reverse: false, trackParents: wantPath,
-        wantPasses, eMax,
+        wantTree: wantPasses, eMax,
         maximize, maxEdgeCost,
       });
       const b = dijkstra({
@@ -936,18 +1047,24 @@ self.onmessage = (ev) => {
         seedR, seedC,
         alpha, beta, eta, dx, dy,
         reverse: true, trackParents: false,
-        wantPasses, eMax,
+        wantTree: wantPasses, eMax,
         maximize, maxEdgeCost,
       });
       energy = new Float32Array(N);
       for (let i = 0; i < N; i++) {
         const a = f.E[i];
         const c = b.E[i];
-        energy[i] = (a === Infinity || c === Infinity) ? Infinity : a + c;
+        const s = a + c;
+        // Total-budget mode masks over-budget round trips.
+        energy[i] = (a === Infinity || c === Infinity || (eMaxTotalCap > 0 && s > eMaxTotalCap))
+          ? Infinity : s;
       }
-      if (wantPasses && f.passes && b.passes) {
-        passes = new Float64Array(N);
-        for (let i = 0; i < N; i++) passes[i] = f.passes[i] + b.passes[i];
+      if (wantPasses) {
+        const include = new Uint8Array(N);
+        for (let i = 0; i < N; i++) include[i] = Number.isFinite(energy[i]) ? 1 : 0;
+        passes = subtreePasses(f.parents, f.order, f.orderLen, N, include);
+        const pb = subtreePasses(b.parents, b.order, b.orderLen, N, include);
+        for (let i = 0; i < N; i++) passes[i] += pb[i];
       }
       // For round trip, the "path" is ambiguous (outbound vs return differ).
       // Report the outbound path here for visualisation.

@@ -1,0 +1,4 @@
+# The backend is built on the machine it runs on (it's a localhost server),
+# so target the native ISA. Remove this if you ever distribute binaries.
+[build]
+rustflags = ["-C", "target-cpu=native"]

@@ -49,7 +49,38 @@
 //              direction array but subtracting the offset, sending the
 //              walk the wrong way → spurious "backtrack_fail"). Fix
 //              ReferenceError on autoMax/passesMax in renderResult.
-const VERSION  = "v11";
+//   v11 → v12: Density worker pool + Dijkstra heap optimisations;
+//              manifest link fixed (index.html pointed at a manifest.json
+//              that never existed); CDN libs get SRI + crossorigin (which
+//              also makes them runtime-cacheable here — no-cors responses
+//              were opaque and never cached, so offline mode lacked the
+//              libraries); maskable icons precached; synchronous
+//              res.clone() before the body can be consumed. QMC
+//              (Sobol/Halton) sampling option for "Place random" refs.
+//              Round-trip budget mode: eMax can cap each leg (old
+//              behaviour, default) or the round-trip total. Round-mode
+//              passes are filtered: only displayed (feasible/in-budget)
+//              destinations count as trajectory endpoints. "Energy color"
+//              passes blend (hue from energy field, alpha from passes).
+//              Optional vector-network rendering (black lines, adjustable
+//              ground width + opacity; deterministic layer stacking via
+//              dedicated panes, user-reorderable in a modal) and
+//              constrain-to-network toggle. Basemap selector (OSM, Carto
+//              minimal, solid colours). Rendered-image export (PNG +
+//              world files). Changelog in the help modal +
+//              CHANGELOG.md (see CLAUDE.md: keep all three in sync).
+//              Fix bundle-before-DEM order: pending bundle re-applied on
+//              matching DEM load instead of being wiped. Density+network
+//              Compute no longer aborts silently (null-src re-snap bug);
+//              random refs snap to the network. OSM (Overpass) network
+//              pull; constrained-vs-unconstrained compare + difference
+//              field; backend liveness ticker, hard-fail after response,
+//              zero-copy parse, interp progress. Network snap is
+//              grid-wide (radius input = quiet zone, no rejection dead
+//              end); .gpkg geom column from metadata; 0-cell networks
+//              rejected with a clear error. SEO/LLM metadata
+//              (description, canonical, OG, JSON-LD, llms.txt, sitemap).
+const VERSION  = "v12";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
@@ -69,6 +100,8 @@ const PRECACHE_URLS = [
   "./icons/icon.svg",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
+  "./icons/icon-maskable-192.png",
+  "./icons/icon-maskable-512.png",
   "./icons/apple-touch-icon.png",
   "./vocab/simujoules.jsonld",
 ];
@@ -107,29 +140,47 @@ self.addEventListener("fetch", (event) => {
   if (/\.tiff?$/i.test(url.pathname)) return;
 
   // For top-level navigation requests, try the network first so deploys
-  // propagate quickly; fall back to the cached shell for offline launch.
+  // propagate quickly; fall back to the cached shell for offline launch
+  // AND for 5xx edge errors (a CDN hiccup shouldn't take the app down
+  // when we have a perfectly good shell cached).
   if (req.mode === "navigate") {
     event.respondWith(
-      fetch(req).catch(() => caches.match("./index.html")),
+      fetch(req)
+        .then((res) => (res && res.status < 500)
+          ? res
+          : caches.match("./index.html").then((c) => c || res))
+        .catch(() => caches.match("./index.html")),
     );
     return;
   }
 
-  event.respondWith(handle(req));
+  event.respondWith(handle(event));
 });
 
 // Cache-first with stale-while-revalidate. Returns the cached copy
 // immediately if there is one, and refreshes the cache in the background
 // from the network. On cache miss, fetch from network and stash a copy.
-async function handle(req) {
+//
+// Two subtleties:
+//   - res.clone() must happen synchronously, BEFORE the response is
+//     handed to the page. Cloning inside caches.open(...).then(...) races
+//     the page consuming the body — clone() then throws "body already
+//     used" and the cache write intermittently fails.
+//   - cache writes go through event.waitUntil so the SW isn't terminated
+//     mid-put after the response has been returned.
+async function handle(event) {
+  const req = event.request;
   const cached = await caches.match(req);
   if (cached) {
     // Background refresh, ignored failures — offline browsing is fine.
-    fetch(req).then((res) => {
-      if (res && res.ok) {
-        caches.open(RUNTIME).then((c) => c.put(req, res.clone()));
-      }
-    }).catch(() => {});
+    event.waitUntil(
+      fetch(req).then((res) => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          return caches.open(RUNTIME).then((c) => c.put(req, copy));
+        }
+      }).catch(() => {}),
+    );
     return cached;
   }
 
@@ -138,7 +189,8 @@ async function handle(req) {
     if (res && res.ok && res.status < 400) {
       // Cache only successful responses. opaque (cross-origin no-cors)
       // and 4xx/5xx are skipped to avoid poisoning the cache.
-      caches.open(RUNTIME).then((c) => c.put(req, res.clone()));
+      const copy = res.clone();
+      event.waitUntil(caches.open(RUNTIME).then((c) => c.put(req, copy)));
     }
     return res;
   } catch (err) {

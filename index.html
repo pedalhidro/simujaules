@@ -1,5 +1,7 @@
 <!doctype html>
-<html lang="en">
+<!-- lang matches the PT-BR default content; applyTranslations() switches it
+     to "en" live when the user toggles language. -->
+<html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
   <!-- viewport: maximum-scale not pinned because pinch-zoom on the map is
@@ -10,10 +12,57 @@
        what crawlers and the OS task-bar see before JS runs. -->
   <title>Simulador bici-geo-energético</title>
 
+  <!-- ==== SEO / social / LLM metadata ====================================
+       Keep the description in sync with manifest.webmanifest and llms.txt.
+       The canonical URL is the deployed root (deploy.sh → GCS + CDN). -->
+  <meta name="description" content="Simulador de campos de energia para ciclismo sobre modelos digitais de elevação (DEM): custo assimétrico subida/descida, rotas ótimas, corredores naturais (contagem de passagens) e densidade multi-referência. Gratuito, roda inteiro no navegador. / Cycling energy-field simulator over DEMs — runs entirely in the browser." />
+  <link rel="canonical" href="https://telhas.pedalhidrografi.co/simujoules/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Simujoules" />
+  <meta property="og:title" content="Simujoules — Simulador bici-geo-energético" />
+  <meta property="og:description" content="Campos de energia para ciclismo sobre DEMs: custo assimétrico de subida/descida, rotas ótimas, corredores naturais e densidade de passagens. Roda no navegador, exporta GeoTIFF para QGIS." />
+  <meta property="og:url" content="https://telhas.pedalhidrografi.co/simujoules/" />
+  <meta property="og:image" content="https://telhas.pedalhidrografi.co/simujoules/icons/icon-512.png" />
+  <meta property="og:locale" content="pt_BR" />
+  <meta property="og:locale:alternate" content="en_US" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Simujoules — Simulador bici-geo-energético" />
+  <meta name="twitter:description" content="Cycling energy fields over elevation models — asymmetric climb/descent costs, optimal routes, natural corridors. Free, in-browser, exports GeoTIFF." />
+  <meta name="twitter:image" content="https://telhas.pedalhidrografi.co/simujoules/icons/icon-512.png" />
+  <!-- schema.org structured data: the machine-readable summary search
+       engines and LLM crawlers actually parse. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "Simujoules — Simulador bici-geo-energético",
+    "alternateName": "Simujoules",
+    "url": "https://telhas.pedalhidrografi.co/simujoules/",
+    "description": "Browser-based simulator of cycling energy fields over digital elevation models (DEMs). Computes asymmetric-cost (climb vs. descent) shortest-path energy fields with Dijkstra on an 8-connected grid, passes counts (natural corridors), top-N alternative routes, multi-reference density, and optional vector-network constraints. Imports GeoTIFF DEMs and GeoPackage networks; exports georeferenced GeoTIFF rasters and reproducible JSON-LD bundles for QGIS.",
+    "applicationCategory": "Scientific / GIS web application",
+    "operatingSystem": "Any (modern web browser)",
+    "browserRequirements": "Requires JavaScript and Web Workers",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "BRL" },
+    "inLanguage": ["pt-BR", "en"],
+    "image": "https://telhas.pedalhidrografi.co/simujoules/icons/icon-512.png",
+    "publisher": { "@type": "Organization", "name": "pedalhidrografi.co", "url": "https://telhas.pedalhidrografi.co/" },
+    "featureList": [
+      "Asymmetric climb/descent energy cost model (alpha per flat metre, beta per metre climbed, eta downhill recovery)",
+      "Energy fields from/to a point or round trip, with per-leg or total energy budgets",
+      "Passes count: natural corridor detection via shortest-path-tree subtree sizes",
+      "Top-N alternative routes with repulsion penalties",
+      "Multi-reference density with pseudo-random or quasi-random (Sobol, Halton) sampling",
+      "GeoTIFF DEM import, FABDEM viewport loader, GeoPackage vector-network constraint",
+      "Georeferenced GeoTIFF and rendered-PNG export for QGIS",
+      "Offline-capable PWA; Portuguese and English"
+    ]
+  }
+  </script>
+
   <!-- PWA wiring. The manifest drives Add-to-Home-Screen on Android/Chrome;
        the apple-touch-icon and the iOS-specific meta tags do the same job
        on iOS Safari (which still ignores parts of the manifest spec). -->
-  <link rel="manifest" href="./manifest.json" />
+  <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#0f1115" />
   <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
@@ -527,6 +576,17 @@
   <div id="app">
     <aside id="panel">
       <h1 data-i18n="title">Simulador bici-geo-energético</h1>
+      <noscript>
+        <p>Simulador de campos de energia para ciclismo sobre modelos digitais
+        de elevação (DEM). Calcula campos de custo assimétrico subida/descida
+        (Dijkstra em grade 8-conectada), corredores naturais (contagem de
+        passagens), rotas alternativas e densidade multi-referência; importa
+        GeoTIFF/GeoPackage e exporta rasters georreferenciados para QGIS.
+        Este aplicativo precisa de JavaScript para funcionar. /
+        Cycling energy-field simulator over DEMs — this app requires
+        JavaScript. See <a href="./llms.txt">llms.txt</a> for a full
+        machine-readable description.</p>
+      </noscript>
       <div class="header-actions">
         <button type="button" class="engine-tag" id="lang-tag" data-i18n-title="lang.toggle.title" title="Language — click to switch">EN</button>
         <button type="button" class="help-button" id="help-btn" aria-label="Help" data-i18n-title="help.title" title="How it works">?</button>
@@ -560,6 +620,8 @@
       <div class="group">
         <h2 data-i18n="group.network">1b. Optional vector network (.gpkg)</h2>
         <input type="file" id="vector-file" accept=".gpkg" />
+        <button type="button" class="secondary" id="vec-osm" data-i18n="net.osm" style="margin-top: 4px;">Pull streets from OSM (highway=*)</button>
+        <div class="hint" data-i18n="net.osm_hint">Queries Overpass over the current map view ∩ DEM extent. Large areas can take a while or hit Overpass limits — zoom in first.</div>
         <div class="row" style="margin-top: 5px;">
           <div>
             <label data-i18n="net.line_width">line width (cells)</label>
@@ -571,6 +633,28 @@
           </div>
         </div>
         <button type="button" class="secondary" id="vec-clear" data-i18n="net.clear" style="margin-top: 4px;">Clear network</button>
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
+          <input type="checkbox" id="vec-constrain" checked />
+          <span data-i18n="net.constrain">Constrain compute to network</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
+          <input type="checkbox" id="vec-compare" />
+          <span data-i18n="net.compare">Compare with unconstrained</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
+          <input type="checkbox" id="vec-render" />
+          <span data-i18n="net.render">Draw network (black lines)</span>
+        </label>
+        <div class="row" style="margin-top: 3px;">
+          <div>
+            <label data-i18n="net.render_width">line width (m)</label>
+            <input type="number" id="vec-render-width" value="4" min="0.5" max="100" step="0.5" />
+          </div>
+          <div>
+            <label data-i18n="net.render_opacity">line opacity</label>
+            <input type="range" id="vec-render-opacity" min="0" max="1" step="0.05" value="1" />
+          </div>
+        </div>
         <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
           <input type="checkbox" id="net-interp" checked />
           <span data-i18n="net.interp">Interpolate across non-network cells</span>
@@ -625,6 +709,14 @@
             <input type="number" id="e-max" value="0" step="any" />
           </div>
         </div>
+        <div id="e-max-mode-row" style="display: none;">
+          <label data-i18n="param.budget_mode">Budget applies to</label>
+          <select id="e-max-mode">
+            <option value="leg"   data-i18n="budget.leg">each leg (out OR back)</option>
+            <option value="total" data-i18n="budget.total">round trip (total)</option>
+          </select>
+          <div class="hint" data-i18n="budget_mode.hint">Round-trip mode only. "Each leg": a cell is shown if out ≤ budget AND back ≤ budget (totals can reach 2×). "Total": out + back ≤ budget.</div>
+        </div>
         <label style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
           <input type="checkbox" id="want-passes" />
           <span data-i18n="param.want_passes">Compute passes count (route density)</span>
@@ -661,11 +753,27 @@
             </div>
           </div>
           <div class="hint" data-i18n="ref.direction_hint" style="margin-top: 3px;">Direction follows the Mode above.</div>
+          <label data-i18n="param.sampling" style="margin-top: 4px;">Sampling strategy</label>
+          <select id="ref-sampling">
+            <option value="random" data-i18n="sampling.random">pseudo-random</option>
+            <option value="sobol"  data-i18n="sampling.sobol">Sobol (quasi-random)</option>
+            <option value="halton" data-i18n="sampling.halton">Halton (quasi-random)</option>
+          </select>
+          <div class="hint" data-i18n="sampling.hint">Quasi-random (QMC) sequences cover the area evenly, without the clumps and gaps of pseudo-random — the density converges with fewer references. Successive clicks continue the sequence rather than repeat it.</div>
           <div class="row" style="margin-top: 4px;">
             <button type="button" class="secondary" id="ref-place-random" data-i18n="ref.place_random">Place random</button>
             <button type="button" class="secondary" id="ref-clear" data-i18n="ref.clear">Clear refs</button>
           </div>
           <div class="hint" id="ref-display" data-i18n="ref.none" style="margin-top: 3px;">no references placed</div>
+          <label style="display: flex; align-items: center; gap: 6px; margin-top: 6px;">
+            <input type="checkbox" id="use-backend" />
+            <span data-i18n="param.use_backend">Use native backend (Rust)</span>
+          </label>
+          <div id="backend-extra" style="display: none;">
+            <label data-i18n="param.backend_url">Backend URL</label>
+            <input type="text" id="backend-url" value="http://127.0.0.1:8077" spellcheck="false" />
+            <div class="hint" data-i18n="backend.hint">Optional local server (backend/ in the repo, cargo run --release). Density runs are sent there and computed on all cores; if unreachable, the app silently falls back to the in-browser worker pool.</div>
+          </div>
         </div>
         <div id="topn-extra" style="display: none;">
           <div class="row">
@@ -710,6 +818,21 @@
           </div>
         </div>
 
+        <!-- Basemap selector: OSM, minimalist Carto styles, or a solid
+             colour with no tiles at all. -->
+        <div class="layer-block">
+          <label data-i18n="layer.basemap">Basemap</label>
+          <select id="basemap-select">
+            <option value="osm"         data-i18n="basemap.osm">OSM (default)</option>
+            <option value="carto-dark"  data-i18n="basemap.dark">OSM minimalist black</option>
+            <option value="carto-light" data-i18n="basemap.light">OSM minimalist white</option>
+            <option value="none-black"  data-i18n="basemap.black">no basemap (all black)</option>
+            <option value="none-white"  data-i18n="basemap.white">no basemap (all white)</option>
+            <option value="none-gray"   data-i18n="basemap.gray">no basemap (all gray)</option>
+          </select>
+          <button type="button" class="secondary" id="layer-order-btn" data-i18n="order.open" style="margin-top: 5px;">Layer stacking order…</button>
+        </div>
+
         <!-- rmsampa-v2 tilemap (XYZ tiles from telhas.pedalhidrografi.co) -->
         <div class="layer-block">
           <div class="layer-head">
@@ -747,6 +870,15 @@
               <span data-i18n="layer.energy">Energy</span>
             </label>
             <input type="range" id="energy-opacity" min="0" max="1" step="0.05" value="0.85" />
+          </div>
+          <!-- Shown only when a compare run produced both scenarios. -->
+          <div id="energy-source-row" style="display: none;">
+            <label data-i18n="layer.energy_source">Displayed energy field</label>
+            <select id="energy-source">
+              <option value="constrained"   data-i18n="esrc.constrained">network-constrained</option>
+              <option value="unconstrained" data-i18n="esrc.unconstrained">unconstrained</option>
+              <option value="difference"    data-i18n="esrc.difference">difference (network cost)</option>
+            </select>
           </div>
           <div class="row">
             <div>
@@ -797,12 +929,14 @@
             <option value="screen"       data-i18n="blend.screen">screen</option>
             <option value="multiply"     data-i18n="blend.multiply">multiply</option>
             <option value="overlay"      data-i18n="blend.overlay">overlay</option>
+            <option value="energy"       data-i18n="blend.energy">energy color (passes = opacity)</option>
           </select>
-          <div class="hint" data-i18n="passes.hint">Greyscale ramp; with "add" mode high-pass cells brighten the energy field beneath. Same auto / pinned-range behaviour as Energy.</div>
+          <div class="hint" data-i18n="passes.hint">Greyscale ramp; with "add" mode high-pass cells brighten the energy field beneath. "Energy color" paints corridors with the energy field's colormap and uses passes for opacity — min/max/γ shape the alpha ramp. Same auto / pinned-range behaviour as Energy.</div>
         </div>
 
         <button class="secondary" id="range-reset" data-i18n="btn.range_reset" style="margin-top: 4px;">Reset ranges to auto</button>
         <button type="button" id="download-bundle" data-i18n="btn.download_bundle" style="margin-top: 4px;">Download bundle (.zip)</button>
+        <button type="button" class="secondary" id="export-rendered" data-i18n="btn.export_rendered" style="margin-top: 4px;">Export rendered images (.zip)</button>
       </div>
 
       <div class="credit" data-i18n="credit">feito por Claúdio e dirigido pelos neogeógrafos geomorfológicos</div>
@@ -819,10 +953,26 @@
        silently truncates Float32/Float64 to uint8. Reader API also gained
        async getTiePoints + ImageFileDirectory.getValue() in 3.0; see
        loadDemFromArrayBuffer for the migrated calls. -->
-  <script src="https://cdn.jsdelivr.net/npm/geotiff@3.0.5/dist-browser/geotiff.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.0/dist/proj4.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+  <script
+    src="https://cdn.jsdelivr.net/npm/geotiff@3.0.5/dist-browser/geotiff.js"
+    integrity="sha384-QchpYxK+DqZYCChtK4SebrECTZEIQ0ahLhme9vwraN6KNxOGwtS66BG72wo1HQDN"
+    crossorigin="anonymous"
+  ></script>
+  <script
+    src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"
+    integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG"
+    crossorigin="anonymous"
+  ></script>
+  <script
+    src="https://cdn.jsdelivr.net/npm/proj4@2.9.0/dist/proj4.js"
+    integrity="sha384-U14wzrePlI+UpXk1Jpe45fK/C0yeI7rtwKzi9eM3Lj7LYjXlHNy0YacuWZIk7Hic"
+    crossorigin="anonymous"
+  ></script>
+  <script
+    src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"
+    integrity="sha384-8D3Rsfo535FqoC1pHCCQMrNf75UgzyoG/HQm9zOzITRrz3QKzecc2E7JXKGCXoWu"
+    crossorigin="anonymous"
+  ></script>
 
   <!-- Drawer toggle (mobile only). Inline + standalone so the panel is still
        reachable if app.js fails to load. Exposes window.__simuDrawer.close()
@@ -929,8 +1079,57 @@
 
           <h4 data-i18n="help.h.impl">Implementação</h4>
           <p data-i18n-html="help.p.impl"></p>
+
+          <!-- Changelog: collapsed by default. Entries are English-only by
+               design (technical notes, not UI copy). Keep in sync with
+               CHANGELOG.md and the sw.js VERSION history — update all three
+               together when shipping behavioural changes. -->
+          <details id="changelog" style="margin-top: 12px;">
+            <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
+            <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v12</strong> — 2026-06-12<br/>
+              Density worker pool (multi-core) + Dijkstra heap optimisations (~10× density runs).
+              Optional native Rust backend (off by default, density only, auto-fallback).
+              QMC (Sobol/Halton) sampling option for random reference placement.
+              Round-trip budget mode: cap each leg or the round-trip total; round-mode passes
+              count only completable (in-budget) trajectories.
+              "Energy color" passes blend (hue from energy, opacity from passes).
+              Optional vector-network rendering (black lines, configurable ground width + opacity; passes overlay stacks above the network; stacking reorderable via a modal) and a
+              "constrain compute to network" toggle. Basemap selector (OSM / Carto minimal /
+              solid colours). Export of rendered energy/passes PNGs with world files. OSM (Overpass) street-network pull. Constrained-vs-unconstrained comparison with difference field. Backend liveness/progress fixes. SEO/LLM metadata (description, canonical, Open Graph, JSON-LD, llms.txt, sitemap). Fixes: PWA manifest restored, service-worker install bug, offline
+              caching of CDN libs (SRI + crossorigin), 3-D GeoPackage (Z/M) parsing, stale-result
+              race on DEM/network swap mid-compute, worker-crash handling, XSS hardening of
+              Bundle-before-DEM loading order now restores correctly (pending-bundle re-apply). Density+network Compute no longer aborts silently (null-src re-snap bug); network clicks snap grid-wide (no more snap-radius dead-end); .gpkg geometry column name read from metadata; empty-on-DEM networks rejected loudly.</p>
+              <p><strong>v11</strong> — 2026-05-13<br/>
+              Wasm engine removed (JS worker only). Fix layered-DP backtrack direction bug
+              (spurious "backtrack_fail"); fix ReferenceError in result metadata.</p>
+              <p><strong>v8–v10</strong> — 2026-05<br/>
+              Reverse-optimisation (maximize energy) toggle; length-constrained max-cost path
+              via layered DP; DP failures surfaced in the UI instead of the console.</p>
+              <p><strong>v4–v7</strong> — 2026-05<br/>
+              DEM relief layer (cmocean.phase + slope); locate-me button; OOM fixes for huge
+              DEMs (reservoir-sampled percentiles, stride-capped canvas); drawer/z-index and
+              iOS private-browsing fixes.</p>
+              <p><strong>v1–v3</strong> — 2026-05-08<br/>
+              First public shell: GeoTIFF DEM loading, asymmetric-cost Dijkstra energy fields,
+              passes count, top-N routes, multi-reference density, vector-network constraint,
+              bundle export (GeoTIFF + JSON-LD), PT/EN, FABDEM viewport loader, PWA shell.</p>
+            </div>
+          </details>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Layer stacking-order modal. Rows are rendered by app.js (top of the
+       list = drawn on top); ↑/↓ apply immediately and persist. -->
+  <div class="modal-backdrop" id="layer-order-modal" role="dialog" aria-modal="true" aria-labelledby="layer-order-title">
+    <div class="modal" style="max-width: 320px;">
+      <button type="button" class="modal-close" id="layer-order-close" aria-label="Close">×</button>
+      <h2 id="layer-order-title" data-i18n="order.title" style="margin: 0 0 6px; font-size: 15px;">Layer stacking order</h2>
+      <div class="hint" data-i18n="order.hint" style="margin-bottom: 6px;">Top of the list is drawn on top. Markers and tooltips always stay above. Applied immediately; remembered on this device.</div>
+      <div id="layer-order-list"></div>
+      <button type="button" class="secondary" id="layer-order-reset" data-i18n="order.reset" style="margin-top: 8px;">Reset to default</button>
     </div>
   </div>
 </body>

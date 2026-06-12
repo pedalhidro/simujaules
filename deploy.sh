@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Deploy the static site to gs://pedal-hidrografico/telhas/simujoules.
+# Deploy the static site to gs://telhas/simujoules (served at
+# https://telhas.pedalhidrografi.co/simujoules/).
 #
 # Requires: gsutil (or `gcloud storage`) authenticated against a project
 # that has write access to the pedal-hidrografico bucket.
@@ -31,16 +32,30 @@ fi
 #    test harnesses, this script) out of the public bucket.
 echo ">> Staging files…"
 STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE"' EXIT
+RSYNC_LOG="$(mktemp)"
+CDN_ERR="$(mktemp)"
+# Single EXIT trap for every temp path — a second `trap ... EXIT` would
+# silently REPLACE the first one (the old script leaked the ~575 MB
+# staging dir on every run because of exactly that).
+trap 'rm -rf "$STAGE" "$RSYNC_LOG" "$CDN_ERR"' EXIT
 
 cp index.html app.js energy-worker.js "$STAGE/"
+# Explicit glob rather than `cp -r dem/ ...` — BSD and GNU cp disagree on
+# trailing-slash semantics (GNU nests a second dem/ level, breaking the
+# example-DEM URLs hardcoded in app.js).
 mkdir -p "$STAGE/dem"
-cp -r dem/ "$STAGE/dem"
+cp dem/*.tif "$STAGE/dem/"
 
 # JSON-LD vocab document referenced by SIMU_CONTEXT["@vocab"] — bundles point
 # at this URL, so it has to be present at every deploy or @vocab 404s.
 mkdir -p "$STAGE/vocab"
 cp vocab/simujoules.jsonld "$STAGE/vocab/"
+
+# SEO / LLM-crawler descriptors + the changelog (linked from llms.txt and
+# index.html's noscript). NB: sitemap.xml lives under /simujoules/, not the
+# domain root, so submit it explicitly in Search Console — crawlers won't
+# discover it via a domain-root robots.txt this repo doesn't control.
+cp llms.txt sitemap.xml CHANGELOG.md "$STAGE/"
 
 # PWA assets: manifest, service worker, icons. The service worker has its
 # own scope and must live at the deploy root for `scope: './'` to cover
@@ -62,7 +77,7 @@ fi
 
 # 3. Upload Flags:
 #    -m  parallelise.
-#    -r  recurse into wasm/pkg/.
+#    -r  recurse into subdirectories (dem/, icons/, vocab/).
 #    -d  delete files in the bucket that aren't in the staging dir, so
 #        renames don't leave orphans.
 #    -c  CRC32C-based change detection. Without it, rsync compares size
@@ -72,8 +87,6 @@ fi
 #    Capture stdout so we can tell whether anything moved (used below to
 #    decide whether to invalidate CDN — invalidation isn't free).
 echo ">> Uploading to $BUCKET …"
-RSYNC_LOG="$(mktemp)"
-trap 'rm -f "$RSYNC_LOG"' EXIT
 gsutil -m rsync -r -d -c "$STAGE" "$BUCKET/" 2>&1 | tee "$RSYNC_LOG"
 # rsync prints "Copying ..." for each upload and "Removing ..." for each
 # delete. If neither appears, nothing actually changed and we can skip
@@ -100,6 +113,21 @@ if [[ "$CHANGED" -eq 1 ]]; then
     -h "Content-Type: application/ld+json" \
     -h "Cache-Control: public, max-age=86400" \
     "$BUCKET/vocab/simujoules.jsonld"
+
+  # SEO descriptors: explicit content types (gsutil guesses .txt right but
+  # .md becomes octet-stream without this) + modest caches.
+  gsutil setmeta \
+    -h "Content-Type: text/plain; charset=utf-8" \
+    -h "Cache-Control: public, max-age=3600" \
+    "$BUCKET/llms.txt"
+  gsutil setmeta \
+    -h "Content-Type: application/xml" \
+    -h "Cache-Control: public, max-age=86400" \
+    "$BUCKET/sitemap.xml"
+  gsutil setmeta \
+    -h "Content-Type: text/markdown; charset=utf-8" \
+    -h "Cache-Control: public, max-age=3600" \
+    "$BUCKET/CHANGELOG.md"
 
   # PWA manifest: dedicated MIME type (browsers tolerate application/json
   # but the spec wants this one). Short cache because adding/removing icons
@@ -149,10 +177,10 @@ fi
 if command -v gcloud >/dev/null 2>&1; then
   echo ">> Invalidating Cloud CDN ($URL_MAP, $INVALIDATE_PATH)…"
   if ! gcloud compute url-maps invalidate-cdn-cache "$URL_MAP" \
-        --path "$INVALIDATE_PATH" --async 2>/tmp/cdn-err; then
+        --path "$INVALIDATE_PATH" --async 2>"$CDN_ERR"; then
     echo
     echo "WARNING: CDN invalidation failed. Output:"
-    cat /tmp/cdn-err
+    cat "$CDN_ERR"
     echo
     echo "Override the URL map name with:  URL_MAP=<name> ./deploy.sh"
     echo "List candidates:                 gcloud compute url-maps list"
