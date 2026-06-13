@@ -475,6 +475,51 @@ function chamferDistanceTransform(seedMask, H, W) {
   return dist;
 }
 
+// Specialised 3-4 chamfer for the idwFill prefilter: Int32 distances in raw
+// chamfer units (no /3 normalisation pass), clamped at `limit + 4` so the
+// propagation never grows numbers past what the cutoff comparison needs.
+// ~2-3× cheaper than the general Float32 transform above.
+function chamferFar3(seedMask, H, W, limit) {
+  const N = H * W;
+  const D = 3, DD = 4;
+  const cap = limit + DD;
+  const dist = new Int32Array(N);
+  for (let i = 0; i < N; i++) dist[i] = seedMask[i] ? 0 : cap;
+  // Forward pass: top→bottom, left→right
+  for (let r = 0; r < H; r++) {
+    const rowOff = r * W;
+    for (let c = 0; c < W; c++) {
+      const idx = rowOff + c;
+      let v = dist[idx];
+      if (v === 0) continue;
+      if (r > 0) {
+        if (c > 0)        { const t = dist[idx - W - 1] + DD; if (t < v) v = t; }
+                          { const t = dist[idx - W] + D;      if (t < v) v = t; }
+        if (c < W - 1)    { const t = dist[idx - W + 1] + DD; if (t < v) v = t; }
+      }
+      if (c > 0)          { const t = dist[idx - 1] + D;      if (t < v) v = t; }
+      dist[idx] = v < cap ? v : cap;
+    }
+  }
+  // Backward pass: bottom→top, right→left
+  for (let r = H - 1; r >= 0; r--) {
+    const rowOff = r * W;
+    for (let c = W - 1; c >= 0; c--) {
+      const idx = rowOff + c;
+      let v = dist[idx];
+      if (v === 0) continue;
+      if (c < W - 1)      { const t = dist[idx + 1] + D;      if (t < v) v = t; }
+      if (r < H - 1) {
+        if (c > 0)        { const t = dist[idx + W - 1] + DD; if (t < v) v = t; }
+                          { const t = dist[idx + W] + D;      if (t < v) v = t; }
+        if (c < W - 1)    { const t = dist[idx + W + 1] + DD; if (t < v) v = t; }
+      }
+      dist[idx] = v < cap ? v : cap;
+    }
+  }
+  return dist;
+}
+
 // GDAL-style fillnodata: for each non-network cell within demMask, walk
 // outward in 8 directions until a network cell with a finite energy is
 // found (up to maxDistance cells per direction). The cell's filled value
@@ -498,36 +543,61 @@ function fillAcrossNetwork(E, networkMask, demMask, H, W, dx, dy, maxDistance, s
   return buf;
 }
 
-function idwFill(E, networkMask, demMask, H, W, dx, dy, maxDistance, onProgress) {
+// rowStart/rowEnd (optional) restrict the FILLED rows to a band — the app's
+// interp worker pool partitions the grid by rows; inputs are always the full
+// grid since rays read up to maxDistance beyond the band edges. Output cells
+// outside the band keep their input values.
+function idwFill(E, networkMask, demMask, H, W, dx, dy, maxDistance, onProgress, rowStart = 0, rowEnd = H) {
   const N = H * W;
   const out = new Float32Array(E);
   const dDiag = Math.hypot(dx, dy);
-  // Eight rays: dr, dc, per-step Euclidean cost.
-  const dirs = [
-    [-1,  0, dy],
-    [-1,  1, dDiag],
-    [ 0,  1, dx],
-    [ 1,  1, dDiag],
-    [ 1,  0, dy],
-    [ 1, -1, dDiag],
-    [ 0, -1, dx],
-    [-1, -1, dDiag],
-  ];
+  // Eight rays: dr, dc, per-step Euclidean cost. Typed columns — same
+  // order as the original triplet array, so hit-sum order (and therefore
+  // float rounding) is unchanged.
+  const drs = new Int32Array([-1, -1, 0, 1, 1, 1, 0, -1]);
+  const dcs = new Int32Array([0, 1, 1, 1, 0, -1, -1, -1]);
+  const steps = new Float64Array([dy, dDiag, dx, dDiag, dy, dDiag, dx, dDiag]);
   const max = Math.max(1, maxDistance | 0);
-  const reportEvery = Math.max(1, Math.floor(H / 25));
+  const bandRows = Math.max(1, rowEnd - rowStart);
+  const reportEvery = Math.max(1, Math.floor(bandRows / 25));
 
-  for (let r = 0; r < H; r++) {
-    if (onProgress && r % reportEvery === 0) onProgress(r / H);
+  // Distance-transform prefilter: a ray can reach at most maxDistance·√2
+  // cells (Euclidean), so cells whose nearest seed is provably farther get
+  // Infinity without walking 8 rays — that's the bulk of the work on
+  // sparse networks (misses cost the full 8·maxDistance steps; hits are
+  // cheap). The chamfer transform is ±~6% approximate, so the cutoff
+  // carries a 10% safety margin: cells inside the margin still walk (and
+  // miss) their rays, keeping the output bit-identical.
+  const seedMask = new Uint8Array(N);
+  let anySeed = false;
+  for (let i = 0; i < N; i++) {
+    if (networkMask[i] && E[i] < Infinity) { seedMask[i] = 1; anySeed = true; }
+  }
+  // Integer chamfer in raw 3-4 units, clamped just above the cutoff — two
+  // cheap passes regardless of network shape (global density heuristics
+  // fail on clustered networks, where the prefilter matters most).
+  // cutoffC3 is the cutoff in chamfer units with a 10% margin for the
+  // transform's ±~6% error; marginal cells still walk (and miss) their
+  // rays, so the output is bit-identical to the unfiltered version.
+  const cutoffC3 = Math.ceil(1.1 * Math.SQRT2 * max * 3);
+  const distNet = anySeed ? chamferFar3(seedMask, H, W, cutoffC3) : null;
+
+  for (let r = rowStart; r < rowEnd; r++) {
+    if (onProgress && (r - rowStart) % reportEvery === 0) onProgress((r - rowStart) / bandRows);
+    const rowOff = r * W;
     for (let c = 0; c < W; c++) {
-      const idx = r * W + c;
+      const idx = rowOff + c;
       if (!demMask[idx]) continue;
       // Network cells with finite E are the seeds — leave them alone.
-      if (networkMask[idx] && Number.isFinite(E[idx])) continue;
+      if (networkMask[idx] && E[idx] < Infinity) continue;
+      // No seeds at all → nothing can fill; beyond the (chamfer-unit)
+      // cutoff → no ray can possibly hit, skip the walk.
+      if (!anySeed || distNet[idx] > cutoffC3) { out[idx] = Infinity; continue; }
 
       let weighted = 0;
       let weightSum = 0;
       for (let k = 0; k < 8; k++) {
-        const dr = dirs[k][0], dc = dirs[k][1], step = dirs[k][2];
+        const dr = drs[k], dc = dcs[k], step = steps[k];
         let nr = r, nc = c, dist = 0;
         for (let s = 0; s < max; s++) {
           nr += dr; nc += dc; dist += step;
@@ -536,7 +606,7 @@ function idwFill(E, networkMask, demMask, H, W, dx, dy, maxDistance, onProgress)
           // Walk over any cells (network or not) but only contribute when we
           // hit a network cell with a finite seed value. The loop terminates
           // at the first such hit per direction.
-          if (networkMask[ni] && Number.isFinite(E[ni])) {
+          if (networkMask[ni] && E[ni] < Infinity) {
             const w = 1 / (dist * dist);
             weighted += E[ni] * w;
             weightSum += w;
@@ -773,12 +843,41 @@ self.onmessage = (ev) => {
   // a follow-up task on the merged energy field.
   if (msg.kind === "interp") {
     try {
-      const filled = fillAcrossNetwork(
-        msg.energy, msg.networkMask, msg.mask, msg.H, msg.W, msg.dx, msg.dy,
-        msg.interpMaxDistance, msg.interpSmoothing,
-        (frac) => postMessage({ kind: "progress", progress: frac }),
-      );
-      postMessage({ kind: "interp-done", energy: filled }, [filled.buffer]);
+      const rowStart = msg.rowStart ?? 0;
+      const rowEnd = msg.rowEnd ?? msg.H;
+      const onProgress = (frac) => postMessage({ kind: "progress", progress: frac });
+      if (rowStart > 0 || rowEnd < msg.H) {
+        // Pool band: fill only [rowStart, rowEnd) and return that slice.
+        // Smoothing is NOT applied per band (it would seam at the edges) —
+        // the app runs a separate "smooth" pass over the merged grid.
+        const out = idwFill(
+          msg.energy, msg.networkMask, msg.mask, msg.H, msg.W, msg.dx, msg.dy,
+          msg.interpMaxDistance, onProgress, rowStart, rowEnd,
+        );
+        const band = out.slice(rowStart * msg.W, rowEnd * msg.W);
+        postMessage({ kind: "interp-done", energy: band, rowStart, rowEnd }, [band.buffer]);
+      } else {
+        const filled = fillAcrossNetwork(
+          msg.energy, msg.networkMask, msg.mask, msg.H, msg.W, msg.dx, msg.dy,
+          msg.interpMaxDistance, msg.interpSmoothing, onProgress,
+        );
+        postMessage({ kind: "interp-done", energy: filled }, [filled.buffer]);
+      }
+    } catch (err) {
+      postMessage({ kind: "error", message: err.message });
+    }
+    return;
+  }
+
+  // Post-merge smoothing for the banded interp path: N box-smooth passes
+  // over the full merged grid (cheap relative to the fill itself).
+  if (msg.kind === "smooth") {
+    try {
+      let buf = msg.energy;
+      for (let s = 0; s < (msg.iters | 0); s++) {
+        buf = boxSmoothPreserveNetwork(buf, msg.networkMask, msg.mask, msg.H, msg.W);
+      }
+      postMessage({ kind: "smooth-done", energy: buf }, [buf.buffer]);
     } catch (err) {
       postMessage({ kind: "error", message: err.message });
     }

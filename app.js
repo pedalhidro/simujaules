@@ -59,7 +59,7 @@ const STRINGS = {
   "net.osm":             { pt: "Puxar ruas do OSM (highway=*)", en: "Pull streets from OSM (highway=*)" },
   "net.osm_hint":        { pt: "Consulta o Overpass sobre a vista atual ∩ extensão do DEM. Áreas grandes podem demorar ou estourar limites do Overpass — aproxime o zoom primeiro.", en: "Queries Overpass over the current map view ∩ DEM extent. Large areas can take a while or hit Overpass limits — zoom in first." },
   "net.compare":         { pt: "Comparar com cenário sem rede", en: "Compare with unconstrained" },
-  "layer.energy_source": { pt: "Campo de energia exibido", en: "Displayed energy field" },
+  "layer.energy_source": { pt: "Cenário exibido (energia e passagens)", en: "Displayed scenario (energy & passes)" },
   "esrc.constrained":    { pt: "restrito à rede", en: "network-constrained" },
   "esrc.unconstrained":  { pt: "sem restrição", en: "unconstrained" },
   "esrc.difference":     { pt: "diferença (custo da rede)", en: "difference (network cost)" },
@@ -164,6 +164,7 @@ const STRINGS = {
   "blend.multiply":      { pt: "multiply", en: "multiply" },
   "blend.overlay":       { pt: "overlay", en: "overlay" },
   "blend.energy":        { pt: "cor da energia (passagens = opacidade)", en: "energy color (passes = opacity)" },
+  "passes.dual":         { pt: "Canal verde (sem restrição) — vazio = igual ao vermelho", en: "Green channel (unconstrained) — blank = same as red" },
   "passes.hint":         { pt: "Rampa cinza; com modo \"soma\", células de alta passagem clareiam o campo de energia abaixo. \"Cor da energia\" pinta os corredores com o colormap do campo de energia e usa as passagens como opacidade — min/max/γ moldam a rampa de alfa. Mesmo comportamento auto/pinado da Energia.", en: 'Greyscale ramp; with "add" mode high-pass cells brighten the energy field beneath. "Energy color" paints corridors with the energy field\'s colormap and uses passes for opacity — min/max/γ shape the alpha ramp. Same auto / pinned-range behaviour as Energy.' },
   "btn.range_reset":     { pt: "Reset auto", en: "Reset ranges to auto" },
   "btn.download_bundle": { pt: "Baixar bundle (.zip)", en: "Download bundle (.zip)" },
@@ -286,6 +287,10 @@ function styleSnapshot() {
     g:   document.getElementById("passes-gamma")?.value || "",
     w:   document.getElementById("passes-mean-window")?.value || "",
     b:   document.getElementById("passes-blend")?.value || "",
+    pbm: document.getElementById("passes-vmin-b")?.value || "",
+    pbM: document.getElementById("passes-vmax-b")?.value || "",
+    gb:  document.getElementById("passes-gamma-b")?.value || "",
+    wb:  document.getElementById("passes-mean-window-b")?.value || "",
   });
 }
 function markStyleDirty() {
@@ -355,6 +360,8 @@ document.addEventListener("DOMContentLoaded", () => {
     "vmin", "vmax",
     "passes-vmin", "passes-vmax",
     "passes-gamma", "passes-mean-window",
+    "passes-vmin-b", "passes-vmax-b",
+    "passes-gamma-b", "passes-mean-window-b",
     "passes-blend",
   ]) {
     const el = document.getElementById(id);
@@ -2447,25 +2454,41 @@ runBtn.addEventListener("click", async () => {
   // Shared tail for the density paths (pool and native backend): optional
   // IDW fill as a follow-up worker task (the fill helpers live in the
   // worker; per-slice filling would be wrong), then computeDone.
-  const finishDensityOutputs = (energy, density) => {
-    const finalize = (energyOut) => computeDone({
-      energy: energyOut, passes: density,
-      path: null, pathEnergy: null, pathLengthM: null, routes: null,
-      elapsedMs: performance.now() - state.computeStartedAt,
+  // ---- Pooled network interpolation -----------------------------------------
+  // The IDW fill is embarrassingly parallel by rows: split the grid into
+  // bands across the worker pool (each band worker gets the FULL inputs —
+  // rays read past band edges — so memory is ~6 bytes/cell per worker,
+  // capped). Smoothing can't be banded (it would seam at band edges), so
+  // it runs as one cheap full-grid pass after the merge. Resolves with the
+  // filled field; failures go through computeFailed (promise stays pending,
+  // the generation bump kills the chain).
+  const runInterp = (energy) => new Promise((resolve) => {
+    status.textContent = "Interpolating across the network…";
+    progressBar.style.width = "0%";
+    const interpPayload = () => ({
+      mask: new Uint8Array(state.dem.mask),
+      networkMask: new Uint8Array(state.networkMask),
     });
-    if (wantNetworkInterp && constrainNet) {
-      // This phase can take minutes on large DEMs (O(N·maxDist) ray
-      // walking) — say so and stream its progress, or it reads as a hang
-      // after the density part already finished.
-      status.textContent = "Interpolating across the network…";
-      progressBar.style.width = "0%";
-      // Lean payload — the fill only needs the masks, not the heights.
-      const mask = new Uint8Array(state.dem.mask);
-      const networkMask = new Uint8Array(state.networkMask);
+    const smoothThenResolve = (filled) => {
+      if (!(interpSmoothing > 0)) { resolve(filled); return; }
+      const { mask, networkMask } = interpPayload();
+      const w = spawnWorker((m) => {
+        if (m.kind === "smooth-done") resolve(m.energy);
+        else if (m.kind === "error") computeFailed(m.message);
+      });
+      w.postMessage(
+        { kind: "smooth", energy: filled, networkMask, mask, H, W, iters: interpSmoothing },
+        [filled.buffer, mask.buffer, networkMask.buffer],
+      );
+    };
+    const P = Math.max(1, Math.min(cores, Math.floor(1.5e9 / (6 * N)), Math.ceil(H / 64)));
+    if (P <= 1) {
+      // Single worker — smoothing handled worker-side in the same job.
+      const { mask, networkMask } = interpPayload();
       const w = spawnWorker((m) => {
         if (m.kind === "progress") {
           progressBar.style.width = `${Math.min(100, m.progress * 100).toFixed(1)}%`;
-        } else if (m.kind === "interp-done") finalize(m.energy);
+        } else if (m.kind === "interp-done") resolve(m.energy);
         else if (m.kind === "error") computeFailed(m.message);
       });
       w.postMessage(
@@ -2476,9 +2499,50 @@ runBtn.addEventListener("click", async () => {
         },
         [energy.buffer, mask.buffer, networkMask.buffer],
       );
-    } else {
-      finalize(energy);
+      return;
     }
+    const merged = new Float32Array(N);
+    const frac = new Float64Array(P);
+    let remaining = P;
+    for (let p = 0; p < P; p++) {
+      const r0 = Math.floor(p * H / P);
+      const r1 = Math.floor((p + 1) * H / P);
+      const slot = p;
+      const w = spawnWorker((m) => {
+        if (m.kind === "progress") {
+          frac[slot] = m.progress;
+          let acc = 0;
+          for (let i = 0; i < P; i++) acc += frac[i];
+          progressBar.style.width = `${Math.min(100, (acc / P) * 100).toFixed(1)}%`;
+        } else if (m.kind === "interp-done") {
+          merged.set(m.energy, m.rowStart * W);
+          frac[slot] = 1;
+          if (--remaining === 0) smoothThenResolve(merged);
+        } else if (m.kind === "error") computeFailed(m.message);
+      });
+      const eCopy = new Float32Array(energy);
+      const { mask, networkMask } = interpPayload();
+      w.postMessage(
+        {
+          kind: "interp", energy: eCopy, networkMask, mask, H, W,
+          dx: state.dem.dxM, dy: state.dem.dyM,
+          interpMaxDistance, rowStart: r0, rowEnd: r1,
+        },
+        [eCopy.buffer, mask.buffer, networkMask.buffer],
+      );
+    }
+  });
+
+  const finishDensityOutputs = (energy, density, alt) => {
+    const finalize = (energyOut) => computeDone({
+      energy: energyOut, passes: density,
+      path: null, pathEnergy: null, pathLengthM: null, routes: null,
+      elapsedMs: performance.now() - state.computeStartedAt,
+      energyAlt: alt?.energyAlt || null,
+      passesAlt: alt?.passesAlt || null,
+    });
+    if (wantNetworkInterp && constrainNet) runInterp(energy).then(finalize);
+    else finalize(energy);
   };
 
   // ---- Density worker pool -------------------------------------------------
@@ -2494,64 +2558,72 @@ runBtn.addEventListener("click", async () => {
   const memCap = Math.max(1, Math.floor(3e9 / (32 * N)));
   const poolN = wantDensity ? Math.max(1, Math.min(K, cores, memCap)) : 1;
 
-  const startDensityPool = () => {
-    const density = new Float64Array(N);
-    const energySum = new Float64Array(N);
-    const energyCount = new Int32Array(N);
-    const workerFrac = new Float64Array(poolN);
-    const sliceLen = new Float64Array(poolN);
-    let remaining = poolN;
+  // Run one full density field over the worker pool and resolve with the
+  // raw outputs (no interp, no UI finalisation — the callers compose those).
+  // useNetwork toggles the network constraint per scenario, which is what
+  // the constrained-vs-unconstrained comparison varies. Progress maps into
+  // [progressBase, progressBase + progressScale].
+  const computeDensityField = ({ useNetwork, progressBase = 0, progressScale = 1 }) =>
+    new Promise((resolve) => {
+      const density = new Float64Array(N);
+      const energySum = new Float64Array(N);
+      const energyCount = new Int32Array(N);
+      const workerFrac = new Float64Array(poolN);
+      const sliceLen = new Float64Array(poolN);
+      let remaining = poolN;
 
-    const poolProgress = () => {
-      let acc = 0;
-      for (let i = 0; i < poolN; i++) acc += workerFrac[i] * sliceLen[i];
-      reportProgress(acc / K);
-    };
+      const poolProgress = () => {
+        let acc = 0;
+        for (let i = 0; i < poolN; i++) acc += workerFrac[i] * sliceLen[i];
+        reportProgress(progressBase + progressScale * (acc / K));
+      };
 
-    const finishDensity = () => {
-      // Second density normalisation (the per-ref /N happened worker-side).
-      for (let i = 0; i < N; i++) density[i] /= N;
-      const energy = new Float32Array(N);
-      for (let i = 0; i < N; i++) {
-        energy[i] = energyCount[i] > 0 ? energySum[i] / energyCount[i] : Infinity;
+      for (let p = 0; p < poolN; p++) {
+        const lo = Math.floor(p * K / poolN);
+        const hi = Math.floor((p + 1) * K / poolN);
+        sliceLen[p] = hi - lo;
+        const slot = p;
+        const w = spawnWorker((m) => {
+          if (m.kind === "progress") {
+            workerFrac[slot] = m.progress;
+            poolProgress();
+          } else if (m.kind === "done") {
+            for (let i = 0; i < N; i++) density[i] += m.density[i];
+            for (let i = 0; i < N; i++) energySum[i] += m.energySum[i];
+            for (let i = 0; i < N; i++) energyCount[i] += m.energyCount[i];
+            workerFrac[slot] = 1;
+            poolProgress();
+            if (--remaining === 0) {
+              // Second density normalisation (per-ref /N happened worker-side).
+              for (let i = 0; i < N; i++) density[i] /= N;
+              const energy = new Float32Array(N);
+              for (let i = 0; i < N; i++) {
+                energy[i] = energyCount[i] > 0 ? energySum[i] / energyCount[i] : Infinity;
+              }
+              resolve({ energy, passes: density });
+            }
+          } else if (m.kind === "error") {
+            computeFailed(m.message);
+          }
+        });
+        const height = new Float32Array(state.dem.height);
+        const mask = new Uint8Array(state.dem.mask);
+        const networkMask = useNetwork ? new Uint8Array(state.networkMask) : null;
+        const transfer = [height.buffer, mask.buffer];
+        if (networkMask) transfer.push(networkMask.buffer);
+        w.postMessage(
+          {
+            ...baseMsg,
+            height, mask, networkMask,
+            refPoints: state.refPoints.slice(lo, hi),
+            densityPartial: true,
+            // Interp (if any) runs after the merge, never per-slice.
+            wantNetworkInterp: false,
+          },
+          transfer,
+        );
       }
-      finishDensityOutputs(energy, density);
-    };
-
-    for (let p = 0; p < poolN; p++) {
-      const lo = Math.floor(p * K / poolN);
-      const hi = Math.floor((p + 1) * K / poolN);
-      sliceLen[p] = hi - lo;
-      const slot = p;
-      const w = spawnWorker((m) => {
-        if (m.kind === "progress") {
-          workerFrac[slot] = m.progress;
-          poolProgress();
-        } else if (m.kind === "done") {
-          for (let i = 0; i < N; i++) density[i] += m.density[i];
-          for (let i = 0; i < N; i++) energySum[i] += m.energySum[i];
-          for (let i = 0; i < N; i++) energyCount[i] += m.energyCount[i];
-          workerFrac[slot] = 1;
-          poolProgress();
-          if (--remaining === 0) finishDensity();
-        } else if (m.kind === "error") {
-          computeFailed(m.message);
-        }
-      });
-      const { height, mask, networkMask, transfer } = demPayload();
-      w.postMessage(
-        {
-          ...baseMsg,
-          height, mask, networkMask,
-          refPoints: state.refPoints.slice(lo, hi),
-          densityPartial: true,
-          // Interp (if any) runs after the merge, never per-slice.
-          wantNetworkInterp: false,
-        },
-        transfer,
-      );
-    }
-  };
+    });
 
   const startSingleWorker = () => {
     // Single worker: regular from/to/round runs, top-N, maximize, and
@@ -2580,7 +2652,7 @@ runBtn.addEventListener("click", async () => {
   // which runs the per-ref Dijkstras on all cores. Any failure — server not
   // running, version mismatch, network error — falls back to the in-browser
   // pool. Protocol documented in backend/src/main.rs.
-  const startDensityBackend = async (baseUrl) => {
+  const startDensityBackend = async (baseUrl, { useNetwork }) => {
     progressBar.style.width = "10%"; // no streaming progress from the backend
     // Liveness ticker: large runs take a while server-side and fetch gives
     // no progress events — an elapsed counter shows the app isn't hung.
@@ -2598,7 +2670,7 @@ runBtn.addEventListener("click", async () => {
         alpha, beta, eta, eMax, eMaxMode,
         densityMode,
         refPoints: state.refPoints.map(([r, c]) => [r, c]),
-        hasNetwork: constrainNet,
+        hasNetwork: useNetwork,
         maximize,
       };
       const json = new TextEncoder().encode(JSON.stringify(params));
@@ -2606,12 +2678,12 @@ runBtn.addEventListener("click", async () => {
       new DataView(head.buffer).setUint32(0, json.length, true);
       const body = new Blob([
         head, json, state.dem.height, state.dem.mask,
-        ...(constrainNet ? [state.networkMask] : []),
+        ...(useNetwork ? [state.networkMask] : []),
       ]);
       const resp = await fetch(`${baseUrl}/density`, { method: "POST", body });
       if (!resp.ok) throw new Error(`backend HTTP ${resp.status}`);
       const buf = await resp.arrayBuffer();
-      if (gen !== state.computeGen) return;
+      if (gen !== state.computeGen) return new Promise(() => {});
 
       // From here on the backend HAS answered — a parsing/allocation error
       // must surface as a failure, NOT fall through to the browser-pool
@@ -2625,47 +2697,77 @@ runBtn.addEventListener("click", async () => {
         }
         let off = 4 + jlen;
         // Current backends pad the meta JSON so the payload is 8-byte
-        // aligned — views straight onto the response buffer, zero copies.
-        // Unaligned (older backend): slice-copy to realign.
+        // aligned — the density view sits straight on the response buffer,
+        // zero copies. Unaligned (older backend): slice-copy to realign.
         const aligned = off % 8 === 0;
         const density = aligned
           ? new Float64Array(buf, off, N)
           : new Float64Array(buf.slice(off, off + 8 * N));
         off += 8 * N;
-        // The interp step transfers the energy buffer to a worker; a view
-        // would drag (and detach) the whole response buffer with it, so
-        // copy in that case.
-        const willInterp = wantNetworkInterp && constrainNet;
-        const energy = (aligned && !willInterp)
-          ? new Float32Array(buf, off, N)
-          : new Float32Array(buf.slice(off, off + 4 * N));
+        // Energy is always copied out: downstream steps (interp) transfer
+        // it to workers, and a view would drag the whole response buffer —
+        // density included — along and detach it.
+        const energy = new Float32Array(buf.slice(off, off + 4 * N));
         progressBar.style.width = "100%";
-        finishDensityOutputs(energy, density);
+        return { energy, passes: density };
       } catch (err) {
         console.error("[backend] response handling failed:", err);
         computeFailed(`backend response handling failed: ${err.message}`);
+        return new Promise(() => {}); // run is dead; keep the chain pending
       }
     } finally {
       clearInterval(ticker);
     }
   };
 
+  // Backend with browser-pool fallback, per scenario. Resolves with raw
+  // {energy, passes} like computeDensityField.
+  const densityField = async (opts) => {
+    if (backendOn) {
+      try {
+        return await startDensityBackend(backendUrl, opts);
+      } catch (err) {
+        if (gen !== state.computeGen) return new Promise(() => {});
+        console.warn("[backend] falling back to in-browser workers:", err);
+        status.textContent = "Native backend unavailable — using browser workers…";
+      }
+    }
+    return computeDensityField(opts);
+  };
+
   // ---- Constrained vs unconstrained comparison ------------------------------
   // Two workers in parallel: the primary run exactly as configured (network
-  // mask, passes, top-N, path, interp), plus a secondary energy-only run
-  // WITHOUT the network. The difference field (constrained − unconstrained,
-  // clamped at 0 — a constraint can never reduce cost) quantifies what the
-  // network costs in energy. Progress reports come from the primary.
+  // mask, passes, top-N, path, interp), plus a secondary run WITHOUT the
+  // network (energy + passes when enabled). The energy difference
+  // (constrained − unconstrained, clamped at 0 — a constraint can never
+  // reduce cost) quantifies what the network costs in energy; it's defined
+  // on network cells only (off-network constrained values are interp
+  // visualisation, not analysis). Passes difference is signed: positive
+  // where the network concentrates traffic, negative where unconstrained
+  // corridors ran. Progress reports come from the primary.
   const startComparePair = () => {
     let primary = null, secondary = null;
-    const maybeFinish = () => {
+    const maybeFinish = async () => {
       if (!primary || !secondary) return;
-      const diff = new Float32Array(N);
+      // The difference is ANALYSED on network cells only (off-network
+      // constrained values are interpolation, not analysis), then — when
+      // the interp option is on — visually filled across non-network
+      // cells exactly like the constrained field.
+      const net = state.networkMask;
+      let diff = new Float32Array(N);
       for (let i = 0; i < N; i++) {
+        if (net && !net[i]) { diff[i] = Infinity; continue; }
         const a = primary.energy[i], b = secondary.energy[i];
         diff[i] = (Number.isFinite(a) && Number.isFinite(b)) ? Math.max(0, a - b) : Infinity;
       }
+      if (wantNetworkInterp && constrainNet) {
+        diff = await runInterp(diff);
+        if (gen !== state.computeGen) return;
+      }
       primary.energyAlt = { unconstrained: secondary.energy, difference: diff };
+      if (primary.passes && secondary.passes) {
+        primary.passesAlt = { unconstrained: secondary.passes };
+      }
       computeDone(primary);
     };
     const wA = spawnWorker((m) => {
@@ -2686,7 +2788,8 @@ runBtn.addEventListener("click", async () => {
       else if (m.kind === "error") computeFailed(m.message);
     });
     {
-      // Energy-only, no network, no extras — same mode/cost/budget.
+      // No network, no path/top-N extras — same mode/cost/budget; passes
+      // mirror the primary so the overlay is comparable across scenarios.
       const height = new Float32Array(state.dem.height);
       const mask = new Uint8Array(state.dem.mask);
       wB.postMessage(
@@ -2694,7 +2797,7 @@ runBtn.addEventListener("click", async () => {
           ...baseMsg,
           height, mask, networkMask: null,
           goalR: -1, goalC: -1,
-          wantPasses: false, wantTopN: false,
+          wantTopN: false,
           wantNetworkInterp: false,
           maximizeLength: 0,
         },
@@ -2703,24 +2806,48 @@ runBtn.addEventListener("click", async () => {
     }
   };
 
-  const compareNet = constrainNet && !wantDensity &&
-    !!document.getElementById("vec-compare")?.checked;
+  const compareOn = constrainNet && !!document.getElementById("vec-compare")?.checked;
 
   const backendOn = !!document.getElementById("use-backend")?.checked;
   const backendUrl = (document.getElementById("backend-url")?.value || "http://127.0.0.1:8077")
     .trim().replace(/\/+$/, "");
 
-  if (wantDensity && backendOn) {
-    startDensityBackend(backendUrl).catch((err) => {
+  // Density + compare: the two scenarios run sequentially (each already
+  // saturates the cores), splitting the progress bar. Diffs come from the
+  // RAW constrained field (pre-interp); the energy difference is therefore
+  // naturally confined to network cells.
+  const startDensityCompare = async () => {
+    const A = await densityField({ useNetwork: true, progressBase: 0, progressScale: 0.5 });
+    if (gen !== state.computeGen) return;
+    const B = await densityField({ useNetwork: false, progressBase: 0.5, progressScale: 0.5 });
+    if (gen !== state.computeGen) return;
+    let diffE = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const a = A.energy[i], b = B.energy[i];
+      diffE[i] = (Number.isFinite(a) && Number.isFinite(b)) ? Math.max(0, a - b) : Infinity;
+    }
+    // Difference is computed from the RAW constrained field (network cells
+    // only), then visually filled like the constrained field when the
+    // interp option is on.
+    if (wantNetworkInterp && constrainNet) {
+      diffE = await runInterp(diffE);
       if (gen !== state.computeGen) return;
-      console.warn("[backend] falling back to in-browser workers:", err);
-      status.textContent = "Native backend unavailable — using browser workers…";
-      if (poolN > 1) startDensityPool();
-      else startSingleWorker();
+    }
+    finishDensityOutputs(A.energy, A.passes, {
+      energyAlt: { unconstrained: B.energy, difference: diffE },
+      passesAlt: { unconstrained: B.passes },
     });
-  } else if (wantDensity && poolN > 1) {
-    startDensityPool();
-  } else if (compareNet) {
+  };
+
+  if (wantDensity && compareOn) {
+    startDensityCompare();
+  } else if (wantDensity) {
+    (async () => {
+      const r = await densityField({ useNetwork: constrainNet });
+      if (gen !== state.computeGen) return;
+      finishDensityOutputs(r.energy, r.passes);
+    })();
+  } else if (compareOn) {
     startComparePair();
   } else {
     startSingleWorker();
@@ -2728,14 +2855,18 @@ runBtn.addEventListener("click", async () => {
 });
 
 // ------- Render -------
-function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs, energyAlt }) {
+function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs, energyAlt, passesAlt }) {
   // Cache for live re-render on colormap / view / range changes.
-  state.lastResult = { energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs, energyAlt: energyAlt || null };
+  state.lastResult = {
+    energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs,
+    energyAlt: energyAlt || null,
+    passesAlt: passesAlt || null,
+  };
 
-  // The displayed-field selector only makes sense after a compare run.
+  // The displayed-scenario selector only makes sense after a compare run.
   const srcRow = document.getElementById("energy-source-row");
-  if (srcRow) srcRow.style.display = energyAlt ? "" : "none";
-  if (!energyAlt) {
+  if (srcRow) srcRow.style.display = (energyAlt || passesAlt) ? "" : "none";
+  if (!energyAlt && !passesAlt) {
     const sel = document.getElementById("energy-source");
     if (sel) sel.value = "constrained";
   }
@@ -2793,16 +2924,25 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
 function rerenderCachedResult() {
   const r = state.lastResult;
   if (!r || !state.dem) return;
-  const { passes, path, routes } = r;
+  const { path, routes } = r;
   const { H, W, originX, originY, dx, dy, isGeographic } = state.dem;
 
-  // After a compare run, the energy layer can display the constrained
-  // field (default), the unconstrained one, or their difference (the
-  // energy cost of the network). Pure re-render — no recompute.
+  // After a compare run, the scenario selector switches BOTH layers.
+  // Energy: constrained (default) / unconstrained / difference field.
+  // Passes: constrained / unconstrained, and in "difference" mode the two
+  // scenarios render TOGETHER — constrained in light red, unconstrained in
+  // light green, shared scale (no subtraction; overlap blends to yellow).
+  // Pure re-render — no recompute.
   const energySel = document.getElementById("energy-source")?.value || "constrained";
   const energy = (r.energyAlt && energySel !== "constrained" && r.energyAlt[energySel])
     ? r.energyAlt[energySel]
     : r.energy;
+  const dualPasses = energySel === "difference" && r.passes && r.passesAlt?.unconstrained;
+  const dualRow = document.getElementById("passes-dual-row");
+  if (dualRow) dualRow.style.display = dualPasses ? "" : "none";
+  const passes = (r.passesAlt && energySel === "unconstrained" && r.passesAlt.unconstrained)
+    ? r.passesAlt.unconstrained
+    : r.passes;
 
   // -- Energy layer. In density mode this is the per-cell mean energy
   // across reference points (Infinity where unreachable from every ref);
@@ -2831,7 +2971,25 @@ function rerenderCachedResult() {
   // brightens "highway" cells without imposing its own hue. When blend
   // mode is "normal" the renderer paints with full alpha so dim cells
   // read as solid black instead of transparent.
-  if (passes) {
+  if (passes && dualPasses) {
+    const gamma = parseFloat(document.getElementById("passes-gamma")?.value);
+    const win = parseInt(document.getElementById("passes-mean-window")?.value, 10);
+    const gammaB = parseFloat(document.getElementById("passes-gamma-b")?.value);
+    const winB = parseInt(document.getElementById("passes-mean-window-b")?.value, 10);
+    const out = renderDualPassesToDataURL(r.passes, r.passesAlt.unconstrained, W, H, {
+      userMin: readRangeInput("passes-vmin", null),
+      userMax: readRangeInput("passes-vmax", null),
+      gamma: Number.isFinite(gamma) ? gamma : 1,
+      meanWindow: Number.isFinite(win) && win > 1 ? win : 1,
+      userMinB: readRangeInput("passes-vmin-b", null),
+      userMaxB: readRangeInput("passes-vmax-b", null),
+      gammaB: Number.isFinite(gammaB) ? gammaB : null,
+      meanWindowB: Number.isFinite(winB) ? winB : null,
+    });
+    state.passesDataUrl = out.url;
+    state.lastPassesAutoMin = out.lo;
+    state.lastPassesAutoMax = out.hi;
+  } else if (passes) {
     const blend = document.getElementById("passes-blend")?.value || "plus-lighter";
     const gamma = parseFloat(document.getElementById("passes-gamma")?.value);
     const win = parseInt(document.getElementById("passes-mean-window")?.value, 10);
@@ -3106,6 +3264,96 @@ function renderFieldToDataURL(field, W, H, opts) {
     img.data[4 * i + 1] = g2;
     img.data[4 * i + 2] = b2;
     img.data[4 * i + 3] = a2;
+  }
+  ctx.putImageData(img, 0, 0);
+  return { url: canvas.toDataURL(), lo, hi };
+}
+
+// Two-scenario passes render for the "difference" view: constrained passes
+// in light red, unconstrained in light green, ADDITIVELY blended on a
+// SHARED scale — overlap genuinely sums toward yellow (the bases are
+// chosen so red+green clamps to a soft yellow, not white), and the alpha
+// adds too, so coincident corridors pop. No subtraction — the user reads
+// where each scenario routes its traffic.
+// Per-channel controls: the A (red/constrained) channel uses the regular
+// passes inputs; the B (green/unconstrained) channel takes optional
+// overrides that fall back to A's RESOLVED values when blank — so by
+// default both channels share one scale (comparable), and each knob can
+// diverge independently. Auto bounds are p10/p90 over BOTH fields'
+// positive cells.
+function renderDualPassesToDataURL(constrained, unconstrained, W, H, opts) {
+  const N = W * H;
+  const winA = opts.meanWindow && opts.meanWindow > 1 ? opts.meanWindow : 1;
+  const winB = opts.meanWindowB && opts.meanWindowB > 1
+    ? opts.meanWindowB
+    : (opts.meanWindowB == null ? winA : 1);
+  const a = winA > 1 ? boxBlur2D(constrained, W, H, winA) : constrained;
+  const b = winB > 1 ? boxBlur2D(unconstrained, W, H, winB) : unconstrained;
+
+  // Shared auto bounds: reservoir-sample positive cells from both fields.
+  const SAMPLE_CAP = 100_000;
+  const samples = new Float32Array(SAMPLE_CAP);
+  let collected = 0, seen = 0;
+  for (const f of [a, b]) {
+    for (let i = 0; i < N; i++) {
+      const v = f[i];
+      if (!Number.isFinite(v) || v <= 0) continue;
+      if (collected < SAMPLE_CAP) samples[collected++] = v;
+      else {
+        const j = Math.floor(Math.random() * (seen + 1));
+        if (j < SAMPLE_CAP) samples[j] = v;
+      }
+      seen++;
+    }
+  }
+  let autoLo = 0, autoHi = 1;
+  if (collected > 0) {
+    const sorted = samples.subarray(0, collected).slice().sort();
+    const at = (p) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p / 100))];
+    autoLo = at(10);
+    autoHi = at(90);
+  }
+  let lo = opts.userMin != null ? opts.userMin : autoLo;
+  let hi = opts.userMax != null ? opts.userMax : autoHi;
+  if (!Number.isFinite(lo)) lo = 0;
+  if (!Number.isFinite(hi) || hi <= lo) hi = lo + 1;
+  const span = hi - lo;
+  const gammaExp = Math.max(0.01, opts.gamma ?? 1);
+  // Green channel: explicit overrides, else inherit red's resolved values.
+  let loB = opts.userMinB != null ? opts.userMinB : lo;
+  let hiB = opts.userMaxB != null ? opts.userMaxB : hi;
+  if (!Number.isFinite(loB)) loB = lo;
+  if (!Number.isFinite(hiB) || hiB <= loB) hiB = loB + 1;
+  const spanB = hiB - loB;
+  const gammaExpB = Math.max(0.01, opts.gammaB ?? gammaExp);
+
+  // Light red (constrained) / light green (unconstrained). Their SUM is
+  // (255, 255, 150) — a soft yellow — which is what overlap clamps to.
+  const RA = 255, GA = 105, BA = 70;
+  const RB = 95,  GB = 225, BB = 80;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  const img = ctx.createImageData(W, H);
+  for (let i = 0; i < N; i++) {
+    let tA = (a[i] - lo) / span;
+    let tB = (b[i] - loB) / spanB;
+    // Full clamp on BOTH ends: a value below the channel's min must floor
+    // at 0, not go negative — a negative channel would subtract from the
+    // additive sum and could erase the other channel entirely.
+    if (!Number.isFinite(tA) || a[i] <= 0 || tA < 0) tA = 0;
+    else if (tA > 1) tA = 1;
+    if (!Number.isFinite(tB) || b[i] <= 0 || tB < 0) tB = 0;
+    else if (tB > 1) tB = 1;
+    if (tA <= 0 && tB <= 0) { img.data[4 * i + 3] = 0; continue; }
+    if (gammaExp !== 1 && tA > 0) tA = Math.pow(tA, gammaExp);
+    if (gammaExpB !== 1 && tB > 0) tB = Math.pow(tB, gammaExpB);
+    img.data[4 * i + 0] = Math.min(255, Math.round(RA * tA + RB * tB));
+    img.data[4 * i + 1] = Math.min(255, Math.round(GA * tA + GB * tB));
+    img.data[4 * i + 2] = Math.min(255, Math.round(BA * tA + BB * tB));
+    img.data[4 * i + 3] = Math.min(255, Math.round((tA + tB) * 255));
   }
   ctx.putImageData(img, 0, 0);
   return { url: canvas.toDataURL(), lo, hi };

@@ -873,11 +873,11 @@
           </div>
           <!-- Shown only when a compare run produced both scenarios. -->
           <div id="energy-source-row" style="display: none;">
-            <label data-i18n="layer.energy_source">Displayed energy field</label>
+            <label data-i18n="layer.energy_source">Displayed scenario (energy & passes)</label>
             <select id="energy-source">
               <option value="constrained"   data-i18n="esrc.constrained">network-constrained</option>
               <option value="unconstrained" data-i18n="esrc.unconstrained">unconstrained</option>
-              <option value="difference"    data-i18n="esrc.difference">difference (network cost)</option>
+              <option value="difference"    data-i18n="esrc.difference">difference (network cost; passes overlaid)</option>
             </select>
           </div>
           <div class="row">
@@ -920,6 +920,33 @@
             <div>
               <label data-i18n="passes.mean_window">mean filter N</label>
               <input type="number" id="passes-mean-window" value="5" min="1" max="200" step="1" />
+            </div>
+          </div>
+          <!-- Green-channel overrides for the dual (difference) passes view.
+               Shown only while the scenario selector is on "difference"; the
+               controls above drive the red (constrained) channel. Blank =
+               inherit the red channel's resolved value. -->
+          <div id="passes-dual-row" style="display: none;">
+            <div class="hint" data-i18n="passes.dual" style="margin-top: 4px;">Green channel (unconstrained) — blank = same as red</div>
+            <div class="row">
+              <div>
+                <label>min</label>
+                <input type="number" id="passes-vmin-b" placeholder="=" step="any" />
+              </div>
+              <div>
+                <label>max</label>
+                <input type="number" id="passes-vmax-b" placeholder="=" step="any" />
+              </div>
+            </div>
+            <div class="row">
+              <div>
+                <label>γ</label>
+                <input type="number" id="passes-gamma-b" placeholder="=" min="0.01" step="0.05" />
+              </div>
+              <div>
+                <label>N</label>
+                <input type="number" id="passes-mean-window-b" placeholder="=" min="1" max="200" step="1" />
+              </div>
             </div>
           </div>
           <label data-i18n="passes.blend">Blend</label>
@@ -1096,7 +1123,7 @@
               "Energy color" passes blend (hue from energy, opacity from passes).
               Optional vector-network rendering (black lines, configurable ground width + opacity; passes overlay stacks above the network; stacking reorderable via a modal) and a
               "constrain compute to network" toggle. Basemap selector (OSM / Carto minimal /
-              solid colours). Export of rendered energy/passes PNGs with world files. OSM (Overpass) street-network pull. Constrained-vs-unconstrained comparison with difference field. Backend liveness/progress fixes. SEO/LLM metadata (description, canonical, Open Graph, JSON-LD, llms.txt, sitemap). Fixes: PWA manifest restored, service-worker install bug, offline
+              solid colours). Export of rendered energy/passes PNGs with world files. OSM (Overpass) street-network pull. Constrained-vs-unconstrained comparison: interpolated energy difference + additive red/green passes overlay with per-channel controls (regular and density modes). Interpolation prefilter + worker-pool banding. Backend liveness/progress fixes. SEO/LLM metadata (description, canonical, Open Graph, JSON-LD, llms.txt, sitemap). Fixes: PWA manifest restored, service-worker install bug, offline
               caching of CDN libs (SRI + crossorigin), 3-D GeoPackage (Z/M) parsing, stale-result
               race on DEM/network swap mid-compute, worker-crash handling, XSS hardening of
               Bundle-before-DEM loading order now restores correctly (pending-bundle re-apply). Density+network Compute no longer aborts silently (null-src re-snap bug); network clicks snap grid-wide (no more snap-radius dead-end); .gpkg geometry column name read from metadata; empty-on-DEM networks rejected loudly.</p>

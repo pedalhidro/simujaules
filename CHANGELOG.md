@@ -57,6 +57,24 @@ history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
   sitemap.xml; lang attribute fixed to pt-BR (matches default content).
   deploy.sh ships llms.txt, sitemap.xml and CHANGELOG.md.
 
+- Network interpolation is much faster: an integer chamfer prefilter
+  skips cells provably beyond any ray's reach (~4× on networks smaller
+  than the DEM), and the fill runs banded across the worker pool
+  (~×cores). Outputs stay bit-identical. Smoothing runs as a single
+  post-merge pass.
+- Scenario comparison extended: passes are computed for both scenarios
+  (signed difference shows corridors the network creates), and the
+  comparison also works in multi-reference density mode (two sequential
+  runs splitting the progress bar, browser pool or native backend). The
+  selector now switches energy AND passes together. In "difference" mode
+  the passes layer overlays both scenarios — constrained light red,
+  unconstrained light green, additively blended (overlap sums to a soft
+  yellow, coincident corridors brighten). The channels share one scale by
+  default; a green-channel sub-panel (min/max/γ/mean filter, blank =
+  inherit red) lets each be tuned independently. The energy difference is analysed on network cells and then
+  interpolated across the grid like the constrained field (when interp is
+  on).
+
 ### Fixes
 
 - PWA manifest restored (deleted in the v11 commit; broke deploys, blocked

@@ -74,7 +74,12 @@
 //              Compute no longer aborts silently (null-src re-snap bug);
 //              random refs snap to the network. OSM (Overpass) network
 //              pull; constrained-vs-unconstrained compare + difference
-//              field; backend liveness ticker, hard-fail after response,
+//              fields (energy diff interpolated; passes overlaid red/
+//              green additively with per-channel min/max/gamma/filter,
+//              also in density mode); interp
+//              prefilter + pooled banding (bit-identical, ~4x clustered,
+//              xcores everywhere); backend liveness ticker, hard-fail
+//              after response,
 //              zero-copy parse, interp progress. Network snap is
 //              grid-wide (radius input = quiet zone, no rejection dead
 //              end); .gpkg geom column from metadata; 0-cell networks
