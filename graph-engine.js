@@ -231,7 +231,17 @@
     const nNodes = nodeR.length, nEdges = edgeA.length;
     const NR = new Float64Array(nodeR), NC = new Float64Array(nodeC);
     const NH = new Float32Array(nNodes);
-    for (let i = 0; i < nNodes; i++) NH[i] = sampleHeight(height, mask, H, W, NR[i], NC[i]);
+    // A node is valid only inside the DEM extent AND on a non-nodata cell — the
+    // graph analogue of the grid mask. Invalid nodes are never traversed or
+    // drawn, so passes/energy can't leak past the DEM (network lines often run
+    // off the tile edge).
+    const nodeValid = new Uint8Array(nNodes);
+    for (let i = 0; i < nNodes; i++) {
+      NH[i] = sampleHeight(height, mask, H, W, NR[i], NC[i]);
+      const ri = Math.floor(NR[i]), ci = Math.floor(NC[i]);
+      const inB = ri >= 0 && ri < H && ci >= 0 && ci < W;
+      nodeValid[i] = (inB && (!mask || mask[ri * W + ci])) ? 1 : 0;
+    }
 
     // Per-edge metric length + densified elevation profile (A→B order).
     const EA = new Int32Array(edgeA), EB = new Int32Array(edgeB);
@@ -270,7 +280,7 @@
 
     return {
       nNodes, nEdges, junctionMode,
-      nodeR: NR, nodeC: NC, nodeH: NH,
+      nodeR: NR, nodeC: NC, nodeH: NH, nodeValid,
       edgeA: EA, edgeB: EB, edgeLenM, edgeStepM, profOff, profH,
       csrHead, csrSource, csrTarget, csrEdge, csrAtoB,
     };
@@ -300,13 +310,13 @@
     const parentHE = new Int32Array(nN).fill(-1);
     const order = new Int32Array(nN); let ol = 0;
     const heap = makeRadixHeap();
-    for (let i = 0; i < seeds.length; i++) { const s = seeds[i]; if (s >= 0 && s < nN && E[s] !== 0) { E[s] = 0; heap.push(0, s); } }
+    for (let i = 0; i < seeds.length; i++) { const s = seeds[i]; if (s >= 0 && s < nN && g.nodeValid[s] && E[s] !== 0) { E[s] = 0; heap.push(0, s); } }
     while (heap.pop()) {
       const g0 = heap.pri, u = heap.val;
       if (settled[u]) continue;
       settled[u] = 1; order[ol++] = u;
       for (let he = g.csrHead[u]; he < g.csrHead[u + 1]; he++) {
-        const v = g.csrTarget[he]; if (settled[v]) continue;
+        const v = g.csrTarget[he]; if (settled[v] || !g.nodeValid[v]) continue;
         const e = g.csrEdge[he], atob = g.csrAtoB[he];
         const w = reverse ? (atob ? costBA[e] : costAB[e]) : (atob ? costAB[e] : costBA[e]);
         const t = g0 + w;
@@ -563,6 +573,7 @@
   function nearestNode(g, r, c) {
     let best = -1, bestD = Infinity;
     for (let i = 0; i < g.nNodes; i++) {
+      if (g.nodeValid && !g.nodeValid[i]) continue; // snap only to in-extent nodes
       const dr = g.nodeR[i] - r, dc = g.nodeC[i] - c, d = dr * dr + dc * dc;
       if (d < bestD) { bestD = d; best = i; }
     }

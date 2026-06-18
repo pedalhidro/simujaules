@@ -1,0 +1,14 @@
+{
+  "name": "simujoules-census",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless population-weighted density harness for simujoules. Dev tooling, never deployed.",
+  "scripts": {
+    "test": "node test-census-density.mjs"
+  },
+  "dependencies": {
+    "geotiff": "3.0.5",
+    "jszip": "3.10.1"
+  }
+}

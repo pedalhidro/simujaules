@@ -1,0 +1,11 @@
+# Node deps for census-density.mjs (reinstall with `npm install`).
+node_modules/
+
+# Generated artifacts — not source.
+census_data/
+points.geojson
+*.zip
+
+# Python
+__pycache__/
+*.pyc

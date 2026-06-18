@@ -1118,7 +1118,7 @@ self.onmessage = (ev) => {
     try {
       const g = GraphEngine.buildGraph(msg.lines, msg.dem, msg.opts);
       const transfer = [
-        g.nodeR.buffer, g.nodeC.buffer, g.nodeH.buffer, g.edgeA.buffer, g.edgeB.buffer,
+        g.nodeR.buffer, g.nodeC.buffer, g.nodeH.buffer, g.nodeValid.buffer, g.edgeA.buffer, g.edgeB.buffer,
         g.edgeLenM.buffer, g.edgeStepM.buffer, g.profOff.buffer, g.profH.buffer,
         g.csrHead.buffer, g.csrSource.buffer, g.csrTarget.buffer, g.csrEdge.buffer, g.csrAtoB.buffer,
       ];

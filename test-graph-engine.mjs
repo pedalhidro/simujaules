@@ -134,5 +134,20 @@ const alpha = 0.008, beta = 1.0, eta = 0.1;
   ok("maximize energy == 3 uphill steps", res.path && approx(res.path.energy, want), `got ${res.path && res.path.energy} want ${want}`);
 }
 
+// ---- 8. nodes outside the DEM extent are excluded (clip to extent) ----------
+{
+  const dem = flatDem(1, 4, 0); // W=4 → valid cols 0..3
+  // Chain runs off the right edge: cols 0..5; cols 4,5 are out of extent.
+  const chain = [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5]];
+  const g = GraphEngine.buildGraph([chain], dem, { junctionMode: "shared" });
+  let invalid = 0;
+  for (let i = 0; i < g.nNodes; i++) if (!g.nodeValid[i]) invalid++;
+  ok("out-of-extent nodes marked invalid", invalid === 2, `invalid=${invalid}`);
+  const src = GraphEngine.nearestNode(g, 0, 0);
+  const res = GraphEngine.computeGraph(g, { mode: "density", densityMode: "from", alpha, beta, eta, eMax: 0, refNodes: [src] });
+  const reached = Array.from(res.edgePasses).filter((p) => p > 0).length;
+  ok("passes stop at the DEM extent (3 in-bounds edges)", reached === 3, `reached=${reached}`);
+}
+
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

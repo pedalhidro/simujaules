@@ -871,6 +871,9 @@ const state = {
   graphEnergyLayer: null,
   graphPassesLayer: null,
   graphRoutesLayer: null,
+  // Graph energy is shown as an interpolated RASTER (like grid), not vector
+  // edges — rasterised from the graph then IDW-filled. Cached for restyle.
+  graphEnergyRaster: null,
   // Multi-reference density: list of [r, c] pixel coords plus their map markers.
   refPoints: [],
   refMarkers: [],
@@ -1859,6 +1862,7 @@ function clearVectorNetwork() {
   state.networkGraph = null; state.networkGraphToken = null;
   removeGraphLayers();
   state.lastGraphResult = null;
+  state.graphEnergyRaster = null;
   const meta = document.getElementById("vec-meta");
   if (meta) meta.innerHTML = "No network loaded.";
   const inp = document.getElementById("vector-file");
@@ -2057,6 +2061,44 @@ function drawGraphPath(graph, p, colour, group) {
 
 // Render the cached graph result as a colored-vector overlay. Reads the style
 // knobs LIVE so colormap/range/gamma changes recolor without recomputing.
+// Rasterise the graph's per-node energy onto the DEM grid (network cells only),
+// stamping each edge's lerped endpoint energy along its cells with the network
+// line width. Returns a Float32Array (Infinity off-network) to feed the IDW
+// interp, or null if there's no energy. Invalid (off-extent) edges are skipped.
+function rasterizeGraphEnergy(graph, result) {
+  if (!state.dem || !result.nodeEnergy) return null;
+  const { H, W, mask } = state.dem;
+  const lineWidth = Math.max(1, parseInt(document.getElementById("vec-width")?.value, 10) || 1);
+  const halfWidth = (lineWidth - 1) >> 1;
+  const eGrid = new Float32Array(H * W).fill(Infinity);
+  let any = false;
+  for (let e = 0; e < graph.nEdges; e++) {
+    const a = graph.edgeA[e], b = graph.edgeB[e];
+    if (graph.nodeValid && (!graph.nodeValid[a] || !graph.nodeValid[b])) continue;
+    const eA = result.nodeEnergy[a], eB = result.nodeEnergy[b];
+    const fA = Number.isFinite(eA), fB = Number.isFinite(eB);
+    if (!fA && !fB) continue;
+    const r0 = graph.nodeR[a], c0 = graph.nodeC[a], r1 = graph.nodeR[b], c1 = graph.nodeC[b];
+    const steps = Math.max(1, Math.ceil(Math.hypot(r1 - r0, c1 - c0)));
+    for (let s = 0; s <= steps; s++) {
+      const f = s / steps;
+      const rr = Math.round(r0 + (r1 - r0) * f), cc = Math.round(c0 + (c1 - c0) * f);
+      const ev = (fA ? eA : eB) * (1 - f) + (fB ? eB : eA) * f;
+      for (let pdr = -halfWidth; pdr <= halfWidth; pdr++) {
+        const rrr = rr + pdr; if (rrr < 0 || rrr >= H) continue;
+        for (let pdc = -halfWidth; pdc <= halfWidth; pdc++) {
+          const ccc = cc + pdc; if (ccc < 0 || ccc >= W) continue;
+          const idx = rrr * W + ccc;
+          if (!mask[idx]) continue;
+          if (ev < eGrid[idx]) eGrid[idx] = ev;
+          any = true;
+        }
+      }
+    }
+  }
+  return any ? eGrid : null;
+}
+
 // Remove all graph-mode layers and reset the pane opacities (the raster
 // overlays assume the panes sit at opacity 1 and set their own element opacity).
 function removeGraphLayers() {
@@ -2065,7 +2107,7 @@ function removeGraphLayers() {
   }
   const ep = map.getPane("energyPane"), pp = map.getPane("passesPane");
   if (ep) ep.style.opacity = "";
-  if (pp) pp.style.opacity = "";
+  if (pp) { pp.style.opacity = ""; pp.style.mixBlendMode = ""; }
 }
 
 // Build one colored-polyline-per-edge vector layer for a per-edge field.
@@ -2122,14 +2164,29 @@ function buildGraphFieldLayer(graph, field, { pane, greyscale, minId, maxId, per
 function renderGraphOverlay() {
   if (!state.lastGraphResult || !state.dem) return;
   const { graph, result } = state.lastGraphResult;
-  // Graph layers replace the raster overlays.
-  if (state.energyOverlay) { state.energyOverlay.remove(); state.energyOverlay = null; }
+  const { W, H } = state.dem;
   if (state.passesOverlay) { state.passesOverlay.remove(); state.passesOverlay = null; }
   removeGraphLayers();
 
-  // Passes is the result the user asked for when density or "want passes" is on
-  // (mirrors the grid, where passes only renders when computed). Otherwise the
-  // run is energy-only and we show the energy field instead.
+  // Energy: interpolated RASTER (built in finishGraph), shown through the same
+  // energy imageOverlay grid mode uses → the Energy visibility/opacity/colormap
+  // controls drive it, and it reads as a smooth field, not a network outline.
+  if (state.energyOverlay) { state.energyOverlay.remove(); state.energyOverlay = null; }
+  if (state.graphEnergyRaster) {
+    const out = renderFieldToDataURL(state.graphEnergyRaster, W, H, {
+      usePercentileBounds: true, percentiles: [1, 80],
+      userMin: readRangeInput("vmin", null), userMax: readRangeInput("vmax", null),
+      useGreyscale: false, treatZeroAsTransparent: false,
+    });
+    state.energyDataUrl = out.url;
+    state.lastAutoMin = out.lo; state.lastAutoMax = out.hi;
+    applyEnergyOverlay();
+  } else {
+    state.energyDataUrl = null;
+  }
+
+  // Passes: vector corridors (the "follow the vectors" result), when density or
+  // "want passes" is on (mirrors the grid, where passes renders only if computed).
   const passesWanted = !!document.getElementById("want-density")?.checked || !!document.getElementById("want-passes")?.checked;
   const hasPasses = passesWanted && result.edgePasses && result.edgePasses.some((v) => v > 0);
   if (hasPasses) {
@@ -2138,13 +2195,6 @@ function renderGraphOverlay() {
       state.graphPassesLayer.addTo(map);
       state.lastPassesAutoMin = state.graphPassesLayer._range[0];
       state.lastPassesAutoMax = state.graphPassesLayer._range[1];
-    }
-  } else if (result.edgeEnergy && result.edgeEnergy.some((v) => Number.isFinite(v))) {
-    state.graphEnergyLayer = buildGraphFieldLayer(graph, result.edgeEnergy, { pane: "energyPane", greyscale: false, minId: "vmin", maxId: "vmax", percentiles: [1, 80], skipZero: false });
-    if (state.graphEnergyLayer) {
-      state.graphEnergyLayer.addTo(map);
-      state.lastAutoMin = state.graphEnergyLayer._range[0];
-      state.lastAutoMax = state.graphEnergyLayer._range[1];
     }
   }
   const routesGroup = L.layerGroup();
@@ -3068,9 +3118,34 @@ runBtn.addEventListener("click", async () => {
       updateRunButtonState();
       state.computeStartedAt = 0;
       state.lastGraphResult = { graph, result };
-      renderGraphOverlay();
+      state.graphEnergyRaster = null;
+      renderGraphOverlay();   // passes corridors show immediately
       const routeNote = result.routes ? ` · ${result.routes.length} route(s)` : "";
-      status.textContent = `Done in ${result.elapsedMs.toFixed(0)} ms (graph: ${graph.nNodes} nodes, ${graph.nEdges} edges)${routeNote}.`;
+      const doneMsg = `Done in ${result.elapsedMs.toFixed(0)} ms (graph: ${graph.nNodes} nodes, ${graph.nEdges} edges)${routeNote}.`;
+      // Energy field: rasterise the graph energy onto the grid, then (when the
+      // interp option is on) IDW-fill off-network — the smooth field grid shows.
+      const eGrid = rasterizeGraphEnergy(graph, result);
+      if (eGrid && wantNetworkInterp) {
+        status.textContent = "Interpolating energy field…";
+        const seedMask = new Uint8Array(eGrid.length);
+        for (let i = 0; i < eGrid.length; i++) seedMask[i] = Number.isFinite(eGrid[i]) ? 1 : 0;
+        const mask = new Uint8Array(state.dem.mask);
+        const w = spawnWorker((m) => {
+          if (m.kind === "interp-done") {
+            if (gen !== state.computeGen) return;
+            state.graphEnergyRaster = m.energy;
+            renderGraphOverlay();
+            status.textContent = doneMsg;
+          } else if (m.kind === "error") { console.warn("[graph interp]", m.message); status.textContent = doneMsg; }
+        });
+        w.postMessage(
+          { kind: "interp", energy: eGrid, networkMask: seedMask, mask, H: state.dem.H, W: state.dem.W, dx: state.dem.dxM, dy: state.dem.dyM, interpMaxDistance, interpSmoothing },
+          [eGrid.buffer, seedMask.buffer, mask.buffer],
+        );
+      } else {
+        if (eGrid) { state.graphEnergyRaster = eGrid; renderGraphOverlay(); }
+        status.textContent = doneMsg;
+      }
     };
     const runOnGraph = (graph) => {
       if (gen !== state.computeGen) return;
@@ -3137,6 +3212,7 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
   // A grid result supersedes any graph-mode overlay.
   removeGraphLayers();
   state.lastGraphResult = null;
+  state.graphEnergyRaster = null;
   // Cache for live re-render on colormap / view / range changes.
   state.lastResult = {
     energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs,
@@ -3906,21 +3982,20 @@ function applyLayerControls() {
     // blend — composite it normally.
     if (el) el.style.mixBlendMode = blend === "energy" ? "normal" : blend;
   }
-  // Graph-mode vector layers ride on energyPane / passesPane — drive their pane
-  // opacity from the same Energy / Passes controls (visible ? op : 0).
-  if (state.graphEnergyLayer) {
-    const visible = document.getElementById("energy-visible")?.checked ?? true;
-    const opRaw = parseFloat(document.getElementById("energy-opacity")?.value);
-    const op = Number.isFinite(opRaw) ? opRaw : 0.85;
-    const ep = map.getPane("energyPane");
-    if (ep) ep.style.opacity = String(visible ? op : 0);
-  }
+  // Graph-mode passes is a vector layer on passesPane (energy is the raster
+  // overlay above) — drive its pane opacity + blend from the Passes controls.
   if (state.graphPassesLayer) {
     const visible = document.getElementById("passes-visible")?.checked ?? true;
     const opRaw = parseFloat(document.getElementById("passes-opacity")?.value);
     const op = Number.isFinite(opRaw) ? opRaw : 0.7;
+    const blend = document.getElementById("passes-blend")?.value || "normal";
     const pp = map.getPane("passesPane");
-    if (pp) pp.style.opacity = String(visible ? op : 0);
+    if (pp) {
+      pp.style.opacity = String(visible ? op : 0);
+      // Additive ("plus-lighter" / soma) blend makes the near-black low-pass
+      // lines contribute nothing, leaving only the bright corridors.
+      pp.style.mixBlendMode = blend === "energy" ? "normal" : blend;
+    }
   }
 }
 
