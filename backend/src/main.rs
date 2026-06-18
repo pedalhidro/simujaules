@@ -148,7 +148,10 @@ struct Scratch {
     parents: Vec<i32>,
     settled: Vec<u8>,
     order: Vec<u32>,
-    passes: Vec<f64>,
+    // f32 (not f64): subtree counts are exact integers up to 2^24 and only
+    // ever divided into the f64 `Acc.density` (widened below), so this is
+    // bit-parity-safe vs the JS worker on the test grid while saving 4 B/cell.
+    passes: Vec<f32>,
     heap: RadixHeap,
 }
 
@@ -268,7 +271,7 @@ fn subtree_passes(s: &mut Scratch, include: Option<&[u8]>) {
     match include {
         Some(inc) => {
             for &i in &s.order {
-                s.passes[i as usize] = f64::from(inc[i as usize]);
+                s.passes[i as usize] = f32::from(inc[i as usize]);
             }
         }
         None => {
@@ -300,7 +303,7 @@ impl Acc {
         let n = self.density.len();
         let nf = n as f64;
         for i in 0..n {
-            self.density[i] += s.passes[i] / nf;
+            self.density[i] += s.passes[i] as f64 / nf;
             if s.e[i].is_finite() {
                 self.energy_sum[i] += s.e[i] as f64;
                 self.energy_count[i] += 1;
@@ -340,7 +343,7 @@ impl Acc {
         subtree_passes(fwd, Some(include));
         subtree_passes(bwd, Some(include));
         for i in 0..n {
-            self.density[i] += (fwd.passes[i] + bwd.passes[i]) / nf;
+            self.density[i] += (fwd.passes[i] as f64 + bwd.passes[i] as f64) / nf;
         }
     }
     fn merge(mut self, other: Acc) -> Acc {
@@ -351,6 +354,57 @@ impl Acc {
         }
         self
     }
+}
+
+// Total system memory in bytes, std-only (no extra crates). macOS via
+// `sysctl -n hw.memsize`; Linux via /proc/meminfo `MemAvailable` (the
+// realistic budget) falling back to `MemTotal`. None if neither works.
+fn detect_total_mem_bytes() -> Option<u64> {
+    // Linux: prefer MemAvailable, else MemTotal (values are in kB).
+    if let Ok(s) = std::fs::read_to_string("/proc/meminfo") {
+        let mut total = None;
+        for line in s.lines() {
+            if let Some(rest) = line.strip_prefix("MemAvailable:") {
+                if let Some(kb) = rest.split_whitespace().next().and_then(|v| v.parse::<u64>().ok()) {
+                    return Some(kb * 1024);
+                }
+            }
+            if let Some(rest) = line.strip_prefix("MemTotal:") {
+                total = rest.split_whitespace().next().and_then(|v| v.parse::<u64>().ok());
+            }
+        }
+        if let Some(kb) = total {
+            return Some(kb * 1024);
+        }
+    }
+    // macOS: sysctl hw.memsize → bytes.
+    if let Ok(out) = std::process::Command::new("sysctl").args(["-n", "hw.memsize"]).output() {
+        if let Ok(s) = String::from_utf8(out.stdout) {
+            if let Ok(b) = s.trim().parse::<u64>() {
+                return Some(b);
+            }
+        }
+    }
+    None
+}
+
+// Memory budget (bytes) usable for per-slice scratch+accumulator allocations.
+// `SIMU_MAX_MEM_GB` (or the `--max-mem-gb N` CLI flag, parsed in main) is the
+// authoritative override; otherwise detect system RAM and reserve a fixed
+// working set (the request body + height/mask copies + output buffers are all
+// live alongside the slices in handle_density). Floors at 2 GB so we always
+// run at least one slice.
+fn density_mem_budget_bytes() -> u64 {
+    if let Ok(s) = std::env::var("SIMU_MAX_MEM_GB") {
+        if let Ok(g) = s.trim().parse::<f64>() {
+            if g > 0.0 {
+                return (g * 1e9 * 0.8) as u64;
+            }
+        }
+    }
+    let total = detect_total_mem_bytes().unwrap_or(8_000_000_000);
+    // ~3 GB reserved for the live request body + DEM copies + output vecs.
+    total.saturating_sub(3_000_000_000).max(2_000_000_000)
 }
 
 fn compute_density(g: &Grid, p: &Params) -> (Vec<f64>, Vec<f32>) {
@@ -390,7 +444,30 @@ fn compute_density(g: &Grid, p: &Params) -> (Vec<f64>, Vec<f32>) {
     let round = p.density_mode == "round";
     let reverse = p.density_mode == "to";
     let total_cap = if round && p.e_max_mode == "total" && p.e_max > 0.0 { p.e_max } else { 0.0 };
-    let n_slices = refs.len().min(rayon::current_num_threads()).max(1);
+
+    // Cap concurrent slices by a memory budget so high ref counts on huge
+    // DEMs don't OOM-crash. Each concurrent slice holds full-N buffers:
+    //   Scratch ≈ 17·n (e4 + parents4 + settled1 + order4 + passes4),
+    //   Acc     ≈ 20·n (density8 + energy_sum8 + energy_count4).
+    // Round runs two Scratch (s_f + s_b) plus an `include` Uint8 (n bytes).
+    // Fewer slices just means more refs processed serially per slice (the
+    // Scratch is already reused across a slice's refs), so the OUTPUT is
+    // unchanged — only wall time grows. SIMU_MAX_MEM_GB / --max-mem-gb /
+    // RAYON_NUM_THREADS are the manual levers (see README).
+    let n64 = n as u64;
+    let scratch_bytes = 17 * n64;
+    let acc_bytes = 20 * n64;
+    let per_slice = if round { 2 * scratch_bytes + acc_bytes + n64 } else { scratch_bytes + acc_bytes };
+    let mem_cap = (density_mem_budget_bytes() / per_slice).max(1) as usize;
+    let n_slices = refs.len()
+        .min(rayon::current_num_threads())
+        .min(mem_cap)
+        .max(1);
+    eprintln!(
+        "[density] {} refs, {}×{} grid, per-slice ≈ {:.1} GB, budget ≈ {:.1} GB → {} slice(s)",
+        refs.len(), g.w, g.h,
+        per_slice as f64 / 1e9, density_mem_budget_bytes() as f64 / 1e9, n_slices,
+    );
 
     let accs: Vec<Acc> = (0..n_slices)
         .into_par_iter()
@@ -553,16 +630,32 @@ fn handle_density(mut req: tiny_http::Request) {
 }
 
 fn main() {
-    let addr = std::env::args().nth(1).unwrap_or_else(|| "127.0.0.1:8077".to_string());
+    // Args: an optional bind address (first non-flag arg) and an optional
+    // `--max-mem-gb N` that caps the per-request slice memory budget (it just
+    // sets SIMU_MAX_MEM_GB, the single source of truth read in
+    // density_mem_budget_bytes). RAYON_NUM_THREADS also bounds parallelism.
+    let mut addr = "127.0.0.1:8077".to_string();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--max-mem-gb" && i + 1 < args.len() {
+            std::env::set_var("SIMU_MAX_MEM_GB", &args[i + 1]);
+            i += 2;
+        } else {
+            addr = args[i].clone();
+            i += 1;
+        }
+    }
     let server = Server::http(&addr).unwrap_or_else(|e| {
         eprintln!("failed to bind {}: {}", addr, e);
         std::process::exit(1);
     });
     eprintln!(
-        "simujoules-backend listening on http://{} ({} cores). \
+        "simujoules-backend listening on http://{} ({} cores, density mem budget ≈ {:.1} GB). \
          Enable \"Use native backend\" in the app's density panel to use it.",
         addr,
-        rayon::current_num_threads()
+        rayon::current_num_threads(),
+        density_mem_budget_bytes() as f64 / 1e9,
     );
 
     for req in server.incoming_requests() {

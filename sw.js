@@ -82,6 +82,9 @@
 //              after response; density engine rewritten (reused scratch +
 //              targeted reset + radix heap) — in-browser density now within
 //              ~20% of the native backend on huge DEMs;
+//              density workers leaner (f32) + deviceMemory-budgeted pool +
+//              opt-in max-workers override; backend caps rayon slices to a
+//              memory budget (SIMU_MAX_MEM_GB) so it no longer OOMs at scale;
 //              zero-copy parse, interp progress. Network snap is
 //              grid-wide (radius input = quiet zone, no rejection dead
 //              end); .gpkg geom column from metadata; 0-cell networks

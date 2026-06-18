@@ -33,6 +33,18 @@ history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
   ties (either equal-cost parent is a valid optimum); the browser density
   field now matches the backend's tie behaviour rather than the old binary
   heap's.
+- Density scales to large workloads without crashing. Browser: density
+  workers are leaner (passes + density f32, energySum stays f64), and the
+  pool memory cap now budgets against `navigator.deviceMemory` with an
+  accurate per-worker estimate — so medium DEMs parallelise where they
+  couldn't before. A 135 M-cell DEM still runs single-threaded on 16 GB
+  (two workers can't fit; `deviceMemory` caps at 8 GB so we can't detect
+  bigger machines) — an optional "Max compute workers" override lets users
+  who know they have the RAM force parallelism. Backend: it no longer
+  OOM-crashes at high ref counts — concurrent rayon slices are capped to a
+  memory budget (auto-detected, or `SIMU_MAX_MEM_GB` / `--max-mem-gb` /
+  `RAYON_NUM_THREADS`); fewer slices just run more refs serially. Scratch
+  `passes` is f32 (parity-safe).
 
 ### Features
 

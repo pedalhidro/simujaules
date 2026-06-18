@@ -37,6 +37,25 @@ cargo run --release -- 0.0.0.0:9000   # custom bind address
 Then tick **Use native backend** in the app's density panel (the URL field
 defaults to `http://127.0.0.1:8077`).
 
+### Memory at scale
+
+Each concurrent rayon slice holds full-grid scratch + accumulator buffers
+(~5 GB on a 135 M-cell DEM). With many reference points the server would
+otherwise spawn one slice per core and exhaust RAM, so it **caps concurrent
+slices to fit a memory budget** — fewer slices just process more refs
+serially (slower, but it completes instead of OOM-crashing; output is
+identical). On startup it logs the detected budget and, per request, the
+chosen slice count.
+
+The budget is detected from the OS (`/proc/meminfo` `MemAvailable` on Linux,
+`sysctl hw.memsize` on macOS, minus a ~3 GB working-set reserve). Override it
+when you know better:
+
+```sh
+SIMU_MAX_MEM_GB=48 cargo run --release      # or: --release -- --max-mem-gb 48
+RAYON_NUM_THREADS=4 cargo run --release     # also bounds parallelism directly
+```
+
 ## Protocol
 
 Little-endian binary framing, see `src/main.rs` header comment:

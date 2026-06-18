@@ -276,6 +276,10 @@ function densityField(opts) {
     alpha, beta, eta, dx, dy,
     eMax = 0, maximize = false, maxEdgeCost = 0, eMaxTotalCap = 0,
     onProgress = null,
+    // Optional: invoked once per reference with that ref's settle count
+    // (the explored-cell count). Used by the calibration probe to learn the
+    // budget→explored relationship on this DEM. No effect when omitted.
+    onExplored = null,
   } = opts;
   const N = H * W;
   const diag = Math.hypot(dx, dy);
@@ -290,7 +294,16 @@ function densityField(opts) {
   const adist = new Float64Array(8); for (let k = 0; k < 8; k++) adist[k] = alpha * dists[k];
   const eb = eta * beta;
 
-  const density = new Float64Array(N);
+  // `density` and the `passes` scratch are Float32 (not Float64): subtree
+  // counts are exact integers up to 2^24, and density values are exact
+  // dyadic rationals (count/N) in f32 on small grids, so pooled-vs-single
+  // stays bit-identical (test-worker-pool's maxD===0); on large budgets f32
+  // loses ~1e-7, invisible under the p10/p90-clipped, gamma density render.
+  // `energySum` stays Float64 — it accumulates large energy VALUES (not small
+  // counts), where f32 grouping diverges ~1e-3 between pooled and single and
+  // the mean would lose precision. Net per-worker saving ≈ 8 B/cell
+  // (non-round) / 12 (round). `density` carries the first /N.
+  const density = new Float32Array(N);
   const energySum = new Float64Array(N);
   const energyCount = new Int32Array(N);
 
@@ -298,14 +311,14 @@ function densityField(opts) {
   const settled = new Uint8Array(N);
   const parents = new Int32Array(N).fill(-1);
   const order = new Int32Array(N);
-  const passes = new Float64Array(N);
+  const passes = new Float32Array(N);
   // Round mode keeps a second search resident so both legs combine per ref.
   const round = dmode === "round";
   const E2 = round ? new Float32Array(N).fill(Infinity) : null;
   const settled2 = round ? new Uint8Array(N) : null;
   const parents2 = round ? new Int32Array(N).fill(-1) : null;
   const order2 = round ? new Int32Array(N) : null;
-  const passes2 = round ? new Float64Array(N) : null;
+  const passes2 = round ? new Float32Array(N) : null;
 
   // Exact monotone radix heap on the f64 keys, reused across all searches.
   // Same structure as the Rust backend's: 65 buckets indexed by the highest
@@ -390,6 +403,7 @@ function densityField(opts) {
 
     if (!round) {
       const len = search(refR, refC, dmode === "to", E, settled, parents, order);
+      if (onExplored) onExplored(len);
       for (let j = 0; j < len; j++) passes[order[j]] = 1;
       for (let j = len - 1; j >= 0; j--) { const idx = order[j]; const p = parents[idx]; if (p >= 0) passes[p] += passes[idx]; }
       for (let j = 0; j < len; j++) {
@@ -401,6 +415,7 @@ function densityField(opts) {
     } else {
       const lf = search(refR, refC, false, E, settled, parents, order);
       const lb = search(refR, refC, true, E2, settled2, parents2, order2);
+      if (onExplored) onExplored(lf + lb);
       // Filtered subtree passes: a destination counts only if BOTH legs
       // reach it (and the round trip is within the total cap, if set).
       for (let j = 0; j < lf; j++) { const idx = order[j]; const fi = E[idx], bi = E2[idx]; passes[idx] = (bi < Infinity && !(eMaxTotalCap > 0 && fi + bi > eMaxTotalCap)) ? 1 : 0; }
@@ -1042,6 +1057,45 @@ self.onmessage = (ev) => {
         buf = boxSmoothPreserveNetwork(buf, msg.networkMask, msg.mask, msg.H, msg.W);
       }
       postMessage({ kind: "smooth-done", energy: buf }, [buf.buffer]);
+    } catch (err) {
+      postMessage({ kind: "error", message: err.message });
+    }
+    return;
+  }
+
+  // Calibration probe: learn this DEM's real allocation cost and per-ref
+  // search throughput so the main thread's pre-flight estimate can scale
+  // with the energy budget instead of assuming a fixed full-grid rate.
+  // Two phases: (a) time a fresh full-N scratch allocation (dominated by
+  // first-touch on huge DEMs); (b) run densityField with a couple of refs
+  // at a fixed calibration budget, capturing total time + explored cells.
+  // perRef = (totalMs − allocMs) / nRefs isolates the per-ref work from the
+  // one-time allocation (see app.js startCalibrationProbe).
+  if (msg.kind === "probe") {
+    try {
+      const { height, mask, H, W, dx, dy, alpha, beta, eta, refPoints, eMax } = msg;
+      const N = H * W;
+      const tA = performance.now();
+      // Mirror densityField's non-round scratch set so the measured alloc
+      // matches what a real run pays. Touch each so the JIT can't elide.
+      const _e = new Float32Array(N).fill(Infinity);
+      const _s = new Uint8Array(N);
+      const _p = new Int32Array(N).fill(-1);
+      const _o = new Int32Array(N);
+      const _pa = new Float32Array(N);
+      _e[0] = 0; _s[0] = 1; _p[0] = 0; _o[0] = 0; _pa[0] = 0;
+      const allocMs = performance.now() - tA;
+
+      let exploredTotal = 0;
+      const t0 = performance.now();
+      densityField({
+        height, mask, H, W, refPoints, dmode: "from",
+        alpha, beta, eta, dx, dy, eMax,
+        maximize: false, maxEdgeCost: 0, eMaxTotalCap: 0,
+        onExplored: (len) => { exploredTotal += len; },
+      });
+      const totalMs = performance.now() - t0;
+      postMessage({ kind: "probe-done", allocMs, totalMs, exploredTotal, nRefs: refPoints.length, N, eMax });
     } catch (err) {
       postMessage({ kind: "error", message: err.message });
     }

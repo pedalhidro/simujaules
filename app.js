@@ -96,6 +96,8 @@ const STRINGS = {
   "param.use_backend":   { pt: "Usar backend nativo (Rust)", en: "Use native backend (Rust)" },
   "param.backend_url":   { pt: "URL do backend", en: "Backend URL" },
   "backend.hint":        { pt: "Servidor local opcional (backend/ no repositório, cargo run --release). Execuções de densidade são enviadas para lá e computadas em todos os núcleos; se inacessível, o app volta silenciosamente para o pool de workers do navegador.", en: "Optional local server (backend/ in the repo, cargo run --release). Density runs are sent there and computed on all cores; if unreachable, the app silently falls back to the in-browser worker pool." },
+  "param.max_workers":   { pt: "Máx. de workers de cálculo (0 = auto)", en: "Max compute workers (0 = auto)" },
+  "max_workers.hint":    { pt: "Avançado: paraleliza a densidade entre este número de Web Workers. 0 = auto (dimensionado pelos núcleos e memória disponível). Só aumente se sua máquina tiver mais RAM do que o navegador reporta — cada worker usa cerca de 5 GB em um DEM grande, então exceder pode travar a aba.", en: "Advanced: parallelise density across this many Web Workers. 0 = auto (sized to cores and available memory). Only raise it if your machine has more RAM than the browser reports — each worker needs roughly 5 GB on a large DEM, so over-committing can crash the tab." },
   "param.maximize":      { pt: "Maximizar energia (inverter otimização)", en: "Maximize energy (reverse optimization)" },
   "param.max_length":    { pt: "Comprimento L (arestas, 0 = sem restrição)", en: "Path length L (edges, 0 = unconstrained)" },
   "param.max_length.hint": { pt: "0: Dijkstra invertido (geometricamente curto, custo denso). L>0: DP em camadas encontra o caminho de custo máximo com exatamente L arestas entre src e dst. Limite de memória ≈ 256 MB ⇒ L·H·W precisa caber; DEMs grandes limitam L a poucas dezenas.", en: "0: inverted Dijkstra (geometrically short, cost-dense). L>0: layered DP finds the max-cost path of exactly L edges from src to dst. Memory cap ≈ 256 MB ⇒ L·H·W must fit; large DEMs limit L to a few dozen." },
@@ -483,6 +485,15 @@ document.addEventListener("DOMContentLoaded", () => {
     backendCheck.addEventListener("change", syncBackend);
     syncBackend();
   }
+  // Persist the advanced max-workers override per device (like the lang /
+  // layer-order prefs) — power users on big-RAM machines set it once.
+  const maxWorkersEl = document.getElementById("max-workers");
+  if (maxWorkersEl) {
+    try { const v = localStorage.getItem("simu-max-workers"); if (v != null) maxWorkersEl.value = v; } catch {}
+    maxWorkersEl.addEventListener("change", () => {
+      try { localStorage.setItem("simu-max-workers", maxWorkersEl.value); } catch {}
+    });
+  }
   // Density toggle reveals the multi-ref controls and locks out the
   // single-source toggles (wantPasses / wantTopN) that don't compose
   // with multi-reference density.
@@ -556,9 +567,19 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("ref-clear")?.addEventListener("click", clearRefPoints);
   // Anything that affects the time estimate
-  for (const id of ["mode", "want-passes", "want-topn", "n-routes", "want-density", "n-refs", "e-max"]) {
+  // Inputs that move the (now budget- and engine-aware) time estimate.
+  // `alpha` scales the explored region (flat reach ∝ eMax/alpha); the
+  // backend toggle/URL switches the engine model.
+  for (const id of ["mode", "want-passes", "want-topn", "n-routes", "want-density",
+                    "n-refs", "e-max", "alpha", "use-backend", "max-workers"]) {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", estimateRunTime);
+  }
+  // Backend URL/toggle: refresh the cached /health core count (used by the
+  // estimate's backend-parallelism model), then re-estimate.
+  for (const id of ["use-backend", "backend-url"]) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", refreshBackendCores);
   }
   // Example DEM loader links — populated declaratively in HTML, wired here.
   for (const ex of DEM_EXAMPLES) {
@@ -802,6 +823,14 @@ const state = {
   // rendered against the new grid.
   workers: [],
   computeGen: 0,
+  // Compute-time calibration, learned by a one-shot probe at DEM load (see
+  // startCalibrationProbe). null until the probe lands. calibrationGen is
+  // bumped on every DEM load so a stale in-flight probe's result is dropped.
+  // backendCores: cached {url, cores} from a /health ping, for the estimate.
+  calibration: null,
+  calibrationGen: 0,
+  probeWorker: null,
+  backendCores: null,
   // Stacked overlays — z-order from bottom up:
   //   OSM basemap → tileOverlay (rmsampa-v2) → energyOverlay → passesOverlay
   tileOverlay: null,
@@ -1275,6 +1304,12 @@ async function loadDemFromArrayBuffer(buf, label) {
   state.src = null;
   state.dst = null;
   state.lastResult = null;
+  // New DEM → previous calibration is meaningless; invalidate it and any
+  // in-flight probe (gen bump) so the estimate shows "estimating…" until a
+  // fresh probe lands.
+  state.calibration = null;
+  state.calibrationGen++;
+  if (state.probeWorker) { state.probeWorker.terminate(); state.probeWorker = null; }
   // Drop any previously loaded vector network — its rasterised mask is
   // sized to the *previous* DEM's H×W and would corrupt the next compute
   // (or crash) if reused. The user re-uploads the .gpkg if they want it.
@@ -1334,6 +1369,9 @@ async function loadDemFromArrayBuffer(buf, label) {
   const reliefRow = document.getElementById("relief-row");
   if (reliefRow) reliefRow.style.display = state.demReliefDataUrl ? "" : "none";
   applyLayerControls();
+
+  // Calibrate the compute-time estimate for this DEM (async, off-thread).
+  startCalibrationProbe();
 
   // A bundle was loaded before this DEM (or against a mismatched one) and
   // is waiting in state.pendingBundle. If this DEM matches its grid,
@@ -2385,6 +2423,9 @@ runBtn.addEventListener("click", async () => {
     state.computeStartedAt = 0;
     renderResult(m);
     status.textContent = `Done in ${m.elapsedMs.toFixed(0)} ms.`;
+    // The calibration probe is skipped while a compute runs — if this DEM
+    // still has no calibration, run it now that the cores are free.
+    if (!state.calibration) startCalibrationProbe();
   };
 
   const reportProgress = (frac) => {
@@ -2549,14 +2590,19 @@ runBtn.addEventListener("click", async () => {
   // Each reference point's Dijkstra is independent, so density runs split
   // the refs across min(cores − 1, K, memory-cap) workers — near-linear
   // wall-clock speedup. Workers return raw accumulators (densityPartial);
-  // the merge + final normalisation happens here. Sizing: each worker
-  // resident set is ≈ 32 bytes/cell (5 DEM copy + ~27 Dijkstra internals),
-  // capped so the pool stays under ~3 GB — huge DEMs degrade to 1 worker,
-  // which is exactly the old single-worker behaviour.
+  // the merge + final normalisation happens here.
+  //
+  // Memory cap: each worker's resident set is the DEM copy (height f32 4 +
+  // mask u8 1 = 5 B/cell) + densityField scratch (E4 + settled1 + parents4 +
+  // order4 + passes-f32 4 = 17) + outputs (density-f32 4 + energySum-f64 8 +
+  // energyCount 4 = 16) ≈ 38 B/cell, and ~55 in round mode (a second
+  // search resident). Budget it against navigator.deviceMemory (GB, which
+  // the spec CAPS at 8 — it's a floor on true RAM, never the full amount),
+  // taking a conservative fraction to leave room for the browser, the
+  // main-thread DEM, and the OS. On huge DEMs this still yields 1 worker
+  // (the honest ceiling: two won't fit), exactly the old behaviour.
   const K = wantDensity ? state.refPoints.length : 0;
-  const cores = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
-  const memCap = Math.max(1, Math.floor(3e9 / (32 * N)));
-  const poolN = wantDensity ? Math.max(1, Math.min(K, cores, memCap)) : 1;
+  const poolN = wantDensity ? densityPoolSize({ N, K, round: densityMode === "round" }) : 1;
 
   // Run one full density field over the worker pool and resolve with the
   // raw outputs (no interp, no UI finalisation — the callers compose those).
@@ -3669,56 +3715,211 @@ function syncRangePlaceholders() {
   if (pHi && state.lastPassesAutoMax != null) pHi.placeholder = formatEnergy(state.lastPassesAutoMax);
 }
 
+// Density worker-pool size, shared by the runner and the time estimator so
+// they can never drift. Each worker's resident set ≈ DEM copy (height f32 4 +
+// mask u8 1 = 5 B/cell) + densityField scratch (E4 + settled1 + parents4 +
+// order4 + passes-f32 4 = 17) + outputs (density-f32 4 + energySum-f64 8 +
+// energyCount 4 = 16) ≈ 38 B/cell, ~55 in round mode (a second search
+// resident). Budgeted against navigator.deviceMemory (GB; the spec CAPS it at
+// 8 — a floor on true RAM, never the full amount) with a conservative
+// fraction. The optional #max-workers input lets a user on a big-RAM machine
+// (which deviceMemory can't see) force more, still clamped by K.
+function densityPoolSize({ N, K, round }) {
+  if (!K) return 1;
+  const cores = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
+  const bytesPerWorker = (round ? 55 : 38) * N;
+  const devMemGB = navigator.deviceMemory || 4;
+  const memBudget = Math.max(1.5e9, devMemGB * 1e9 * 0.45);
+  const memCap = Math.max(1, Math.floor(memBudget / bytesPerWorker));
+  const userMax = parseInt(document.getElementById("max-workers")?.value, 10);
+  const overrideN = Number.isFinite(userMax) && userMax > 0 ? userMax : 0;
+  return overrideN
+    ? Math.max(1, Math.min(K, overrideN))
+    : Math.max(1, Math.min(K, cores, memCap));
+}
+
+// Cache the native backend's core count from /health so the time estimate's
+// backend-parallelism model reflects the actual server. Only pinged when the
+// backend toggle/URL changes (not per estimate). Cleared/ignored when the
+// backend is off; falls back to BACKEND_PAR_CAP if unreachable.
+async function refreshBackendCores() {
+  const on = !!document.getElementById("use-backend")?.checked;
+  if (!on) { state.backendCores = null; estimateRunTime(); return; }
+  const url = (document.getElementById("backend-url")?.value || "http://127.0.0.1:8077")
+    .trim().replace(/\/+$/, "");
+  try {
+    const resp = await fetch(`${url}/health`, { signal: AbortSignal.timeout(2000) });
+    if (resp.ok) {
+      const h = await resp.json();
+      if (Number.isFinite(h.cores)) state.backendCores = { url, cores: h.cores };
+    }
+  } catch { /* unreachable — estimate falls back to the parallelism cap */ }
+  estimateRunTime();
+}
+
+// Fixed budget for the calibration probe — small enough to bound the probe's
+// cost on a 135 M-cell DEM (~6% explored ≈ a few seconds), large enough to
+// measure real frontier behaviour. The estimate extrapolates from here.
+const PROBE_BUDGET = 150;
+const PROBE_REFS = 2;
+
+// One-shot, off-thread calibration of the compute-time estimate for the
+// current DEM. Runs PROBE_REFS budgeted Dijkstras in a dedicated worker,
+// measuring the one-time allocation cost and the per-ref search throughput,
+// so estimateRunTime() can scale with the energy budget instead of a fixed
+// full-grid rate. Generation-guarded (a new DEM load drops a stale result);
+// deferred while a real compute is running so it doesn't steal cores.
+function startCalibrationProbe() {
+  if (!state.dem) return;
+  if (state.computeStartedAt) return; // a compute is running — retried in computeDone
+  if (state.probeWorker) { state.probeWorker.terminate(); state.probeWorker = null; }
+
+  const { H, W, mask } = state.dem;
+  // Two deterministic interior, on-mask reference cells (sample real relief,
+  // not a corner). Spiral out from each target to the nearest valid cell.
+  const findValid = (r0, c0) => {
+    for (let rad = 0; rad < Math.max(H, W); rad++) {
+      for (let dr = -rad; dr <= rad; dr += Math.max(1, 2 * rad)) {
+        const r = r0 + dr;
+        if (r < 0 || r >= H) continue;
+        for (let dc = -rad; dc <= rad; dc++) {
+          const c = c0 + dc;
+          if (c < 0 || c >= W) continue;
+          if (mask[r * W + c]) return [r, c];
+        }
+      }
+    }
+    return null;
+  };
+  const refs = [];
+  for (const [fr, fc] of [[0.5, 0.5], [0.5, 0.25]]) {
+    const v = findValid(Math.round(fr * H), Math.round(fc * W));
+    if (v) refs.push(v);
+  }
+  if (refs.length < PROBE_REFS) return; // degenerate mask; estimate stays uncalibrated
+
+  const probeGen = state.calibrationGen;
+  const alpha = parseFloat(document.getElementById("alpha")?.value) || 0.008;
+  const beta = parseFloat(document.getElementById("beta")?.value) || 1.0;
+  const eta = parseFloat(document.getElementById("eta")?.value) || 0.1;
+
+  const w = new Worker(WORKER_URL);
+  state.probeWorker = w;
+  w.onmessage = (ev) => {
+    const m = ev.data;
+    if (m.kind !== "probe-done") return;
+    w.terminate();
+    if (state.probeWorker === w) state.probeWorker = null;
+    if (probeGen !== state.calibrationGen) return; // superseded by a newer DEM
+    const perRefMsAtB0 = Math.max(0, (m.totalMs - m.allocMs) / m.nRefs);
+    state.calibration = {
+      N: m.N,
+      allocMsN: m.allocMs,
+      perRefMsAtB0,
+      E0: Math.max(1, m.exploredTotal / m.nRefs),
+      B0: m.eMax,
+      alphaAtProbe: alpha,
+    };
+    estimateRunTime();
+  };
+  w.onerror = () => { w.terminate(); if (state.probeWorker === w) state.probeWorker = null; };
+
+  const height = new Float32Array(state.dem.height);
+  const maskCopy = new Uint8Array(mask);
+  w.postMessage(
+    {
+      kind: "probe",
+      height, mask: maskCopy, H, W,
+      dx: state.dem.dxM, dy: state.dem.dyM,
+      alpha, beta, eta, eMax: PROBE_BUDGET,
+      refPoints: refs.slice(0, PROBE_REFS),
+    },
+    [height.buffer, maskCopy.buffer],
+  );
+  estimateRunTime(); // show "estimating…" until the probe lands
+}
+
 // ------- Compute-time estimation -------
-// Empirical rates on the 553k-cell test DEM:
-//   JS forward Dijkstra ≈ 170 ms  → ~3,300 cells/ms.
-//   wasm forward Dijkstra ≈ 30–50 ms → ~12,000 cells/ms (when built).
-// Mode round-trip = 2 passes. Passes adds ~10%. Each top-N iteration is
-// ~0.5× of a Dijkstra (A* terminates at goal). Distance-transform-based
-// repulsion modes add ~0.3× per iteration.
-const RATE_CELLS_PER_MS_JS   = 3300;
+// Calibrated by a per-DEM probe at load (state.calibration; see
+// startCalibrationProbe). The probe gives, for this exact DEM/terrain:
+//   allocMsN      — one-time full-N scratch allocation cost
+//   perRefMsAtB0  — per-ref search+walk+accumulate time at budget B0
+//   E0            — cells explored per ref at B0
+//   alphaAtProbe  — alpha used during the probe
+// We extrapolate the explored cell count with the energy budget (the
+// dominant driver — see the ~5× swing between budget 150 and 300) and with
+// alpha (flat reach ∝ eMax/alpha, area ∝ that²), then scale time by it.
+// Tunables (single-DEM-derived; adjust if they drift):
+const EXPLORE_EXP   = 2.1;   // explored ∝ (eMax/alpha)^EXPLORE_EXP (measured ~2.07)
+const NATIVE_SPEEDUP = 1.25; // native backend per-ref speedup vs JS
+const BACKEND_PAR_CAP = 8;   // bandwidth-bound effective parallelism ceiling
 
 function estimateRunTime() {
   const out = document.getElementById("time-estimate");
   if (!out) return;
   if (!state.dem) { out.textContent = ""; return; }
 
+  const cal = state.calibration;
+  if (!cal) { out.textContent = "≈ estimating…"; return; }
+
   const N = state.dem.H * state.dem.W;
   const wantPasses = !!document.getElementById("want-passes")?.checked;
   const wantTopN   = !!document.getElementById("want-topn")?.checked;
   const wantDensity = !!document.getElementById("want-density")?.checked;
-  // Single (JS) engine — rate constant is fixed.
-  const rate = RATE_CELLS_PER_MS_JS;
-
-  let ms = N / rate;
   const mode = document.getElementById("mode")?.value || "from";
-  if (mode === "round") ms *= 2;
-  if (wantPasses) ms *= 1.1;
+  const alpha = parseFloat(document.getElementById("alpha")?.value) || cal.alphaAtProbe;
+  const eMaxRaw = parseFloat(document.getElementById("e-max")?.value);
+  const eMax = Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0;
 
-  if (wantTopN) {
-    const k = Math.max(1, Math.min(20, parseInt(document.getElementById("n-routes")?.value, 10) || 3));
-    const rep = document.getElementById("repulsion-mode")?.value || "per-cell";
-    const perIter = rep === "per-cell" ? 0.5 : 0.8;
-    ms += (N / rate) * perIter * k;
-  }
-  // Multi-reference density runs one (or two for round-trip) Dijkstras per
-  // reference, each with passes tracking.
+  // Explored cells for the current budget/alpha, terrain-calibrated via E0.
+  // eMax = 0 (no budget) → full grid.
+  const explored = eMax > 0
+    ? Math.min(N, cal.E0 * Math.pow((eMax * cal.alphaAtProbe) / (cal.B0 * alpha), EXPLORE_EXP))
+    : N;
+  // Per-ref/per-Dijkstra search time scales with explored cells.
+  let perDijkstraMs = cal.perRefMsAtB0 * (explored / cal.E0);
+  if (wantPasses || wantDensity) perDijkstraMs *= 1.1; // passes-walk overhead
+
+  const dijkstrasPerRef = mode === "round" ? 2 : 1;
+
+  let ms;
   if (wantDensity) {
     const refs = state.refPoints?.length || 0;
-    // Density direction now follows the global mode select.
-    const dmode = document.getElementById("mode")?.value || "from";
-    const dijkstrasPerRef = dmode === "round" ? 2 : 1;
-    ms += (N / rate) * 1.1 * dijkstrasPerRef * refs;
+    const backendOn = !!document.getElementById("use-backend")?.checked;
+    if (backendOn) {
+      // Native backend: faster per ref, parallel across refs but
+      // bandwidth-bound (effective parallelism capped). Server hardware is
+      // unknown — this is a rough estimate (the live ETA refines it).
+      const cores = (state.backendCores && state.backendCores.cores) || BACKEND_PAR_CAP;
+      const effPar = Math.max(1, Math.min(refs || 1, cores, BACKEND_PAR_CAP));
+      ms = cal.allocMsN + (refs / effPar) * (perDijkstraMs / NATIVE_SPEEDUP) * dijkstrasPerRef;
+    } else {
+      // Browser worker pool: per-ref work splits across poolN; each worker
+      // pays its own alloc, overlapping in wall-clock (so allocMsN once).
+      const poolN = densityPoolSize({ N, K: refs, round: mode === "round" });
+      ms = cal.allocMsN + (refs / poolN) * perDijkstraMs * dijkstrasPerRef;
+    }
+  } else {
+    // Single-point modes (from/to/round) — one Dijkstra (two for round),
+    // now budget-aware too. dijkstra() allocs full-N per call.
+    ms = cal.allocMsN + perDijkstraMs * dijkstrasPerRef;
+    if (wantTopN) {
+      const k = Math.max(1, Math.min(20, parseInt(document.getElementById("n-routes")?.value, 10) || 3));
+      const rep = document.getElementById("repulsion-mode")?.value || "per-cell";
+      const perIter = rep === "per-cell" ? 0.5 : 0.8;
+      ms += perDijkstraMs * perIter * k;
+    }
   }
-  // Network IDW fill (8-direction ray search) plus optional 3×3 smoothing
-  // passes. Only kicks in when a network mask is loaded AND interpolation
-  // is enabled — otherwise the cells outside the network are left empty.
-  // The 0.3 / 0.05 multipliers are rough rule-of-thumb fits from runs on
-  // the 5e6-cell DEM; tune if they drift.
+
+  // Network IDW fill (8-direction ray search) + optional 3×3 smoothing
+  // passes — proportional to N, not the budget. Rough rule-of-thumb fit;
+  // expressed via the calibrated full-grid rate (allocMsN/N is a rough
+  // per-cell cost proxy isn't right here, so reuse perRef-at-full-grid).
   const wantNetInterp = !!document.getElementById("net-interp")?.checked;
   if (wantNetInterp && networkConstraintActive()) {
     const smoothingIters = parseInt(document.getElementById("net-interp-smoothing")?.value, 10) || 0;
-    ms += (N / rate) * (0.3 + 0.05 * smoothingIters);
+    const fullGridMs = cal.perRefMsAtB0 * (N / cal.E0);
+    ms += fullGridMs * (0.3 + 0.05 * smoothingIters);
   }
   out.textContent = `≈ ${formatDuration(ms)}`;
 }

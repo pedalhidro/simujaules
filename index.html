@@ -774,6 +774,9 @@
             <input type="text" id="backend-url" value="http://127.0.0.1:8077" spellcheck="false" />
             <div class="hint" data-i18n="backend.hint">Optional local server (backend/ in the repo, cargo run --release). Density runs are sent there and computed on all cores; if unreachable, the app silently falls back to the in-browser worker pool.</div>
           </div>
+          <label data-i18n="param.max_workers" style="margin-top: 6px;">Max compute workers (0 = auto)</label>
+          <input type="number" id="max-workers" value="0" min="0" max="64" step="1" />
+          <div class="hint" data-i18n="max_workers.hint">Advanced: parallelise density across this many Web Workers. 0 = auto (sized to cores and available memory). Only raise it if your machine has more RAM than the browser reports — each worker needs roughly 5 GB on a large DEM, so over-committing can crash the tab.</div>
         </div>
         <div id="topn-extra" style="display: none;">
           <div class="row">
@@ -1123,7 +1126,7 @@
               "Energy color" passes blend (hue from energy, opacity from passes).
               Optional vector-network rendering (black lines, configurable ground width + opacity; passes overlay stacks above the network; stacking reorderable via a modal) and a
               "constrain compute to network" toggle. Basemap selector (OSM / Carto minimal /
-              solid colours). Export of rendered energy/passes PNGs with world files. OSM (Overpass) street-network pull. Constrained-vs-unconstrained comparison: interpolated energy difference + additive red/green passes overlay with per-channel controls (regular and density modes). Interpolation prefilter + worker-pool banding. Backend liveness/progress fixes. SEO/LLM metadata (description, canonical, Open Graph, JSON-LD, llms.txt, sitemap). Fixes: PWA manifest restored, service-worker install bug, offline
+              solid colours). Export of rendered energy/passes PNGs with world files. OSM (Overpass) street-network pull. Constrained-vs-unconstrained comparison: interpolated energy difference + additive red/green passes overlay with per-channel controls (regular and density modes). Interpolation prefilter + worker-pool banding. Density radix-heap engine (in-browser density within ~20% of the native backend on huge DEMs). Density scales to large workloads: leaner f32 workers + deviceMemory-budgeted pool + opt-in "max compute workers" override; the native backend caps parallel slices to a memory budget (SIMU_MAX_MEM_GB) so it no longer OOM-crashes at high ref counts. Backend liveness/progress fixes. SEO/LLM metadata (description, canonical, Open Graph, JSON-LD, llms.txt, sitemap). Fixes: PWA manifest restored, service-worker install bug, offline
               caching of CDN libs (SRI + crossorigin), 3-D GeoPackage (Z/M) parsing, stale-result
               race on DEM/network swap mid-compute, worker-crash handling, XSS hardening of
               Bundle-before-DEM loading order now restores correctly (pending-bundle re-apply). Density+network Compute no longer aborts silently (null-src re-snap bug); network clicks snap grid-wide (no more snap-radius dead-end); .gpkg geometry column name read from metadata; empty-on-DEM networks rejected loudly.</p>
