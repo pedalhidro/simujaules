@@ -778,6 +778,13 @@
             <button type="button" class="secondary" id="ref-clear" data-i18n="ref.clear">Clear refs</button>
           </div>
           <div class="hint" id="ref-display" data-i18n="ref.none" style="margin-top: 3px;">no references placed</div>
+          <label style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
+            <input type="checkbox" id="refs-visible" checked />
+            <span data-i18n="ref.show_markers">Show reference markers</span>
+          </label>
+          <label data-i18n="ref.load_file" style="margin-top: 6px;">Load reference points (GeoJSON)</label>
+          <input type="file" id="ref-file" accept=".geojson,.json" />
+          <div class="hint" data-i18n="ref.load_file.hint" style="margin-top: 3px;">Load a GeoJSON of Point features (e.g. census/points.geojson). Each point becomes a reference; points outside the DEM are skipped. Replaces the current references; capped at 2000.</div>
           <label style="display: flex; align-items: center; gap: 6px; margin-top: 6px;">
             <input type="checkbox" id="use-backend" />
             <span data-i18n="param.use_backend">Use native backend (Rust)</span>

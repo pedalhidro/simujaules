@@ -118,6 +118,15 @@ const STRINGS = {
   "sampling.hint":       { pt: "Sequências quase-aleatórias (QMC) cobrem a área uniformemente sem aglomerados nem vazios — melhor convergência da densidade com menos referências. Cliques sucessivos continuam a sequência em vez de repeti-la.", en: "Quasi-random (QMC) sequences cover the area evenly, without the clumps and gaps of pseudo-random — the density converges with fewer references. Successive clicks continue the sequence rather than repeat it." },
   "ref.clear":           { pt: "Limpar referências", en: "Clear refs" },
   "ref.none":            { pt: "nenhuma referência marcada", en: "no references placed" },
+  "ref.show_markers":    { pt: "Mostrar marcadores de referência", en: "Show reference markers" },
+  "ref.load_file":       { pt: "Carregar referências (GeoJSON)", en: "Load reference points (GeoJSON)" },
+  "ref.load_file.hint":  { pt: "Carregue um GeoJSON de pontos (Point), ex.: census/points.geojson. Cada ponto vira uma referência; pontos fora do DEM são ignorados. Substitui as referências atuais; limite de 2000.", en: "Load a GeoJSON of Point features (e.g. census/points.geojson). Each point becomes a reference; points outside the DEM are skipped. Replaces the current references; capped at 2000." },
+  "ref.loaded":          { pt: "{0} referências carregadas de {1}.", en: "Loaded {0} reference points from {1}." },
+  "ref.loaded.skipped":  { pt: "{0} referências carregadas de {1} ({2} fora do DEM ignoradas).", en: "Loaded {0} reference points from {1} ({2} skipped outside the DEM)." },
+  "ref.load.no_dem":     { pt: "Carregue um DEM antes de carregar referências.", en: "Load a DEM before loading reference points." },
+  "ref.load.geographic": { pt: "Carregar referências por arquivo exige um DEM geográfico (lon/lat).", en: "Loading reference points requires a geographic (lon/lat) DEM." },
+  "ref.load.no_points":  { pt: "Nenhum ponto válido dentro do DEM em {0}.", en: "No valid points inside the DEM in {0}." },
+  "ref.load.parse_error":{ pt: "Falha ao ler o GeoJSON: {0}", en: "Could not read the GeoJSON: {0}" },
   "param.n_routes":      { pt: "N (1–20)", en: "N (1–20)" },
   "param.penalty":       { pt: "penalidade / força", en: "penalty / strength" },
   "param.repulsion":     { pt: "Modo de repulsão", en: "Repulsion mode" },
@@ -408,6 +417,7 @@ document.addEventListener("DOMContentLoaded", () => {
     "relief-visible", "relief-opacity",
     "energy-visible", "energy-opacity",
     "passes-visible", "passes-opacity",
+    "refs-visible",
   ]) {
     const el = document.getElementById(id);
     if (!el) continue;
@@ -570,6 +580,11 @@ document.addEventListener("DOMContentLoaded", () => {
     placeRandomRefPoints(n);
   });
   document.getElementById("ref-clear")?.addEventListener("click", clearRefPoints);
+  document.getElementById("ref-file")?.addEventListener("change", async (ev) => {
+    const f = ev.target.files[0];
+    if (f) await loadRefPointsFromFile(f);
+    ev.target.value = "";   // let the same file be re-loaded
+  });
   // Anything that affects the time estimate
   // Inputs that move the (now budget- and engine-aware) time estimate.
   // `alpha` scales the explored region (flat reach ∝ eMax/alpha); the
@@ -2337,7 +2352,10 @@ function addRefPoint(rc) {
   const latlng = L.latLng(originY - (r + 0.5) * dy, originX + (c + 0.5) * dx);
   const idx = state.refPoints.length;
   const m = L.marker(latlng, { icon: makeRefIcon(idx) })
-    .addTo(map).bindTooltip(`ref ${idx} · r=${r}, c=${c}`);
+    .bindTooltip(`ref ${idx} · r=${r}, c=${c}`);
+  // Respect the visibility toggle: a marker added while refs are hidden stays
+  // off the map until the toggle re-adds it (applyLayerControls).
+  if (document.getElementById("refs-visible")?.checked ?? true) m.addTo(map);
   state.refMarkers.push(m);
   enforceRefCap();
   syncRefDisplay();
@@ -2455,6 +2473,61 @@ function placeRandomRefPoints(n) {
     placed.push([r, c]);
   }
   for (const rc of placed) addRefPoint(rc);
+}
+
+// Load reference points from a GeoJSON of Point / MultiPoint features. Each
+// coordinate is converted to a DEM pixel via latLngToPixel and placed through
+// addRefPoint (reusing its mask check / numbered marker / FIFO cap). Replaces
+// the current reference set; points outside the extent or on nodata are
+// skipped. Pairs with census/sample_census.py output.
+async function loadRefPointsFromFile(file) {
+  if (!file) return;
+  const fail = (key, ...a) => {
+    status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t(key, ...a))}</span>`;
+  };
+  if (!state.dem) return fail("ref.load.no_dem");
+  if (!state.dem.isGeographic) return fail("ref.load.geographic");
+  let fc;
+  try {
+    fc = JSON.parse(await file.text());
+  } catch (err) {
+    return fail("ref.load.parse_error", err.message);
+  }
+  // Accept a FeatureCollection, a single Feature, or a bare geometry.
+  const features = Array.isArray(fc?.features) ? fc.features
+    : fc?.type === "Feature" ? [fc]
+    : fc ? [{ geometry: fc.geometry || fc }] : [];
+  const coords = [];
+  for (const f of features) {
+    const g = f?.geometry || f;
+    if (g?.type === "Point") coords.push(g.coordinates);
+    else if (g?.type === "MultiPoint") for (const c of g.coordinates) coords.push(c);
+  }
+  // GeoJSON coordinates are [lng, lat]. Keep only points inside the extent on a
+  // passable cell; tally the rest so the load is never silently lossy.
+  const valid = [];
+  let skipped = 0;
+  for (const [lng, lat] of coords) {
+    const rc = latLngToPixel(L.latLng(lat, lng));
+    if (rc && state.dem.mask[rc[0] * state.dem.W + rc[1]]) valid.push(rc);
+    else skipped++;
+  }
+  if (!valid.length) return fail("ref.load.no_points", file.name);
+  // Raise the N-references cap so the whole file survives the FIFO trim in
+  // addRefPoint (input + worker top out at 2000; warn if we clip).
+  const capInput = document.getElementById("n-refs");
+  if (capInput) {
+    capInput.value = String(Math.min(2000, Math.max(parseInt(capInput.value, 10) || 0, valid.length)));
+  }
+  if (valid.length > 2000) {
+    console.warn(`[refs] ${valid.length - 2000} of ${valid.length} points dropped (2000 cap, FIFO).`);
+  }
+  clearRefPoints();
+  for (const rc of valid) addRefPoint(rc);
+  const placed = state.refPoints.length;
+  status.textContent = skipped
+    ? t("ref.loaded.skipped", placed, file.name, skipped)
+    : t("ref.loaded", placed, file.name);
 }
 
 function syncRefDisplay() {
@@ -3981,6 +4054,14 @@ function applyLayerControls() {
     // "energy" is a render mode (colour baked into the canvas), not a CSS
     // blend — composite it normally.
     if (el) el.style.mixBlendMode = blend === "energy" ? "normal" : blend;
+  }
+  // Reference-point markers: show/hide the whole set as a layer toggle.
+  if (state.refMarkers) {
+    const visible = document.getElementById("refs-visible")?.checked ?? true;
+    for (const m of state.refMarkers) {
+      if (visible && !map.hasLayer(m)) m.addTo(map);
+      else if (!visible && map.hasLayer(m)) m.remove();
+    }
   }
   // Graph-mode passes is a vector layer on passesPane (energy is the raster
   // overlay above) — drive its pane opacity + blend from the Passes controls.
