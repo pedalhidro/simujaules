@@ -638,6 +638,19 @@
           <span data-i18n="net.constrain">Constrain compute to network</span>
         </label>
         <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
+          <input type="checkbox" id="vec-graph-mode" />
+          <span data-i18n="net.graph_mode">Compute on network graph (follow vectors)</span>
+        </label>
+        <div class="row" style="margin-top: 3px;">
+          <div>
+            <label data-i18n="net.junctions">junctions</label>
+            <select id="vec-junction-mode">
+              <option value="crossings" data-i18n="net.junctions_crossings">also at crossings</option>
+              <option value="shared" data-i18n="net.junctions_shared">only shared endpoints</option>
+            </select>
+          </div>
+        </div>
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
           <input type="checkbox" id="vec-compare" />
           <span data-i18n="net.compare">Compare with unconstrained</span>
         </label>
@@ -1117,6 +1130,11 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v13</strong> — 2026-06-18<br/>
+              "Follow the vectors" network-graph mode (new graph-engine.js): with a vector network loaded,
+              an optional toggle routes on the real polyline graph (planarised — junctions at crossings or
+              only at shared endpoints) instead of the rasterised mask, so passes/paths trace the vectors
+              with no staircase; all compute modes; colored-vector overlay; JS-only.</p>
               <p><strong>v12</strong> — 2026-06-12<br/>
               Density worker pool (multi-core) + Dijkstra heap optimisations (~10× density runs).
               Optional native Rust backend (off by default, density only, auto-fallback).
@@ -1126,7 +1144,7 @@
               "Energy color" passes blend (hue from energy, opacity from passes).
               Optional vector-network rendering (black lines, configurable ground width + opacity; passes overlay stacks above the network; stacking reorderable via a modal) and a
               "constrain compute to network" toggle. Basemap selector (OSM / Carto minimal /
-              solid colours). Export of rendered energy/passes PNGs with world files. OSM (Overpass) street-network pull. Constrained-vs-unconstrained comparison: interpolated energy difference + additive red/green passes overlay with per-channel controls (regular and density modes). Interpolation prefilter + worker-pool banding. Density radix-heap engine (in-browser density within ~20% of the native backend on huge DEMs). Density scales to large workloads: leaner f32 workers + deviceMemory-budgeted pool + opt-in "max compute workers" override; the native backend caps parallel slices to a memory budget (SIMU_MAX_MEM_GB) so it no longer OOM-crashes at high ref counts. Backend liveness/progress fixes. SEO/LLM metadata (description, canonical, Open Graph, JSON-LD, llms.txt, sitemap). Fixes: PWA manifest restored, service-worker install bug, offline
+              solid colours). Export of rendered energy/passes PNGs with world files. OSM (Overpass) street-network pull. Constrained-vs-unconstrained comparison: interpolated energy difference + additive red/green passes overlay with per-channel controls (regular and density modes). Interpolation prefilter + worker-pool banding. Density radix-heap engine (in-browser density within ~20% of the native backend on huge DEMs). Compute-time estimate is now budget- and engine-aware (per-DEM calibration probe at load): changing the energy budget, alpha, worker count, or backend now moves the estimate (it previously ignored the budget entirely). Density scales to large workloads: leaner f32 workers + deviceMemory-budgeted pool + opt-in "max compute workers" override; the native backend caps parallel slices to a memory budget (SIMU_MAX_MEM_GB) so it no longer OOM-crashes at high ref counts. Backend liveness/progress fixes. SEO/LLM metadata (description, canonical, Open Graph, JSON-LD, llms.txt, sitemap). Fixes: PWA manifest restored, service-worker install bug, offline
               caching of CDN libs (SRI + crossorigin), 3-D GeoPackage (Z/M) parsing, stale-result
               race on DEM/network swap mid-compute, worker-crash handling, XSS hardening of
               Bundle-before-DEM loading order now restores correctly (pending-bundle re-apply). Density+network Compute no longer aborts silently (null-src re-snap bug); network clicks snap grid-wide (no more snap-radius dead-end); .gpkg geometry column name read from metadata; empty-on-DEM networks rejected loudly.</p>

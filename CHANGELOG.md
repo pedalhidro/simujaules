@@ -9,6 +9,25 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v13 — 2026-06-18 (unreleased)
+
+### Features
+
+- "Follow the vectors" network-graph mode (new `graph-engine.js`). When a
+  vector network is loaded, the optional *Compute on network graph* toggle
+  routes on the real polyline graph instead of the rasterised mask, so
+  passes/paths trace the vectors with no staircase, corner-cutting, or
+  width-fattening. The network is planarised with a selectable junction mode
+  — *also at crossings* (splits segments at intersections so at-grade
+  crossings route) or *only shared endpoints* (connects solely where lines
+  share a vertex, preserving bridges/overpasses). Edge costs reuse the exact
+  asymmetric energy model, sampled along the true geometry over the DEM
+  (bit-parity with the grid step asserted in `test-graph-engine.mjs`). All
+  compute modes are supported (from/to, round, top-N routes, maximize,
+  multi-reference density), results render as a colored-vector overlay, and
+  style-knob changes recolor without recomputing. JS-only — the Rust backend
+  is untouched.
+
 ## v12 — 2026-06-12 (unreleased)
 
 ### Performance
@@ -21,6 +40,14 @@ history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 - Optional native Rust backend (`backend/`, **off by default**): density
   runs on all cores via rayon, radix-heap Dijkstra, scratch-buffer reuse,
   ~7× over the sequential JS path; automatic fallback to browser workers.
+- Compute-time estimate is now budget- and engine-aware. It was assuming a
+  full-grid Dijkstra at a fixed rate, so changing the energy budget didn't
+  move it at all (off by ~3-18× on huge DEMs). A one-shot calibration probe
+  at DEM load now learns this terrain's real per-cell rate and
+  budget→explored relationship; the live estimate scales with the budget
+  (explored ∝ (eMax/alpha)²), divides by the density worker-pool size, and
+  reflects the native backend when enabled. Shows "estimating…" until the
+  probe lands.
 - Density compute engine rewritten (`densityField` in `energy-worker.js`):
   one reused scratch set with targeted reset/accumulate over only the
   explored cells (an energy budget makes that a small fraction of the

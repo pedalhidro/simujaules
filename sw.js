@@ -79,7 +79,9 @@
 //              also in density mode); interp
 //              prefilter + pooled banding (bit-identical, ~4x clustered,
 //              xcores everywhere); backend liveness ticker, hard-fail
-//              after response; density engine rewritten (reused scratch +
+//              after response; budget- and engine-aware compute-time
+//              estimate (per-DEM calibration probe at load);
+//              density engine rewritten (reused scratch +
 //              targeted reset + radix heap) — in-browser density now within
 //              ~20% of the native backend on huge DEMs;
 //              density workers leaner (f32) + deviceMemory-budgeted pool +
@@ -90,7 +92,14 @@
 //              end); .gpkg geom column from metadata; 0-cell networks
 //              rejected with a clear error. SEO/LLM metadata
 //              (description, canonical, OG, JSON-LD, llms.txt, sitemap).
-const VERSION  = "v12";
+//   v12 → v13: "Follow the vectors" network-graph mode (new graph-engine.js,
+//              now precached): routes on the real polyline graph (planarised,
+//              both junction modes) instead of the rasterised mask — passes
+//              trace the vectors, rendered as a colored-vector overlay. All
+//              compute modes; JS-only (Rust backend untouched). Bumped so the
+//              new worker (graphBuild/graphRun) + graph-engine.js actually
+//              install — a v12 cache would serve the pre-graph worker.
+const VERSION  = "v13";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
@@ -106,6 +115,7 @@ const PRECACHE_URLS = [
   "./index.html",
   "./app.js",
   "./energy-worker.js",
+  "./graph-engine.js",
   "./manifest.webmanifest",
   "./icons/icon.svg",
   "./icons/icon-192.png",

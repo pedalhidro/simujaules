@@ -1013,6 +1013,15 @@ function maxCostPathOfLength(opts) {
 }
 
 // ------- Worker message handler -------
+// Vector-network graph routing lives in a sibling module (shared with the node
+// test). importScripts only exists in a real Worker; in the node test harness
+// (new Function sandbox) it's absent and the graph kinds are never exercised,
+// so the guard keeps test-worker-pool.mjs working while the browser gets the
+// engine. graph-engine.js assigns self.GraphEngine.
+if (typeof importScripts === "function") {
+  try { importScripts("graph-engine.js"); } catch (e) { /* graph mode unavailable; grid paths unaffected */ }
+}
+
 self.onmessage = (ev) => {
   const msg = ev.data;
 
@@ -1096,6 +1105,45 @@ self.onmessage = (ev) => {
       });
       const totalMs = performance.now() - t0;
       postMessage({ kind: "probe-done", allocMs, totalMs, exploredTotal, nRefs: refPoints.length, N, eMax });
+    } catch (err) {
+      postMessage({ kind: "error", message: err.message });
+    }
+    return;
+  }
+
+  // Build the routable graph from network polylines + DEM (once per network
+  // load). Returns transferable typed arrays the app caches as state.networkGraph
+  // and ships back with every graphRun. See graph-engine.js for the data shape.
+  if (msg.kind === "graphBuild") {
+    try {
+      const g = GraphEngine.buildGraph(msg.lines, msg.dem, msg.opts);
+      const transfer = [
+        g.nodeR.buffer, g.nodeC.buffer, g.nodeH.buffer, g.edgeA.buffer, g.edgeB.buffer,
+        g.edgeLenM.buffer, g.edgeStepM.buffer, g.profOff.buffer, g.profH.buffer,
+        g.csrHead.buffer, g.csrSource.buffer, g.csrTarget.buffer, g.csrEdge.buffer, g.csrAtoB.buffer,
+      ];
+      postMessage({ kind: "graph-built", graph: g, gen: msg.gen }, transfer);
+    } catch (err) {
+      postMessage({ kind: "error", message: err.message });
+    }
+    return;
+  }
+
+  // Run one compute (any mode) on the cached graph. The big per-edge / per-node
+  // arrays transfer back; path/routes are small plain objects.
+  if (msg.kind === "graphRun") {
+    try {
+      const g = msg.graph, p = msg.params;
+      // Snap src/dst/ref pixel coords to graph nodes here — the main thread has
+      // no engine; the graph (and nearestNode) live in the worker.
+      if (p.srcRC) p.srcNode = GraphEngine.nearestNode(g, p.srcRC[0], p.srcRC[1]);
+      if (p.dstRC) p.dstNode = GraphEngine.nearestNode(g, p.dstRC[0], p.dstRC[1]);
+      if (p.refRCs) p.refNodes = p.refRCs.map((rc) => GraphEngine.nearestNode(g, rc[0], rc[1]));
+      const res = GraphEngine.computeGraph(g, p);
+      const transfer = [res.edgePasses.buffer];
+      if (res.edgeEnergy) transfer.push(res.edgeEnergy.buffer);
+      if (res.nodeEnergy) transfer.push(res.nodeEnergy.buffer);
+      postMessage({ kind: "graph-result", result: res, gen: msg.gen }, transfer);
     } catch (err) {
       postMessage({ kind: "error", message: err.message });
     }

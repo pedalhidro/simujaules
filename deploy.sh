@@ -39,7 +39,7 @@ CDN_ERR="$(mktemp)"
 # staging dir on every run because of exactly that).
 trap 'rm -rf "$STAGE" "$RSYNC_LOG" "$CDN_ERR"' EXIT
 
-cp index.html app.js energy-worker.js "$STAGE/"
+cp index.html app.js energy-worker.js graph-engine.js "$STAGE/"
 # Explicit glob rather than `cp -r dem/ ...` — BSD and GNU cp disagree on
 # trailing-slash semantics (GNU nests a second dem/ level, breaking the
 # example-DEM URLs hardcoded in app.js).
@@ -104,7 +104,8 @@ if [[ "$CHANGED" -eq 1 ]]; then
   gsutil -m setmeta \
     -h "Cache-Control: public, max-age=3600" \
     "$BUCKET/app.js" \
-    "$BUCKET/energy-worker.js"
+    "$BUCKET/energy-worker.js" \
+    "$BUCKET/graph-engine.js"
 
   # The vocab is consumed by RDF tools that content-negotiate; tag it as
   # application/ld+json (gsutil otherwise infers application/json from the

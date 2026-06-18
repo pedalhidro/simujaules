@@ -56,6 +56,10 @@ const STRINGS = {
   "net.render_width":    { pt: "largura da linha (m)", en: "line width (m)" },
   "net.render_opacity":  { pt: "opacidade da linha", en: "line opacity" },
   "net.constrain":       { pt: "Restringir cálculo à rede", en: "Constrain compute to network" },
+  "net.graph_mode":      { pt: "Calcular sobre o grafo da rede (seguir os vetores)", en: "Compute on network graph (follow vectors)" },
+  "net.junctions":       { pt: "junções", en: "junctions" },
+  "net.junctions_crossings": { pt: "também nos cruzamentos", en: "also at crossings" },
+  "net.junctions_shared":    { pt: "só em extremos compartilhados", en: "only shared endpoints" },
   "net.osm":             { pt: "Puxar ruas do OSM (highway=*)", en: "Pull streets from OSM (highway=*)" },
   "net.osm_hint":        { pt: "Consulta o Overpass sobre a vista atual ∩ extensão do DEM. Áreas grandes podem demorar ou estourar limites do Overpass — aproxime o zoom primeiro.", en: "Queries Overpass over the current map view ∩ DEM extent. Large areas can take a while or hit Overpass limits — zoom in first." },
   "net.compare":         { pt: "Comparar com cenário sem rede", en: "Compare with unconstrained" },
@@ -855,6 +859,18 @@ const state = {
   // ground width. null when over the vertex cap (drawing disabled).
   networkLines: null,
   networkLinesLayer: null,
+  // "Follow the vectors" graph mode: the routable graph built from
+  // networkLines (cached, keyed by networkGraphToken so a network/junction-mode/
+  // DEM change rebuilds it), the last per-edge result, and its map layer.
+  networkGraph: null,
+  networkGraphToken: null,
+  lastGraphResult: null,
+  // Graph mode renders as TWO pane-integrated vector layers (energy on
+  // energyPane, passes on passesPane) so the existing Energy/Passes visibility
+  // + opacity controls drive them, plus a routes/path layer on routesPane.
+  graphEnergyLayer: null,
+  graphPassesLayer: null,
+  graphRoutesLayer: null,
   // Multi-reference density: list of [r, c] pixel coords plus their map markers.
   refPoints: [],
   refMarkers: [],
@@ -1253,6 +1269,8 @@ async function loadDemFromArrayBuffer(buf, label) {
     geoKeys = image.getGeoKeys ? image.getGeoKeys() : null;
   } catch { /* getGeoKeys throws on some malformed tiffs — fine to skip */ }
 
+  // A new DEM invalidates the cached network graph (elevations changed).
+  state.networkGraph = null; state.networkGraphToken = null;
   state.dem = {
     height, mask, H, W,
     dx, dy,                  // native CRS units (degrees for geographic)
@@ -1838,6 +1856,9 @@ function clearVectorNetwork() {
   state.networkFeatureCount = 0;
   state.networkLines = null;
   if (state.networkLinesLayer) { state.networkLinesLayer.remove(); state.networkLinesLayer = null; }
+  state.networkGraph = null; state.networkGraphToken = null;
+  removeGraphLayers();
+  state.lastGraphResult = null;
   const meta = document.getElementById("vec-meta");
   if (meta) meta.innerHTML = "No network loaded.";
   const inp = document.getElementById("vector-file");
@@ -1993,6 +2014,154 @@ function pixelToLatLng(r, c) {
     return L.latLng(originY - (r + 0.5) * dy, originX + (c + 0.5) * dx);
   }
   return null;
+}
+
+// ------- "Follow the vectors" graph mode -------
+// Routing on the real polyline graph (graph-engine.js) instead of the raster
+// mask, so passes trace the vectors with no staircase. Geometry round-trips
+// through FRACTIONAL cell space: lat/lng → (r,c) for the engine, (r,c) → lat/lng
+// for rendering. Gated to geographic DEMs (the same constraint as map clicks).
+function latLngToCellFrac(lat, lng) {
+  const { originX, originY, dx, dy } = state.dem;
+  return [(originY - lat) / dy, (lng - originX) / dx];
+}
+function cellFracToLatLng(r, c) {
+  const { originX, originY, dx, dy } = state.dem;
+  return L.latLng(originY - r * dy, originX + c * dx);
+}
+function networkLinesToCellLines() {
+  // state.networkLines = [[ [lat,lng], … ], … ] → fractional [r,c] polylines.
+  return state.networkLines.map((ln) => ln.map(([lat, lng]) => latLngToCellFrac(lat, lng)));
+}
+function graphJunctionMode() {
+  return document.getElementById("vec-junction-mode")?.value === "shared" ? "shared" : "crossings";
+}
+// Graph mode is usable only with a vector network whose geometry was kept and a
+// geographic DEM. The toggle lives in the network panel.
+function graphModeActive() {
+  return !!document.getElementById("vec-graph-mode")?.checked
+    && !!state.networkLines && state.networkLines.length > 0
+    && !!state.dem && state.dem.isGeographic;
+}
+// Identity of everything the cached graph depends on — a change rebuilds it.
+function computeNetworkGraphToken() {
+  return `${state.networkFeatureCount}|${graphJunctionMode()}|${state.dem ? state.dem.W + "x" + state.dem.H : "0"}`;
+}
+
+// Draw a path/route (sequence of node ids) as a polyline over the edges.
+function drawGraphPath(graph, p, colour, group) {
+  if (!p || !p.nodes || !p.nodes.length) return;
+  const pts = p.nodes.map((n) => cellFracToLatLng(graph.nodeR[n], graph.nodeC[n]));
+  group.addLayer(L.polyline(pts, { color: colour, weight: 4, opacity: 0.95, pane: "routesPane", interactive: false }));
+}
+
+// Render the cached graph result as a colored-vector overlay. Reads the style
+// knobs LIVE so colormap/range/gamma changes recolor without recomputing.
+// Remove all graph-mode layers and reset the pane opacities (the raster
+// overlays assume the panes sit at opacity 1 and set their own element opacity).
+function removeGraphLayers() {
+  for (const k of ["graphEnergyLayer", "graphPassesLayer", "graphRoutesLayer"]) {
+    if (state[k]) { state[k].remove(); state[k] = null; }
+  }
+  const ep = map.getPane("energyPane"), pp = map.getPane("passesPane");
+  if (ep) ep.style.opacity = "";
+  if (pp) pp.style.opacity = "";
+}
+
+// Build one colored-polyline-per-edge vector layer for a per-edge field.
+// greyscale matches the raster passes layer; colormap matches the energy layer.
+// Returns a layerGroup with `_range = [lo, hi]` for the legend.
+function buildGraphFieldLayer(graph, field, { pane, greyscale, minId, maxId, percentiles, skipZero }) {
+  // Collect drawable values. skipZero mirrors the raster's treatZeroAsTransparent:
+  // zero / unreached edges DON'T draw, so the result reads as corridors instead
+  // of a full-network outline. Percentile bounds tame the long passes tail.
+  const vals = [];
+  for (let e = 0; e < graph.nEdges; e++) {
+    const v = field[e];
+    if (!Number.isFinite(v)) continue;
+    if (skipZero && v <= 0) continue;
+    vals.push(v);
+  }
+  if (!vals.length) return null;
+  vals.sort((a, b) => a - b);
+  const pAt = (p) => vals[Math.min(vals.length - 1, Math.max(0, Math.floor((p / 100) * (vals.length - 1))))];
+  let lo = pAt(percentiles[0]), hi = pAt(percentiles[1]);
+  const uMin = readRangeInput(minId, null), uMax = readRangeInput(maxId, null);
+  if (uMin != null) lo = uMin;
+  if (uMax != null) hi = uMax;
+  const span = hi > lo ? hi - lo : 1;
+  const gamma = Math.max(0.05, parseFloat(document.getElementById("passes-gamma")?.value) || 1);
+  const weight = Math.max(1.5, networkLineWeightPx());
+  const renderer = L.canvas({ padding: 0.3, pane });
+  const group = L.layerGroup();
+  for (let e = 0; e < graph.nEdges; e++) {
+    const v = field[e];
+    if (!Number.isFinite(v)) continue;
+    if (skipZero && v <= 0) continue;
+    let t = (v - lo) / span; t = t < 0 ? 0 : (t > 1 ? 1 : t);
+    t = Math.pow(t, gamma);
+    let col;
+    if (greyscale) { const g = Math.round(t * 255); col = `rgb(${g},${g},${g})`; }
+    else { const [cr, cg, cb] = colormap(t); col = `rgb(${cr},${cg},${cb})`; }
+    const a = graph.edgeA[e], b = graph.edgeB[e];
+    group.addLayer(L.polyline(
+      [cellFracToLatLng(graph.nodeR[a], graph.nodeC[a]), cellFracToLatLng(graph.nodeR[b], graph.nodeC[b])],
+      { color: col, weight, opacity: 1, interactive: false, renderer },
+    ));
+  }
+  group._range = [lo, hi];
+  return group;
+}
+
+// Render the cached graph result as a pane-integrated vector layer driven by the
+// existing visibility/opacity controls, plus a routes/path layer. Passes (the
+// "follow the vectors" corridors) is the primary result; energy is shown ONLY
+// when there are no passes (an energy-only from/to) — otherwise colouring every
+// reached edge just restates the network, which the user already toggles via
+// "Draw network". Reads style knobs live → recolours on restyle, no recompute.
+function renderGraphOverlay() {
+  if (!state.lastGraphResult || !state.dem) return;
+  const { graph, result } = state.lastGraphResult;
+  // Graph layers replace the raster overlays.
+  if (state.energyOverlay) { state.energyOverlay.remove(); state.energyOverlay = null; }
+  if (state.passesOverlay) { state.passesOverlay.remove(); state.passesOverlay = null; }
+  removeGraphLayers();
+
+  // Passes is the result the user asked for when density or "want passes" is on
+  // (mirrors the grid, where passes only renders when computed). Otherwise the
+  // run is energy-only and we show the energy field instead.
+  const passesWanted = !!document.getElementById("want-density")?.checked || !!document.getElementById("want-passes")?.checked;
+  const hasPasses = passesWanted && result.edgePasses && result.edgePasses.some((v) => v > 0);
+  if (hasPasses) {
+    state.graphPassesLayer = buildGraphFieldLayer(graph, result.edgePasses, { pane: "passesPane", greyscale: true, minId: "passes-vmin", maxId: "passes-vmax", percentiles: [10, 90], skipZero: true });
+    if (state.graphPassesLayer) {
+      state.graphPassesLayer.addTo(map);
+      state.lastPassesAutoMin = state.graphPassesLayer._range[0];
+      state.lastPassesAutoMax = state.graphPassesLayer._range[1];
+    }
+  } else if (result.edgeEnergy && result.edgeEnergy.some((v) => Number.isFinite(v))) {
+    state.graphEnergyLayer = buildGraphFieldLayer(graph, result.edgeEnergy, { pane: "energyPane", greyscale: false, minId: "vmin", maxId: "vmax", percentiles: [1, 80], skipZero: false });
+    if (state.graphEnergyLayer) {
+      state.graphEnergyLayer.addTo(map);
+      state.lastAutoMin = state.graphEnergyLayer._range[0];
+      state.lastAutoMax = state.graphEnergyLayer._range[1];
+    }
+  }
+  const routesGroup = L.layerGroup();
+  if (result.routes && result.routes.length) {
+    for (let i = 0; i < result.routes.length; i++) drawGraphPath(graph, result.routes[i], routeColour(i, result.routes.length), routesGroup);
+  } else if (result.path) {
+    drawGraphPath(graph, result.path, "#4cc9f0", routesGroup);
+  }
+  routesGroup.addTo(map);
+  state.graphRoutesLayer = routesGroup;
+
+  const passesRow = document.getElementById("passes-row");
+  if (passesRow) passesRow.style.display = hasPasses ? "" : "none";
+
+  applyLayerControls();   // drive visibility + opacity from the Energy/Passes controls
+  updateLegendTicks();
+  applyColormapToLegend();
 }
 
 map.on("click", (e) => {
@@ -2522,6 +2691,7 @@ runBtn.addEventListener("click", async () => {
         [filled.buffer, mask.buffer, networkMask.buffer],
       );
     };
+    const cores = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
     const P = Math.max(1, Math.min(cores, Math.floor(1.5e9 / (6 * N)), Math.ceil(H / 64)));
     if (P <= 1) {
       // Single worker — smoothing handled worker-side in the same job.
@@ -2885,7 +3055,69 @@ runBtn.addEventListener("click", async () => {
     });
   };
 
-  if (wantDensity && compareOn) {
+  // "Follow the vectors": route on the network graph instead of the raster.
+  // Lazily (re)builds the cached graph in a worker, then runs the chosen mode
+  // on it and renders the colored-vector overlay. Same gen/cancel semantics.
+  const startGraphCompute = () => {
+    const token = computeNetworkGraphToken();
+    const finishGraph = (graph, result) => {
+      if (gen !== state.computeGen) return;
+      for (const w of state.workers) w.terminate();
+      state.workers = [];
+      progress.classList.remove("active");
+      updateRunButtonState();
+      state.computeStartedAt = 0;
+      state.lastGraphResult = { graph, result };
+      renderGraphOverlay();
+      const routeNote = result.routes ? ` · ${result.routes.length} route(s)` : "";
+      status.textContent = `Done in ${result.elapsedMs.toFixed(0)} ms (graph: ${graph.nNodes} nodes, ${graph.nEdges} edges)${routeNote}.`;
+    };
+    const runOnGraph = (graph) => {
+      if (gen !== state.computeGen) return;
+      const params = {
+        mode, alpha, beta, eta, eMax, eMaxMode,
+        srcRC: state.src || null,
+        dstRC: state.dst || null,
+        wantPath: !!state.dst,
+        wantTopN, nRoutes, penalty,
+        maximize, maximizeLength,
+        densityMode: mode,
+      };
+      if (wantDensity) {
+        params.mode = "density";
+        params.refRCs = state.refPoints.slice();
+      }
+      const w = spawnWorker((m) => {
+        if (m.kind === "progress") reportProgress(m.progress);
+        else if (m.kind === "graph-result") finishGraph(graph, m.result);
+        else if (m.kind === "error") computeFailed(m.message);
+      });
+      // No transfer list → the cached graph is structured-cloned, not detached.
+      w.postMessage({ kind: "graphRun", graph, params, gen });
+    };
+    if (state.networkGraph && state.networkGraphToken === token) { runOnGraph(state.networkGraph); return; }
+    status.textContent = "Building network graph…";
+    const wb = spawnWorker((m) => {
+      if (m.kind === "graph-built") {
+        if (gen !== state.computeGen) return;
+        state.networkGraph = m.graph;
+        state.networkGraphToken = token;
+        runOnGraph(m.graph);
+      } else if (m.kind === "error") computeFailed(m.message);
+    });
+    const dem = {
+      height: new Float32Array(state.dem.height), mask: new Uint8Array(state.dem.mask),
+      H: state.dem.H, W: state.dem.W, dxM: state.dem.dxM, dyM: state.dem.dyM,
+    };
+    wb.postMessage(
+      { kind: "graphBuild", lines: networkLinesToCellLines(), dem, opts: { junctionMode: graphJunctionMode(), snapTolCells: 0.5, stepCells: 1 }, gen },
+      [dem.height.buffer, dem.mask.buffer],
+    );
+  };
+
+  if (graphModeActive() && state.networkLines && state.networkLines.length) {
+    startGraphCompute();
+  } else if (wantDensity && compareOn) {
     startDensityCompare();
   } else if (wantDensity) {
     (async () => {
@@ -2902,6 +3134,9 @@ runBtn.addEventListener("click", async () => {
 
 // ------- Render -------
 function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs, energyAlt, passesAlt }) {
+  // A grid result supersedes any graph-mode overlay.
+  removeGraphLayers();
+  state.lastGraphResult = null;
   // Cache for live re-render on colormap / view / range changes.
   state.lastResult = {
     energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs,
@@ -2968,6 +3203,11 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
 // colormap. Called from renderResult (after a compute), from the colormap
 // selector, and from any of the per-field range inputs.
 function rerenderCachedResult() {
+  // Graph-mode results live on their own vector layer — recolor them and skip
+  // the raster pipeline entirely (style knobs still apply, no recompute).
+  if (state.lastGraphResult && graphModeActive()) { renderGraphOverlay(); return; }
+  // Reverted to grid rendering — drop any leftover graph overlay.
+  removeGraphLayers();
   const r = state.lastResult;
   if (!r || !state.dem) return;
   const { path, routes } = r;
@@ -3666,6 +3906,22 @@ function applyLayerControls() {
     // blend — composite it normally.
     if (el) el.style.mixBlendMode = blend === "energy" ? "normal" : blend;
   }
+  // Graph-mode vector layers ride on energyPane / passesPane — drive their pane
+  // opacity from the same Energy / Passes controls (visible ? op : 0).
+  if (state.graphEnergyLayer) {
+    const visible = document.getElementById("energy-visible")?.checked ?? true;
+    const opRaw = parseFloat(document.getElementById("energy-opacity")?.value);
+    const op = Number.isFinite(opRaw) ? opRaw : 0.85;
+    const ep = map.getPane("energyPane");
+    if (ep) ep.style.opacity = String(visible ? op : 0);
+  }
+  if (state.graphPassesLayer) {
+    const visible = document.getElementById("passes-visible")?.checked ?? true;
+    const opRaw = parseFloat(document.getElementById("passes-opacity")?.value);
+    const op = Number.isFinite(opRaw) ? opRaw : 0.7;
+    const pp = map.getPane("passesPane");
+    if (pp) pp.style.opacity = String(visible ? op : 0);
+  }
 }
 
 function updateLegendTicks() {
@@ -4233,6 +4489,32 @@ function routesFCFromList(routes, dem) {
   };
 }
 
+// Graph-mode result → GeoJSON FeatureCollection (one LineString per edge with
+// passes/energy/length). Node coords are fractional cells → [lng,lat] via the
+// raw inverse (no +0.5; matches cellFracToLatLng).
+function graphEdgesFC(graph, result, dem) {
+  const lonlat = (r, c) => [dem.originX + c * dem.dx, dem.originY - r * dem.dy];
+  const passes = result.edgePasses, energy = result.edgeEnergy;
+  return {
+    type: "FeatureCollection",
+    features: Array.from({ length: graph.nEdges }, (_, e) => ({
+      type: "Feature",
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          lonlat(graph.nodeR[graph.edgeA[e]], graph.nodeC[graph.edgeA[e]]),
+          lonlat(graph.nodeR[graph.edgeB[e]], graph.nodeC[graph.edgeB[e]]),
+        ],
+      },
+      properties: {
+        passes: passes ? passes[e] : 0,
+        energy: energy && Number.isFinite(energy[e]) ? energy[e] : null,
+        length_m: graph.edgeLenM[e],
+      },
+    })),
+  };
+}
+
 function buildMetadata(result, withOutputs = true) {
   const dem = state.dem;
   const params = {
@@ -4290,6 +4572,8 @@ function buildMetadata(result, withOutputs = true) {
   const network = {
     enabled:           !!state.networkMask,
     constrain:         !!document.getElementById("vec-constrain")?.checked,
+    graphMode:         !!document.getElementById("vec-graph-mode")?.checked,
+    junctionMode:      graphJunctionMode(),
     srsId:             state.networkSrsId || null,
     featureCount:      state.networkFeatureCount || 0,
     lineWidth:         parseInt(document.getElementById("vec-width")?.value, 10) || 1,
@@ -4445,7 +4729,7 @@ async function downloadBundle() {
     status.innerHTML = '<span style="color:#ff6b6b">Load a DEM first, then run Compute, then download.</span>';
     return;
   }
-  if (!state.lastResult) {
+  if (!state.lastResult && !state.lastGraphResult) {
     status.innerHTML = '<span style="color:#ff6b6b">Nothing to download yet — click Compute first.</span>';
     return;
   }
@@ -4455,19 +4739,24 @@ async function downloadBundle() {
   }
   status.textContent = "Building bundle…";
   try {
-    const r = state.lastResult;
+    const graphMode = !!state.lastGraphResult;
+    const r = state.lastResult || {}; // graph-only bundles carry no grid result
     const dem = state.dem;
-    const md = buildMetadata(r, true);
+    const md = buildMetadata(state.lastResult, true);
+    if (graphMode) {
+      md.outputs = md.outputs || {};
+      md.outputs.graphEdges = { format: "GeoJSON", file: "graph_edges.geojson", junctionMode: graphJunctionMode() };
+    }
 
     const zip = new JSZip();
     zip.file("metadata.jsonld", JSON.stringify(md, null, 2));
     // Output rasters as GeoTIFFs — the unzipped bundle drops straight into
     // QGIS / any GIS, no .bin-plus-metadata gymnastics. CRS and pixel grid
     // are inherited from the source DEM via tiffMetadataForDem.
-    if (r.energy) {
+    if (r.energy && !graphMode) {
       zip.file("energy.tif",  new Uint8Array(writeRasterAsGeoTIFF(r.energy, dem, "float32")));
     }
-    if (r.passes) {
+    if (r.passes && !graphMode) {
       zip.file("passes.tif",  new Uint8Array(writeRasterAsGeoTIFF(r.passes, dem, "float64")));
     }
     // The rasterised network mask reproduces the constrained compute even
@@ -4476,14 +4765,19 @@ async function downloadBundle() {
     if (state.networkMask) {
       zip.file("network.tif", new Uint8Array(writeRasterAsGeoTIFF(state.networkMask, dem, "uint8")));
     }
-    if (r.routes && r.routes.length) {
+    if (r.routes && r.routes.length && !graphMode) {
       zip.file("routes.geojson", JSON.stringify(routesFCFromList(r.routes, dem), null, 2));
     }
-    if (r.path && r.path.length) {
+    if (r.path && r.path.length && !graphMode) {
       zip.file("path.geojson", JSON.stringify(pathFCFromIndices(r.path, dem, {
         energy: r.pathEnergy,
         length_m: r.pathLengthM,
       }), null, 2));
+    }
+    // "Follow the vectors" result → per-edge GeoJSON (passes/energy/length).
+    if (state.lastGraphResult) {
+      zip.file("graph_edges.geojson", JSON.stringify(
+        graphEdgesFC(state.lastGraphResult.graph, state.lastGraphResult.result, dem), null, 2));
     }
 
     const blob = await zip.generateAsync({ type: "blob" });
@@ -4637,6 +4931,8 @@ function applyMetadataToUI(md, bin = {}) {
   set("vec-snap", net.snapRadius);
   check("net-interp", net.wantInterp);
   check("vec-constrain", net.constrain);
+  check("vec-graph-mode", net.graphMode);
+  if (net.junctionMode) set("vec-junction-mode", net.junctionMode);
   set("net-interp-max-dist", net.interpMaxDistance);
   set("net-interp-smoothing", net.interpSmoothing);
   set("vec-render-width", net.renderWidthM);
