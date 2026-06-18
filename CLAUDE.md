@@ -46,6 +46,15 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   other; `node backend/test-backend.mjs` enforces energy bit-parity.
   Backend passes may differ from JS only on EXACT f64 cost ties (radix heap
   vs binary heap tie order) — both trees are valid optima.
+- Multi-reference density does NOT go through `dijkstra()`: it uses the
+  dedicated `densityField()` engine (one reused scratch set, targeted
+  reset/accumulate over only the explored cells, and an exact monotone
+  RADIX heap matching the backend's). It is the perf-critical path on
+  huge DEMs — keep its cost model identical to `dijkstra()`. Its radix
+  heap shares the backend's exact-except-on-f64-ties behaviour, so density
+  passes match the backend (not the binary-heap single-point modes) on
+  ties. The from/to single-point modes still use `dijkstra()` (binary
+  heap); only density was switched.
 - In the worker, `E` is Float32Array but heap priorities are f64: the
   `settled` byte array (not `g > E[idx]`) filters stale heap entries, and
   settled neighbours are never relaxed. Both guards exist because of the

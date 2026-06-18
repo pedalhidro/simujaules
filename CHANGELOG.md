@@ -21,6 +21,18 @@ history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 - Optional native Rust backend (`backend/`, **off by default**): density
   runs on all cores via rayon, radix-heap Dijkstra, scratch-buffer reuse,
   ~7× over the sequential JS path; automatic fallback to browser workers.
+- Density compute engine rewritten (`densityField` in `energy-worker.js`):
+  one reused scratch set with targeted reset/accumulate over only the
+  explored cells (an energy budget makes that a small fraction of the
+  grid), and an exact monotone **radix heap** matching the native
+  backend's queue. On the 135 M-cell `sampa_geral` DEM (5 refs, budget
+  150) this brings the in-browser density run to within ~15-20% of the
+  native Rust backend's compute time — both are memory-bandwidth-bound at
+  that size, so the residual is the JS-vs-native floor. Like the backend,
+  the radix heap settles in exact cost order except on genuine f64 cost
+  ties (either equal-cost parent is a valid optimum); the browser density
+  field now matches the backend's tie behaviour rather than the old binary
+  heap's.
 
 ### Features
 

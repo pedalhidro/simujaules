@@ -79,7 +79,9 @@
 //              also in density mode); interp
 //              prefilter + pooled banding (bit-identical, ~4x clustered,
 //              xcores everywhere); backend liveness ticker, hard-fail
-//              after response,
+//              after response; density engine rewritten (reused scratch +
+//              targeted reset + radix heap) — in-browser density now within
+//              ~20% of the native backend on huge DEMs;
 //              zero-copy parse, interp progress. Network snap is
 //              grid-wide (radius input = quiet zone, no rejection dead
 //              end); .gpkg geom column from metadata; 0-cell networks

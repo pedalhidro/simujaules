@@ -258,6 +258,170 @@ function subtreePasses(parents, order, orderLen, N, include) {
   return passes;
 }
 
+// ------- Multi-reference density (optimised, scratch-reused) -------
+// Equivalent to looping dijkstra() per ref + subtree walk + accumulate, but:
+//   - ONE scratch set (E/settled/parents/order/passes), allocated once and
+//     TARGETED-RESET between refs — only the explored cells (tracked in
+//     `order`) are touched, not all H·W. With an energy budget the explored
+//     region is a small fraction of the grid, so this turns per-ref O(N)
+//     overhead into O(explored), the dominant win on large DEMs.
+//   - accumulation also iterates `order`, not the whole grid.
+// Cost model is identical to dijkstra(); from/to are bit-exact vs the old
+// per-ref path, round differs only by f64 summation regrouping (~1e-17,
+// below export/display precision). Returns raw partials (density carries
+// the first /N, like densityPartial); caller does the second /N + avgE.
+function densityField(opts) {
+  const {
+    height, mask, H, W, refPoints, dmode,
+    alpha, beta, eta, dx, dy,
+    eMax = 0, maximize = false, maxEdgeCost = 0, eMaxTotalCap = 0,
+    onProgress = null,
+  } = opts;
+  const N = H * W;
+  const diag = Math.hypot(dx, dy);
+  const drs = new Int32Array([-1, -1, -1, 0, 0, 1, 1, 1]);
+  const dcs = new Int32Array([-1, 0, 1, -1, 1, -1, 0, 1]);
+  const dists = new Float64Array([diag, dy, diag, dx, dx, diag, dy, diag]);
+  const dIdx = new Int32Array(8);
+  for (let k = 0; k < 8; k++) dIdx[k] = drs[k] * W + dcs[k];
+  // Per-edge constants folded once (the inner loop runs ~8·explored·refs
+  // times, so even one fewer multiply per edge matters): adist[k] is the
+  // flat cost of edge k, eb the downhill-recovery coefficient.
+  const adist = new Float64Array(8); for (let k = 0; k < 8; k++) adist[k] = alpha * dists[k];
+  const eb = eta * beta;
+
+  const density = new Float64Array(N);
+  const energySum = new Float64Array(N);
+  const energyCount = new Int32Array(N);
+
+  const E = new Float32Array(N).fill(Infinity);
+  const settled = new Uint8Array(N);
+  const parents = new Int32Array(N).fill(-1);
+  const order = new Int32Array(N);
+  const passes = new Float64Array(N);
+  // Round mode keeps a second search resident so both legs combine per ref.
+  const round = dmode === "round";
+  const E2 = round ? new Float32Array(N).fill(Infinity) : null;
+  const settled2 = round ? new Uint8Array(N) : null;
+  const parents2 = round ? new Int32Array(N).fill(-1) : null;
+  const order2 = round ? new Int32Array(N) : null;
+  const passes2 = round ? new Float64Array(N) : null;
+
+  // Exact monotone radix heap on the f64 keys, reused across all searches.
+  // Same structure as the Rust backend's: 65 buckets indexed by the highest
+  // bit where the key differs from the last-popped minimum; pop drains
+  // bucket 0, refilling it by redistributing the lowest non-empty bucket
+  // around the new minimum. O(1) amortised push, O(64) amortised pop — far
+  // less per-op work than a binary heap's O(log n) sift on the multi-million
+  // entry frontiers a budgeted density search produces. It pops the EXACT
+  // minimum, so the settle order matches a binary heap except on genuine
+  // f64 cost ties (where either equal-cost parent is a valid optimum — the
+  // same tie behaviour the native backend already has). Bit extraction uses
+  // a typed-array union view (JIT-fast; DataView method calls are not).
+  const _ub = new ArrayBuffer(8), _uf = new Float64Array(_ub), _u32 = new Uint32Array(_ub);
+  const NB = 65;
+  const bPri = [], bVal = [], bLen = new Int32Array(NB);
+  for (let i = 0; i < NB; i++) { bPri.push(new Float64Array(16)); bVal.push(new Int32Array(16)); }
+  let lastHi = 0, lastLo = 0, rlen = 0;
+  const bucketOf = (p) => {
+    _uf[0] = p; const hi = _u32[1], lo = _u32[0];
+    const xh = hi ^ lastHi; if (xh !== 0) return 33 + (31 - Math.clz32(xh));
+    const xl = lo ^ lastLo; if (xl === 0) return 0; return 1 + (31 - Math.clz32(xl));
+  };
+  const rClear = () => { for (let i = 0; i < NB; i++) bLen[i] = 0; lastHi = 0; lastLo = 0; rlen = 0; };
+  const rPush = (p, v) => {
+    const b = bucketOf(p); let L = bLen[b];
+    if (L >= bPri[b].length) { const a = new Float64Array(L * 2); a.set(bPri[b]); bPri[b] = a; const c = new Int32Array(L * 2); c.set(bVal[b]); bVal[b] = c; }
+    bPri[b][L] = p; bVal[b][L] = v; bLen[b] = L + 1; rlen++;
+  };
+  const rTop = [0, 0];
+  const rPop = () => {
+    if (rlen === 0) return false;
+    if (bLen[0] === 0) {
+      let i = 1; while (bLen[i] === 0) i++;
+      const pr = bPri[i], va = bVal[i], L = bLen[i];
+      let mn = pr[0]; for (let j = 1; j < L; j++) if (pr[j] < mn) mn = pr[j];
+      _uf[0] = mn; lastHi = _u32[1]; lastLo = _u32[0];
+      for (let j = 0; j < L; j++) {
+        const p = pr[j], v = va[j]; const b = bucketOf(p); let M = bLen[b];
+        if (M >= bPri[b].length) { const a = new Float64Array(M * 2); a.set(bPri[b]); bPri[b] = a; const c = new Int32Array(M * 2); c.set(bVal[b]); bVal[b] = c; }
+        bPri[b][M] = p; bVal[b][M] = v; bLen[b] = M + 1;
+      }
+      bLen[i] = 0;
+    }
+    const L = bLen[0] - 1; rTop[0] = bPri[0][L]; rTop[1] = bVal[0][L]; bLen[0] = L; rlen--; return true;
+  };
+
+  // One budget-limited Dijkstra into the given scratch arrays; returns the
+  // settle count (order length). reverse flips dh (energy TO the seed).
+  function search(seedR, seedC, reverse, Ea, settledA, parentsA, orderA) {
+    let orderLen = 0; rClear();
+    const seed = seedR * W + seedC;
+    Ea[seed] = 0; rPush(0, seed);
+    while (rPop()) {
+      const g = rTop[0], idx = rTop[1] | 0;
+      if (settledA[idx]) continue;
+      settledA[idx] = 1; orderA[orderLen++] = idx;
+      const r = (idx / W) | 0, c = idx - r * W, hHere = height[idx];
+      const inner = r > 0 && r < H - 1 && c > 0 && c < W - 1;
+      for (let k = 0; k < 8; k++) {
+        let nIdx;
+        if (inner) nIdx = idx + dIdx[k];
+        else { const nr = r + drs[k], nc = c + dcs[k]; if (nr < 0 || nr >= H || nc < 0 || nc >= W) continue; nIdx = nr * W + nc; }
+        if (!mask[nIdx] || settledA[nIdx]) continue;
+        const dh = reverse ? hHere - height[nIdx] : height[nIdx] - hHere;
+        let edge;
+        if (dh >= 0) edge = adist[k] + beta * dh;
+        else { edge = adist[k] - eb * (-dh); if (edge < 0) edge = 0; }
+        if (maximize) { edge = maxEdgeCost - edge; if (edge < 0) edge = 0; }
+        const t = g + edge;
+        if (eMax > 0 && t > eMax) continue;
+        if (t < Ea[nIdx]) { Ea[nIdx] = t; parentsA[nIdx] = idx; rPush(t, nIdx); }
+      }
+    }
+    return orderLen;
+  }
+
+  const K = refPoints.length;
+  for (let k = 0; k < K; k++) {
+    const [refR, refC] = refPoints[k];
+    if (refR < 0 || refR >= H || refC < 0 || refC >= W) continue;
+    if (!mask[refR * W + refC]) continue;
+
+    if (!round) {
+      const len = search(refR, refC, dmode === "to", E, settled, parents, order);
+      for (let j = 0; j < len; j++) passes[order[j]] = 1;
+      for (let j = len - 1; j >= 0; j--) { const idx = order[j]; const p = parents[idx]; if (p >= 0) passes[p] += passes[idx]; }
+      for (let j = 0; j < len; j++) {
+        const idx = order[j];
+        density[idx] += passes[idx] / N;
+        energySum[idx] += E[idx]; energyCount[idx] += 1;
+        E[idx] = Infinity; settled[idx] = 0; parents[idx] = -1; passes[idx] = 0;
+      }
+    } else {
+      const lf = search(refR, refC, false, E, settled, parents, order);
+      const lb = search(refR, refC, true, E2, settled2, parents2, order2);
+      // Filtered subtree passes: a destination counts only if BOTH legs
+      // reach it (and the round trip is within the total cap, if set).
+      for (let j = 0; j < lf; j++) { const idx = order[j]; const fi = E[idx], bi = E2[idx]; passes[idx] = (bi < Infinity && !(eMaxTotalCap > 0 && fi + bi > eMaxTotalCap)) ? 1 : 0; }
+      for (let j = lf - 1; j >= 0; j--) { const idx = order[j]; const p = parents[idx]; if (p >= 0) passes[p] += passes[idx]; }
+      for (let j = 0; j < lb; j++) { const idx = order2[j]; const fi = E[idx], bi = E2[idx]; passes2[idx] = (fi < Infinity && !(eMaxTotalCap > 0 && fi + bi > eMaxTotalCap)) ? 1 : 0; }
+      for (let j = lb - 1; j >= 0; j--) { const idx = order2[j]; const p = parents2[idx]; if (p >= 0) passes2[p] += passes2[idx]; }
+      for (let j = 0; j < lf; j++) {
+        const idx = order[j];
+        density[idx] += passes[idx] / N;
+        const fi = E[idx], bi = E2[idx];
+        if (bi < Infinity && !(eMaxTotalCap > 0 && fi + bi > eMaxTotalCap)) { energySum[idx] += Math.fround(fi + bi); energyCount[idx] += 1; }
+      }
+      for (let j = 0; j < lb; j++) density[order2[j]] += passes2[order2[j]] / N;
+      for (let j = 0; j < lf; j++) { const idx = order[j]; E[idx] = Infinity; settled[idx] = 0; parents[idx] = -1; passes[idx] = 0; }
+      for (let j = 0; j < lb; j++) { const idx = order2[j]; E2[idx] = Infinity; settled2[idx] = 0; parents2[idx] = -1; passes2[idx] = 0; }
+    }
+    if (onProgress) onProgress((k + 1) / K);
+  }
+  return { density, energySum, energyCount };
+}
+
 // ------- A* with iterative-penalization for top-N routes -------
 // Single shortest path from `start` to `goal` under the asymmetric cost
 // model, with a per-cell penalty multiplier on the alpha*dist component:
@@ -991,83 +1155,18 @@ self.onmessage = (ev) => {
       // layer is the per-cell mean of all refs' energy fields (counting
       // only refs from which the cell is reachable). Cells unreachable
       // from every ref stay Infinity (rendered transparent).
-      const density = new Float64Array(N);
-      const energySum = new Float64Array(N);
-      const energyCount = new Int32Array(N);
       const dmode = densityMode || "from";
-      const K = refPoints.length;
-      const slice = 1 / K;
-      for (let k = 0; k < K; k++) {
-        const [refR, refC] = refPoints[k];
-        if (refR < 0 || refR >= H || refC < 0 || refC >= W) continue;
-        if (!mask[refR * W + refC]) continue;
-
-        const base = k / K;
-
-        let perRefPasses, perRefEnergy;
-        if (dmode === "round") {
-          // Forward + reverse share this ref's slice equally.
-          const f = dijkstra({
-            height, mask: effMask, H, W,
-            seedR: refR, seedC: refC,
-            alpha, beta, eta, dx, dy,
-            reverse: false, trackParents: false,
-            wantTree: true, eMax,
-            maximize, maxEdgeCost,
-            progressBase: base, progressScale: slice * 0.5,
-          });
-          const b = dijkstra({
-            height, mask: effMask, H, W,
-            seedR: refR, seedC: refC,
-            alpha, beta, eta, dx, dy,
-            reverse: true, trackParents: false,
-            wantTree: true, eMax,
-            maximize, maxEdgeCost,
-            progressBase: base + slice * 0.5, progressScale: slice * 0.5,
-          });
-          // Energy + include mask first; passes after, filtered, so only
-          // displayed (round-trip-feasible) destinations count.
-          perRefEnergy = new Float32Array(N);
-          const include = new Uint8Array(N);
-          for (let i = 0; i < N; i++) {
-            const fi = f.E[i], bi = b.E[i];
-            const s = fi + bi;
-            const ok =
-              Number.isFinite(fi) && Number.isFinite(bi) && !(eMaxTotalCap > 0 && s > eMaxTotalCap);
-            perRefEnergy[i] = ok ? s : Infinity;
-            include[i] = ok ? 1 : 0;
-          }
-          perRefPasses = subtreePasses(f.parents, f.order, f.orderLen, N, include);
-          const pb = subtreePasses(b.parents, b.order, b.orderLen, N, include);
-          for (let i = 0; i < N; i++) perRefPasses[i] += pb[i];
-        } else {
-          const r = dijkstra({
-            height, mask: effMask, H, W,
-            seedR: refR, seedC: refC,
-            alpha, beta, eta, dx, dy,
-            reverse: dmode === "to", trackParents: false,
-            wantPasses: true, eMax,
-            maximize, maxEdgeCost,
-            progressBase: base, progressScale: slice,
-          });
-          perRefPasses = r.passes;
-          perRefEnergy = r.E;
-        }
-        // First normalisation: each reference's count becomes a density
-        // (passes per cell over the grid).
-        for (let i = 0; i < N; i++) {
-          density[i] += perRefPasses[i] / N;
-          if (Number.isFinite(perRefEnergy[i])) {
-            energySum[i] += perRefEnergy[i];
-            energyCount[i] += 1;
-          }
-        }
-        // Snap progress to the slice boundary at end of each ref so the
-        // bar lines up with the "ref X/K" status text the main thread
-        // shows. The per-cell ticks above already cover the slice
-        // monotonically; this is just a clean checkpoint.
-        postMessage({ kind: "progress", progress: (k + 1) / K });
-      }
+      // Optimised engine: one reused scratch set, targeted reset/accumulate
+      // over explored cells only (see densityField). The `density` it
+      // returns already carries the first /N (matching the old per-ref
+      // path); the second /N + avgE happen below.
+      const { density, energySum, energyCount } = densityField({
+        height, mask: effMask, H, W,
+        refPoints, dmode,
+        alpha, beta, eta, dx, dy,
+        eMax, maximize, maxEdgeCost, eMaxTotalCap,
+        onProgress: (frac) => postMessage({ kind: "progress", progress: frac }),
+      });
 
       // Worker-pool mode: hand back the raw accumulators (density before
       // the second /N, energy as sum + reach-count) so the main thread can
