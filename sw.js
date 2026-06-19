@@ -109,7 +109,16 @@
 //              cap (/health now reports mem_budget_bytes), and an online
 //              correction learns actual/predicted per engine. Bumped so the
 //              new probe protocol (maxSettled) + estimate worker install.
-const VERSION  = "v14";
+//   v14 → v15: Bundle reload restores ALL saved layers, not just the energy/
+//              passes rasters. The top-N routes and the maximize path were
+//              exported to the zip (routes.geojson / path.geojson) but the
+//              loader never read them back — reload redrew the fields and told
+//              you to recompute the lines. Now the GeoJSON is parsed and its
+//              coords are converted back to cell indices (exact inverse of the
+//              export mapping, gated on a strict DEM-dimension match), so the
+//              routes/path render and recolor identically to a fresh compute,
+//              with no recompute. Bumped so the updated app.js installs.
+const VERSION  = "v15";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

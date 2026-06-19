@@ -1137,6 +1137,12 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v15</strong> — 2026-06-19<br/>
+              Reloading a bundle now restores all saved layers, not just the energy/passes fields.
+              Top-N routes and the maximize path were already in the exported zip
+              (routes.geojson / path.geojson) but the loader never read them back — it redrew the
+              fields and asked you to recompute. They now come back and recolor exactly like a fresh
+              compute, no recompute needed. (Graph-mode edges aren't restored yet.)</p>
               <p><strong>v14</strong> — 2026-06-19<br/>
               Compute-time estimate accuracy fix (was up to ~3× low, now ~±20% with no bias).
               Backend density on a large DEM was the main culprit: the estimate assumed all cores

@@ -4701,6 +4701,44 @@ function pixelToLonLat(idx, dem) {
   return [dem.originX + (c + 0.5) * dem.dx, dem.originY - (r + 0.5) * dem.dy];
 }
 
+// Exact inverse of pixelToLonLat — recover the cell index from a [lon,lat]
+// pair. Only safe when the DEM matches the one the coords were written
+// against (callers gate on demDimsMatch === true). Used to rebuild the
+// route/path index arrays from a bundle's GeoJSON on reload, so restored
+// lines render and recolor identically to a fresh compute.
+function lonLatToPixel(lon, lat, dem) {
+  const c = Math.round((lon - dem.originX) / dem.dx - 0.5);
+  const r = Math.round((dem.originY - lat) / dem.dy - 0.5);
+  return r * dem.W + c;
+}
+
+// Rebuild a top-N `routes` list ({path, energy, length, shared}) from the
+// routes.geojson FeatureCollection a bundle was exported with.
+function routesFromFC(fc, dem) {
+  if (!fc || !Array.isArray(fc.features)) return null;
+  const routes = fc.features
+    .filter((f) => f.geometry?.type === "LineString")
+    .map((f) => {
+      const p = f.properties || {};
+      return {
+        path:   f.geometry.coordinates.map(([lon, lat]) => lonLatToPixel(lon, lat, dem)),
+        energy: p.energy ?? 0,
+        length: p.length_m ?? 0,
+        shared: p.shared_cells ?? 0,
+      };
+    });
+  // Features are written in rank order (routesFCFromList), so the array is
+  // already ordered best-first — no re-sort needed.
+  return routes.length ? routes : null;
+}
+
+// Rebuild the maximize `path` index array from path.geojson.
+function pathFromFC(fc, dem) {
+  const feat = fc?.features?.find((f) => f.geometry?.type === "LineString");
+  if (!feat) return null;
+  return feat.geometry.coordinates.map(([lon, lat]) => lonLatToPixel(lon, lat, dem));
+}
+
 function pathFCFromIndices(path, dem, props = {}) {
   const coords = path.map((i) => pixelToLonLat(i, dem));
   return {
@@ -5075,9 +5113,14 @@ async function loadBundleFile(file) {
       } else if (nBin) {
         bin.network = new Uint8Array(await nBin.async("arraybuffer"));
       }
-      // GeoJSON route/path geometry doesn't get re-rasterised — when no DEM
-      // is loaded yet we couldn't draw it anyway. After the user loads a
-      // matching DEM and clicks Compute, the routes are regenerated.
+      // Route/path vector geometry. These ride alongside the rasters and get
+      // re-rendered (converted back to cell indices) once a matching DEM is
+      // present — no recompute needed. Held in `bin` so the pending-bundle
+      // replay (loadDemFromArrayBuffer) picks them up too.
+      const rGeo = zip.file("routes.geojson");
+      if (rGeo) { try { bin.routesFC = JSON.parse(await rGeo.async("string")); } catch {} }
+      const pGeo = zip.file("path.geojson");
+      if (pGeo) { try { bin.pathFC = JSON.parse(await pGeo.async("string")); } catch {} }
     } else if (/\.jsonld?$|\.json$/i.test(file.name)) {
       md = JSON.parse(await file.text());
     } else {
@@ -5265,20 +5308,30 @@ function applyMetadataToUI(md, bin = {}) {
   applyLayerControls();
   estimateRunTime();
 
-  // If we got the binary outputs back, render them straight away — no
+  // If we got the cached outputs back, render them straight away — no
   // recompute needed. Skip if the DEM dimensions don't match (or no DEM
-  // is loaded yet).
+  // is loaded yet). Routes/path come back from GeoJSON (converted to cell
+  // indices); the energy/passes rasters come back from the GeoTIFFs. Any
+  // subset is fine — a maximize bundle has a path but no top-N routes, a
+  // density bundle has neither.
   let restored = false;
-  if (state.dem && bin.energy && demDimsMatch === true) {
+  if (state.dem && demDimsMatch === true) {
     const N = state.dem.H * state.dem.W;
-    if (bin.energy.length === N && (!bin.passes || bin.passes.length === N)) {
+    const energyOk = bin.energy && bin.energy.length === N;
+    const passesOk = bin.passes && bin.passes.length === N;
+    const routes = routesFromFC(bin.routesFC || null, state.dem);
+    const path = routes ? null : pathFromFC(bin.pathFC || null, state.dem);
+    // Render whenever we recovered anything drawable; routes take precedence
+    // over a lone path (renderResult draws one or the other, mirroring a
+    // fresh compute where top-N and maximize are mutually exclusive).
+    if (energyOk || passesOk || routes || path) {
       const synth = {
-        energy:      bin.energy,
-        passes:      bin.passes || null,
-        path:        null,
+        energy:      energyOk ? bin.energy : null,
+        passes:      passesOk ? bin.passes : null,
+        path,
         pathEnergy:  md.stats?.pathEnergy ?? null,
         pathLengthM: md.stats?.pathLengthM ?? null,
-        routes:      null,
+        routes,
         elapsedMs:   md.elapsedMs ?? 0,
       };
       renderResult(synth);
@@ -5288,7 +5341,7 @@ function applyMetadataToUI(md, bin = {}) {
 
   updateRunButtonState();
   if (restored) {
-    status.textContent = "Bundle restored from cache. Click Compute to re-derive routes/path.";
+    status.textContent = "Bundle restored from cache — all saved layers re-rendered. No recompute needed.";
   } else if (state.dem && demDimsMatch === false) {
     status.innerHTML =
       `<span style="color:#ff9d3d">DEM size mismatch — bundle was for ` +

@@ -9,6 +9,23 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v15 — 2026-06-19
+
+### Improvements
+
+- Reloading an exported bundle now restores **all** saved layers, not just
+  the energy and passes rasters. Top-N routes and the maximize path were
+  already written to the zip (`routes.geojson` / `path.geojson`), but the
+  loader never read them back — it redrew the fields and told you to
+  recompute the lines. The GeoJSON is now parsed on reload and its
+  coordinates converted back to cell indices (the exact inverse of the
+  export mapping, gated on the same strict DEM-dimension match that guards
+  the raster replay), so the routes/path come back and recolor exactly like
+  a fresh compute, with no recompute needed. Any subset works — a maximize
+  bundle restores its path, a top-N bundle its routes, a density bundle just
+  its field. (Graph-mode `graph_edges.geojson` is still not restored — it
+  needs the full graph object, not just edge geometry.)
+
 ## v14 — 2026-06-19 (unreleased)
 
 ### Fixes
