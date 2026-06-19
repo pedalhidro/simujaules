@@ -276,10 +276,16 @@ function densityField(opts) {
     alpha, beta, eta, dx, dy,
     eMax = 0, maximize = false, maxEdgeCost = 0, eMaxTotalCap = 0,
     onProgress = null,
-    // Optional: invoked once per reference with that ref's settle count
-    // (the explored-cell count). Used by the calibration probe to learn the
-    // budget→explored relationship on this DEM. No effect when omitted.
+    // Optional: invoked once per reference with (settleCount, budgetReached)
+    // — the explored-cell count and the energy of the last-settled cell.
+    // Used by the calibration probe to learn this DEM's reach-vs-budget and
+    // rate laws. No effect when omitted.
     onExplored = null,
+    // Probe-only: stop each search after settling this many cells (0 = no
+    // cap). Bounds the calibration probe's wall time regardless of DEM size
+    // so it returns an estimate in under a few seconds. Zero-cost (one
+    // short-circuited compare per pop) when 0 — the normal compute path.
+    maxSettled = 0,
   } = opts;
   const N = H * W;
   const diag = Math.hypot(dx, dy);
@@ -365,6 +371,10 @@ function densityField(opts) {
     const L = bLen[0] - 1; rTop[0] = bPri[0][L]; rTop[1] = bVal[0][L]; bLen[0] = L; rlen--; return true;
   };
 
+  // Budget reached by the last cell the most recent search settled (its
+  // energy). Only meaningful under maxSettled (the probe); the calibration
+  // reads it to learn what budget a given explored-cell count corresponds to.
+  let lastStopG = 0;
   // One budget-limited Dijkstra into the given scratch arrays; returns the
   // settle count (order length). reverse flips dh (energy TO the seed).
   function search(seedR, seedC, reverse, Ea, settledA, parentsA, orderA) {
@@ -375,6 +385,7 @@ function densityField(opts) {
       const g = rTop[0], idx = rTop[1] | 0;
       if (settledA[idx]) continue;
       settledA[idx] = 1; orderA[orderLen++] = idx;
+      if (maxSettled !== 0 && orderLen >= maxSettled) { lastStopG = g; break; }
       const r = (idx / W) | 0, c = idx - r * W, hHere = height[idx];
       const inner = r > 0 && r < H - 1 && c > 0 && c < W - 1;
       for (let k = 0; k < 8; k++) {
@@ -403,7 +414,7 @@ function densityField(opts) {
 
     if (!round) {
       const len = search(refR, refC, dmode === "to", E, settled, parents, order);
-      if (onExplored) onExplored(len);
+      if (onExplored) onExplored(len, lastStopG);
       for (let j = 0; j < len; j++) passes[order[j]] = 1;
       for (let j = len - 1; j >= 0; j--) { const idx = order[j]; const p = parents[idx]; if (p >= 0) passes[p] += passes[idx]; }
       for (let j = 0; j < len; j++) {
@@ -1082,7 +1093,7 @@ self.onmessage = (ev) => {
   // one-time allocation (see app.js startCalibrationProbe).
   if (msg.kind === "probe") {
     try {
-      const { height, mask, H, W, dx, dy, alpha, beta, eta, refPoints, eMax } = msg;
+      const { height, mask, H, W, dx, dy, alpha, beta, eta, refPoints, maxSettled } = msg;
       const N = H * W;
       const tA = performance.now();
       // Mirror densityField's non-round scratch set so the measured alloc
@@ -1095,16 +1106,27 @@ self.onmessage = (ev) => {
       _e[0] = 0; _s[0] = 1; _p[0] = 0; _o[0] = 0; _pa[0] = 0;
       const allocMs = performance.now() - tA;
 
-      let exploredTotal = 0;
+      // ONE unbudgeted search per ref, stopped after maxSettled cells. This
+      // bounds the probe's wall time regardless of DEM size (the 3 s ceiling)
+      // while anchoring the estimate at an UNSATURATED point: we learn this
+      // terrain's (budgetReached → explored) and (explored → perRef) at the
+      // cell count, then the estimate scales from there. budgetReached
+      // (energy of the last settled cell) varies per ref with local relief;
+      // we average it. perRef = (totalMs − allocMs)/nRefs isolates search+walk.
+      let exploredTotal = 0, budgetReachedSum = 0;
       const t0 = performance.now();
       densityField({
         height, mask, H, W, refPoints, dmode: "from",
-        alpha, beta, eta, dx, dy, eMax,
+        alpha, beta, eta, dx, dy, eMax: 0, maxSettled,
         maximize: false, maxEdgeCost: 0, eMaxTotalCap: 0,
-        onExplored: (len) => { exploredTotal += len; },
+        onExplored: (len, budgetReached) => { exploredTotal += len; budgetReachedSum += budgetReached; },
       });
       const totalMs = performance.now() - t0;
-      postMessage({ kind: "probe-done", allocMs, totalMs, exploredTotal, nRefs: refPoints.length, N, eMax });
+      postMessage({
+        kind: "probe-done", allocMs, totalMs, exploredTotal,
+        budgetReached: budgetReachedSum / refPoints.length,
+        nRefs: refPoints.length, N,
+      });
     } catch (err) {
       postMessage({ kind: "error", message: err.message });
     }

@@ -29,7 +29,7 @@
 //                    [u8 network_mask × N  — only when has_network]
 //     response body: [u32 json_len][json {"elapsed_ms":…,"refs":…}]
 //                    [f64 passes × N][f32 energy × N]
-//   GET /health → {"ok":true,"version":…,"cores":…}
+//   GET /health → {"ok":true,"version":…,"cores":…,"mem_budget_bytes":…}
 //
 // Usage: cargo run --release [-- 127.0.0.1:8077]
 
@@ -668,13 +668,20 @@ fn main() {
                 let _ = req.respond(res);
             }
             (Method::Get, "/health") => {
+                // `mem_budget_bytes` lets the app's compute-time estimate
+                // replicate this server's slice cap (n_slices ≈
+                // min(refs, cores, mem_budget / per_slice)) instead of
+                // assuming all cores parallelise — the dominant error on huge
+                // DEMs, where each slice's ~5 GB scratch limits concurrency to
+                // 1-2 regardless of core count. See estimateRunTime in app.js.
                 respond_json(
                     req,
                     200,
                     &format!(
-                        r#"{{"ok":true,"version":"{}","cores":{}}}"#,
+                        r#"{{"ok":true,"version":"{}","cores":{},"mem_budget_bytes":{}}}"#,
                         env!("CARGO_PKG_VERSION"),
-                        rayon::current_num_threads()
+                        rayon::current_num_threads(),
+                        density_mem_budget_bytes()
                     ),
                 );
             }

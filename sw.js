@@ -99,7 +99,17 @@
 //              compute modes; JS-only (Rust backend untouched). Bumped so the
 //              new worker (graphBuild/graphRun) + graph-engine.js actually
 //              install — a v12 cache would serve the pre-graph worker.
-const VERSION  = "v13";
+//   v13 → v14: Compute-time estimate accuracy fix. The v12 estimate could be
+//              ~3× low (backend density on a huge DEM): it assumed all cores
+//              parallelise, ignoring the server's memory-bounded slice cap
+//              (1-2 slices fit, not cores-many), and used a too-low native
+//              speedup. The calibration probe is now cell-capped (≤~1.5 s on
+//              any DEM, anchored unsaturated — fixes a separate up-to-3.8×
+//              error on small DEMs), the backend estimate replicates the slice
+//              cap (/health now reports mem_budget_bytes), and an online
+//              correction learns actual/predicted per engine. Bumped so the
+//              new probe protocol (maxSettled) + estimate worker install.
+const VERSION  = "v14";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

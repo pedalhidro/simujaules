@@ -9,6 +9,35 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v14 — 2026-06-19 (unreleased)
+
+### Fixes
+
+- Compute-time estimate is now accurate to ~±20% with no systematic bias
+  (was up to ~3× low). Two independent errors were found by benchmarking
+  estimate-vs-actual across DEMs (sampa_geral/centro/aguapreta), budgets,
+  modes, and engines:
+  - **Backend density on a large DEM under-estimated ~3×.** The estimate
+    assumed parallelism scaled with cores (`min(refs, cores, 8)`), but the
+    backend caps concurrent rayon slices to a *memory* budget — each slice
+    holds full-grid scratch (~5 GB on the 135 M-cell DEM), so only 1-2 fit
+    regardless of core count. It also used a native-speedup constant ~2× too
+    low. The backend estimate now replicates the slice cap
+    (`min(refs, cores, mem_budget / per_slice)`) — `GET /health` reports
+    `mem_budget_bytes` — plus a bandwidth-contention term and a corrected
+    nominal speedup.
+  - **Small DEMs under-estimated up to ~3.8× at low budgets.** The probe ran
+    at a fixed energy budget that *saturated* small grids (explored = the
+    whole DEM), so the budget→explored extrapolation was anchored at a
+    meaningless point. The calibration probe now caps by settled-cell count
+    instead — bounding its wall time to ≤~1.5 s on any DEM (the responsiveness
+    target) while always anchoring at an unsaturated point, with the explored
+    and per-ref laws scaled from there.
+  - An **online correction** now learns actual/predicted per engine from each
+    completed compute (EMA), so the estimate converges to this machine and
+    server's reality within a run or two — covering the residual the
+    inherently server-dependent backend factor can't be predicted a priori.
+
 ## v13 — 2026-06-18 (unreleased)
 
 ### Features

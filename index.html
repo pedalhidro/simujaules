@@ -1137,6 +1137,15 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v14</strong> — 2026-06-19<br/>
+              Compute-time estimate accuracy fix (was up to ~3× low, now ~±20% with no bias).
+              Backend density on a large DEM was the main culprit: the estimate assumed all cores
+              parallelise, ignoring that the server caps concurrent slices to a memory budget
+              (1-2 fit on a 135 M-cell DEM, not cores-many) — it now replicates that cap
+              (<code>/health</code> reports the memory budget). The calibration probe is now
+              cell-capped (≤~1.5 s on any DEM, anchored on an unsaturated point — fixes a separate
+              up-to-3.8× error on small DEMs), and an online correction learns actual/predicted per
+              engine so the estimate converges to your machine within a run or two.</p>
               <p><strong>v13</strong> — 2026-06-18<br/>
               "Follow the vectors" network-graph mode (new graph-engine.js): with a vector network loaded,
               an optional toggle routes on the real polyline graph (planarised — junctions at crossings or

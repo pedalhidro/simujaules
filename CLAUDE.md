@@ -41,11 +41,31 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 - `densityPoolSize()` is shared by the runner AND `estimateRunTime()` — they
   must not drift.
 - `estimateRunTime()` is calibrated per-DEM: `startCalibrationProbe()` runs a
-  `kind: "probe"` worker at DEM load (2 budgeted Dijkstras) to learn this
-  terrain's alloc cost + per-ref rate + budget→explored relationship. The
-  estimate then scales with energy budget (`explored ∝ (eMax/alpha)²`), the
-  pool size, and the backend. Probe is generation-guarded (`state.calibrationGen`,
-  bumped per DEM load) and skipped while a compute runs.
+  `kind: "probe"` worker at DEM load. The probe does PROBE_REFS spread-ref
+  searches CAPPED by settled-cell count (`maxSettled`), NOT by energy budget —
+  this bounds the probe to ≤~1.5 s on any DEM (responsiveness target) AND
+  anchors at an UNSATURATED point (`Estar` cells at budget `bStar`,
+  `perRefProbe` ms). Anchoring unsaturated is load-bearing: the old fixed-budget
+  probe saturated small DEMs (E0=N) and under-estimated up to 3.8×. The estimate
+  scales from the anchor: `explored = min(N, Estar·(eMax·αprobe/(bStar·α))^EXPLORE_EXP)`,
+  `perRef = perRefProbe·(explored/Estar)^RATE_EXP`, then ÷ pool size (browser)
+  or the backend slice model. `predictComputeMs()` is the single predictor
+  shared by the live estimate AND the online correction (must not drift).
+  Probe is generation-guarded (`state.calibrationGen`, bumped per DEM load) and
+  skipped while a compute runs.
+- The backend estimate must replicate the backend's MEMORY-bounded slice cap
+  (`min(refs, cores, mem_budget/per_slice)`, per_slice = 37·N or 55·N round),
+  NOT `min(refs, cores)` — on a huge DEM only 1-2 slices fit, so assuming
+  cores-many parallelism under-estimates ~3-8×. `/health` reports
+  `mem_budget_bytes` for this; `BACKEND_BYTES_PER_CELL{,_ROUND}` mirror
+  `backend/src/main.rs`'s `per_slice` (keep in sync). `NATIVE_SPEEDUP` is a
+  nominal constant (native vs JS converge toward bandwidth-bound on huge
+  frontiers); the per-engine online correction (`corrBrowser`/`corrBackend`,
+  EMA of actual/predicted from completed computes, snapshotted in
+  `state.lastRun` at run start and applied in `computeDone`) absorbs the
+  residual scale/server-dependence — that's what guarantees ±20% in steady
+  state. `maxSettled` in `densityField` is probe-only (0 = normal path,
+  zero-cost) — don't let it leak into a real run's cost.
 - Every run captures `state.computeGen`; `cancelActiveCompute()` bumps it
   and terminates `state.workers`. It must be called before anything that
   changes the grid a result renders against (DEM load, network load/clear).
@@ -90,6 +110,11 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   help modal (`index.html`), and the `sw.js` version-history comment.
   Update all three whenever you ship user-visible changes — don't let
   them drift.
+- Every version bump (a new `VERSION` + the changelog trio) ships as its own
+  git commit — always commit when pushing a new version. Author the release
+  commit as Claude (the assistant) and credit the user as a contributor, e.g.
+  `git commit --author="Claude <noreply@anthropic.com>"` with a trailer
+  `Co-Authored-By: Danilo Lessa Bernardineli <danilo.lessa@gmail.com>`.
 - CDN `<script>` tags in `index.html` carry SRI `integrity` +
   `crossorigin="anonymous"`. The crossorigin attribute is ALSO what makes
   responses non-opaque so `sw.js` can runtime-cache them for offline use —
