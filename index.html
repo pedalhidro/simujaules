@@ -1137,6 +1137,14 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v16</strong> — 2026-06-19<br/>
+              Time estimate fixed for network/graph runs. Graph mode ("follow the vectors") was
+              estimated with the raster model (~1000× too high — a graph search is ∝ edges, not
+              135 M cells); it now uses a graph-size model. The IDW interpolation fill is now a
+              separate phase (often the larger one) that scales with the max ray distance, and it's
+              corrected independently of the compute. Toggling interpolate / compute-on-graph /
+              constrain-to-network now updates the estimate. Native backend log line now echoes
+              Emax / mode / type.</p>
               <p><strong>v15</strong> — 2026-06-19<br/>
               Reloading a bundle now restores all saved layers, not just the energy/passes fields.
               Top-N routes and the maximize path were already in the exported zip

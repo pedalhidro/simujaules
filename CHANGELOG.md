@@ -9,6 +9,32 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v16 — 2026-06-19
+
+### Fixes
+
+- Compute-time estimate is now correct for **network-graph and interpolation**
+  runs (it was badly off for both):
+  - **Graph mode** ("follow the vectors") was estimated with the *raster*
+    model — cost ∝ 135 M grid cells — when a graph Dijkstra is ∝ the network's
+    **edges**, orders of magnitude fewer. The estimate over-shot by ~1000×. It
+    now uses a graph-size model (edges × refs), learned per-network via a new
+    online correction.
+  - **The IDW interpolation fill is now a separate phase**, not a fixed
+    fudge bolted onto the compute. It frequently *dominates* a
+    network-constrained run (it fills the whole grid while the compute touches
+    only network cells/edges), and it scales with the **max ray distance**,
+    which the old term ignored entirely. Graph-mode interp (single-worker) and
+    raster-constrained interp (banded across the pool) are sized accordingly.
+  - Compute and interpolation are corrected **independently** now — previously
+    a slow interpolation inflated the compute correction (and a recompute would
+    then over-estimate plain runs).
+  - Toggling **Interpolate / Compute-on-graph / Constrain-to-network** (and the
+    max-distance and smoothing inputs) now updates the estimate — those
+    controls weren't wired to it before.
+- Native backend log line is now self-describing: it echoes the request shape
+  — `Emax=…, mode=…, type=vector|raster` — alongside the grid/slice info.
+
 ## v15 — 2026-06-19
 
 ### Improvements

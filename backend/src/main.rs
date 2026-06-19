@@ -463,9 +463,13 @@ fn compute_density(g: &Grid, p: &Params) -> (Vec<f64>, Vec<f32>) {
         .min(rayon::current_num_threads())
         .min(mem_cap)
         .max(1);
+    // Echo the request shape (budget / mode / network-constrained) so the log
+    // makes each compute self-describing. Emax=∞ means no budget (full grid).
+    let emax_str = if p.e_max > 0.0 { format!("{:.0}", p.e_max) } else { "∞".to_string() };
+    let net_type = if p.has_network { "vector" } else { "raster" };
     eprintln!(
-        "[density] {} refs, {}×{} grid, per-slice ≈ {:.1} GB, budget ≈ {:.1} GB → {} slice(s)",
-        refs.len(), g.w, g.h,
+        "[density] {} refs, Emax={}, mode={}, type={}, {}×{} grid, per-slice ≈ {:.1} GB, budget ≈ {:.1} GB → {} slice(s)",
+        refs.len(), emax_str, p.density_mode, net_type, g.w, g.h,
         per_slice as f64 / 1e9, density_mem_budget_bytes() as f64 / 1e9, n_slices,
     );
 

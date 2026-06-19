@@ -346,7 +346,46 @@ All within the 3 s hard limit; the big DEM is near the ~1 s ideal.
   which round trips are *retained* (`energy-worker.js`), not on how many cells
   are explored — so the two read the same time, as they should.
 
-## 8. Reproducibility
+## 8. Network-graph and interpolation phases (v16)
+
+The v14 model above covers raster density. Two later-found gaps, both on the
+network/vector path:
+
+### 8.1 Graph mode was estimated with the raster model
+
+"Follow the vectors" routes on the polyline graph (`graph-engine.js`), where a
+Dijkstra is ∝ the graph's **edges**, not the DEM's cells. The estimate applied
+the raster per-ref model (cost ∝ 135 M cells) → **~1000× over** (e.g. ~4.7 h
+predicted for a run that takes ~5 s). Fix: a graph branch,
+`perRef ≈ edges × GRAPH_MS_PER_EDGE × refs`, with the edge count from the built
+graph (or the polyline segment count before it's built), online-corrected by
+`corrGraph`.
+
+### 8.2 Interpolation is a separate, often-dominant phase
+
+The IDW fill (off-network cells, 8-direction ray search to `maxDist`) fills the
+*whole* grid while the compute touches only network cells/edges — so on a
+network-constrained run it's frequently the *larger* cost (~6–7× the compute on
+a big DEM). The old term was a fixed `0.3 × full-grid-Dijkstra` fudge that
+ignored `maxDist` entirely. Fix:
+`interpMs ≈ INTERP_MS_PER_CELL · N · maxDist / poolN` (+ smoothing), with
+`poolN = 1` for graph-mode interp (single worker) and the banded interp-pool
+size for raster-constrained interp; online-corrected by `corrInterp`.
+
+### 8.3 Phases are corrected independently
+
+The estimate is now `compute_phase + interp_phase`, each with its own EMA
+correction. This also fixes a regression from §5.4's single combined
+correction: it compared actual (compute + interp) against a compute-only
+prediction, inflating the compute correction so subsequent *plain* runs then
+over-estimated. The density completion path times the two phases separately and
+feeds each to its own factor; the compute factor keys by engine
+(`corrBrowser` / `corrBackend` / `corrGraph`). Finally, the
+Interpolate / Compute-on-graph / Constrain-to-network toggles (and
+max-distance / smoothing) are now wired to re-run the estimate — they weren't
+before, so changing them appeared to do nothing.
+
+## 9. Reproducibility
 
 **Regression / parity tests** — checked in and runnable now; must pass before
 shipping engine or estimate changes:
@@ -377,6 +416,9 @@ census points map to grid cells via each DEM's `ModelTiepoint` origin and
 | `BACKEND_BYTES_PER_CELL` | 37 / 55 (round) | app.js ↔ main.rs | per-slice scratch+acc bytes/cell |
 | `PROBE_MAX_SETTLED` | 1,000,000 | app.js | probe cell cap (also ≤ 0.4·N) |
 | `PROBE_REFS` | 3 | app.js | spread probe refs |
+| `GRAPH_MS_PER_EDGE` | 5e-5 | app.js | graph-mode per-edge cost (online-corrected) |
+| `INTERP_MS_PER_CELL` | 5e-6 | app.js | IDW fill per cell per maxDist unit (online-corrected) |
+| `INTERP_SMOOTH_MS_PER_CELL` | 5e-6 | app.js | smoothing per cell per pass |
 
 See also `performance-formula.md` for the general compute-time model relating
 time to reference count, budget, threads, and memory.

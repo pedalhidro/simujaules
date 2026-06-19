@@ -118,7 +118,16 @@
 //              export mapping, gated on a strict DEM-dimension match), so the
 //              routes/path render and recolor identically to a fresh compute,
 //              with no recompute. Bumped so the updated app.js installs.
-const VERSION  = "v15";
+//   v15 → v16: Time estimate now correct for network/graph runs. Graph mode
+//              ("follow the vectors") was estimated with the raster model
+//              (~1000× too high — a graph Dijkstra is ∝ edges, not 135 M
+//              cells); it now uses a graph-size model. The IDW interpolation
+//              fill is a separate, often-dominant phase (scales with N and the
+//              max ray distance — previously ignored). Compute and interp are
+//              corrected independently (a slow interp no longer inflates the
+//              compute estimate), and toggling interp / graph / constrain now
+//              moves the number. Bumped so the updated app.js installs.
+const VERSION  = "v16";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

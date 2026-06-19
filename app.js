@@ -590,7 +590,12 @@ document.addEventListener("DOMContentLoaded", () => {
   // `alpha` scales the explored region (flat reach ∝ eMax/alpha); the
   // backend toggle/URL switches the engine model.
   for (const id of ["mode", "want-passes", "want-topn", "n-routes", "want-density",
-                    "n-refs", "e-max", "alpha", "use-backend", "max-workers"]) {
+                    "n-refs", "e-max", "alpha", "use-backend", "max-workers",
+                    // Network/graph + interpolation controls — they move the
+                    // estimate now that interp is a separate phase and graph
+                    // mode has its own (much cheaper) compute model.
+                    "net-interp", "net-interp-max-dist", "net-interp-smoothing",
+                    "vec-graph-mode", "vec-constrain"]) {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", estimateRunTime);
   }
@@ -2723,9 +2728,14 @@ runBtn.addEventListener("click", async () => {
     renderResult(m);
     status.textContent = `Done in ${m.elapsedMs.toFixed(0)} ms.`;
     // Learn from this run: nudge the estimate toward reality (single runs
-    // only — compare runs carry energyAlt and time ~2 scenarios). Then refresh
+    // only — compare runs carry energyAlt and time ~2 scenarios). Compute and
+    // interp phases are corrected separately (m.computeMs/m.interpMs when the
+    // density path split them; else the whole run is compute). Then refresh
     // the pre-flight number so the correction is visible immediately.
-    if (!m.energyAlt) { updateEstimateCorrection(m.elapsedMs); estimateRunTime(); }
+    if (!m.energyAlt) {
+      updateEstimateCorrection(m.computeMs ?? m.elapsedMs, m.interpMs ?? 0);
+      estimateRunTime();
+    }
     // The calibration probe is skipped while a compute runs — if this DEM
     // still has no calibration, run it now that the cores are free.
     if (!state.calibration) startCalibrationProbe();
@@ -2879,15 +2889,21 @@ runBtn.addEventListener("click", async () => {
   });
 
   const finishDensityOutputs = (energy, density, alt) => {
-    const finalize = (energyOut) => computeDone({
+    // Split the two phases so the online correction learns them independently
+    // (interp often dominates a network-constrained run).
+    const computeMs = performance.now() - state.computeStartedAt;
+    const finalize = (energyOut, interpMs) => computeDone({
       energy: energyOut, passes: density,
       path: null, pathEnergy: null, pathLengthM: null, routes: null,
       elapsedMs: performance.now() - state.computeStartedAt,
+      computeMs, interpMs: interpMs || 0,
       energyAlt: alt?.energyAlt || null,
       passesAlt: alt?.passesAlt || null,
     });
-    if (wantNetworkInterp && constrainNet) runInterp(energy).then(finalize);
-    else finalize(energy);
+    if (wantNetworkInterp && constrainNet) {
+      const t = performance.now();
+      runInterp(energy).then((e) => finalize(e, performance.now() - t));
+    } else finalize(energy, 0);
   };
 
   // ---- Density worker pool -------------------------------------------------
@@ -3204,6 +3220,11 @@ runBtn.addEventListener("click", async () => {
       state.lastGraphResult = { graph, result };
       state.graphEnergyRaster = null;
       renderGraphOverlay();   // passes corridors show immediately
+      // Learn the graph engine's real per-edge cost (corrGraph). The graph's
+      // actual node/edge counts also sharpen the next estimate.
+      if (state.networkGraph) { state.networkGraph.nNodes = graph.nNodes; state.networkGraph.nEdges = graph.nEdges; }
+      updateEstimateCorrection(result.elapsedMs, 0);
+      estimateRunTime();
       const routeNote = result.routes ? ` · ${result.routes.length} route(s)` : "";
       const doneMsg = `Done in ${result.elapsedMs.toFixed(0)} ms (graph: ${graph.nNodes} nodes, ${graph.nEdges} edges)${routeNote}.`;
       // Energy field: rasterise the graph energy onto the grid, then (when the
@@ -3214,12 +3235,16 @@ runBtn.addEventListener("click", async () => {
         const seedMask = new Uint8Array(eGrid.length);
         for (let i = 0; i < eGrid.length; i++) seedMask[i] = Number.isFinite(eGrid[i]) ? 1 : 0;
         const mask = new Uint8Array(state.dem.mask);
+        const interpStart = performance.now();
         const w = spawnWorker((m) => {
           if (m.kind === "interp-done") {
             if (gen !== state.computeGen) return;
             state.graphEnergyRaster = m.energy;
             renderGraphOverlay();
             status.textContent = doneMsg;
+            // Graph interp is single-worker — learn its rate (corrInterp).
+            updateEstimateCorrection(0, performance.now() - interpStart);
+            estimateRunTime();
           } else if (m.kind === "error") { console.warn("[graph interp]", m.message); status.textContent = doneMsg; }
         });
         w.postMessage(
@@ -4262,9 +4287,10 @@ function startCalibrationProbe() {
       Estar, bStar, perRefProbe,
       alphaAtProbe: alpha,
       // Online correction: actual/predicted from completed computes, per
-      // engine (the backend's native-speedup × slice-contention factor is
-      // scale- and server-dependent, so we learn it rather than guess).
-      corrBrowser: 1, corrBackend: 1,
+      // PHASE/engine (the backend's native-speedup × slice-contention factor,
+      // the graph engine's per-edge cost, and the interp fill rate are all
+      // scale-/network-dependent, so we learn them rather than guess).
+      corrBrowser: 1, corrBackend: 1, corrGraph: 1, corrInterp: 1,
     };
     estimateRunTime();
   };
@@ -4314,6 +4340,53 @@ const BACKEND_PAR_CAP = 8;    // fallback core count when /health is unreachable
 // backend/src/main.rs: 17 scratch + 20 acc; round doubles scratch + 1 byte).
 const BACKEND_BYTES_PER_CELL = 37;
 const BACKEND_BYTES_PER_CELL_ROUND = 55;
+// Network-graph ("follow the vectors") compute: a graph Dijkstra is ∝ EDGES,
+// not raster cells — orders of magnitude cheaper than the grid, so the raster
+// model massively over-estimates it. Nominal; corrGraph tunes per network.
+const GRAPH_MS_PER_EDGE = 5e-5;
+// Network IDW interpolation (separate phase; often DOMINATES when the compute
+// is network-constrained or on the graph, since it fills the whole grid while
+// the compute touches only network cells/edges). Nominal per-cell rates;
+// corrInterp tunes. Fill scales with the ray search distance.
+const INTERP_MS_PER_CELL = 5e-6;        // per cell per maxDist unit (banded)
+const INTERP_SMOOTH_MS_PER_CELL = 5e-6; // per cell per 3×3 smoothing pass (banded)
+
+// Mirror runInterp's worker-pool sizing so the interp estimate matches the
+// real banding (memory-capped on huge DEMs → often 1 worker there).
+function interpPoolSize(N) {
+  const cores = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
+  const H = state.dem?.H || 1;
+  return Math.max(1, Math.min(cores, Math.floor(1.5e9 / (6 * N)), Math.ceil(H / 64)));
+}
+
+// Graph edge count for the graph-mode estimate — the built graph if cached,
+// else the network polyline segment count (≈ edges) before it's built.
+function networkEdgeCount() {
+  if (state.networkGraph && state.networkGraph.nEdges) return state.networkGraph.nEdges;
+  if (state.networkLines && state.networkLines.length) {
+    let v = 0;
+    for (const ln of state.networkLines) v += Math.max(0, ln.length - 1);
+    return Math.max(1, v);
+  }
+  return 0;
+}
+
+// Graph-mode compute: per-ref graph Dijkstra ∝ edges (round = both legs).
+function predictGraphComputeMs(opts) {
+  const dijk = opts.mode === "round" ? 2 : 1;
+  const refs = opts.wantDensity ? (opts.refs || 1) : 1;
+  return refs * Math.max(1, opts.netEdges) * GRAPH_MS_PER_EDGE * dijk;
+}
+
+// Network interpolation phase (0 when not interpolating). Graph-mode interp
+// runs single-worker; raster-constrained interp is banded across the pool.
+function predictInterpMs(opts) {
+  if (!opts.interp || !(opts.N > 0)) return 0;
+  const poolN = opts.graph ? 1 : interpPoolSize(opts.N);
+  const fill = INTERP_MS_PER_CELL * opts.N * Math.max(1, opts.interpMaxDist || 50);
+  const smooth = INTERP_SMOOTH_MS_PER_CELL * opts.N * (opts.smoothIters || 0);
+  return (fill + smooth) / poolN;
+}
 
 function exploredCells(cal, N, eMax, alpha) {
   if (!(eMax > 0)) return N; // no budget → full grid
@@ -4326,7 +4399,16 @@ function exploredCells(cal, N, eMax, alpha) {
 // term). Shared by the live estimate and the online-correction update so they
 // can't drift. `applyCorr` multiplies in the learned per-engine factor.
 function predictComputeMs(cal, opts, applyCorr) {
-  const { N, wantDensity, wantTopN, refs, eMax, mode, alpha, backend } = opts;
+  const { N, wantDensity, wantTopN, refs, eMax, mode, alpha, backend, graph } = opts;
+
+  // "Follow the vectors": cost is ∝ graph edges, not raster cells (~1000× less
+  // on a typical network/DEM). Using the raster model here is the severe
+  // over-estimate users hit in graph mode.
+  if (graph) {
+    const ms = predictGraphComputeMs(opts);
+    return applyCorr ? ms * (cal.corrGraph || 1) : ms;
+  }
+
   const explored = exploredCells(cal, N, eMax, alpha);
   const perRef = cal.perRefProbe * Math.pow(explored / cal.Estar, RATE_EXP);
   const dijk = mode === "round" ? 2 : 1;
@@ -4373,6 +4455,11 @@ function currentRunOpts(cal, N) {
   const mode = document.getElementById("mode")?.value || "from";
   const alpha = parseFloat(document.getElementById("alpha")?.value) || cal.alphaAtProbe;
   const eMaxRaw = parseFloat(document.getElementById("e-max")?.value);
+  const graph = graphModeActive();
+  // Interp runs when its toggle is on AND there's a network to fill around —
+  // either a raster constraint or graph mode (graph energy is IDW-filled too).
+  const interp = !!document.getElementById("net-interp")?.checked
+    && (networkConstraintActive() || graph);
   return {
     N,
     wantDensity: !!document.getElementById("want-density")?.checked,
@@ -4381,6 +4468,11 @@ function currentRunOpts(cal, N) {
     eMax: Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0,
     mode, alpha,
     backend: !!document.getElementById("use-backend")?.checked,
+    graph,
+    netEdges: graph ? networkEdgeCount() : 0,
+    interp,
+    interpMaxDist: Math.max(1, parseInt(document.getElementById("net-interp-max-dist")?.value, 10) || 50),
+    smoothIters: Math.max(0, parseInt(document.getElementById("net-interp-smoothing")?.value, 10) || 0),
   };
 }
 
@@ -4394,33 +4486,36 @@ function estimateRunTime() {
 
   const N = state.dem.H * state.dem.W;
   const opts = currentRunOpts(cal, N);
+  // Two phases, separately corrected: compute (raster/backend/graph) + the
+  // network interpolation fill (frequently the larger of the two).
   let ms = predictComputeMs(cal, opts, true);
-
-  // Network IDW fill (8-direction ray search) + optional 3×3 smoothing passes
-  // — proportional to N, not the budget. Rough rule-of-thumb via the
-  // calibrated full-grid per-ref time.
-  const wantNetInterp = !!document.getElementById("net-interp")?.checked;
-  if (wantNetInterp && networkConstraintActive()) {
-    const smoothingIters = parseInt(document.getElementById("net-interp-smoothing")?.value, 10) || 0;
-    const fullGridMs = cal.perRefProbe * Math.pow(N / cal.Estar, RATE_EXP);
-    ms += fullGridMs * (0.3 + 0.05 * smoothingIters);
-  }
+  ms += predictInterpMs(opts) * (cal.corrInterp || 1);
   out.textContent = `≈ ${formatDuration(ms)}`;
 }
 
-// Online correction: after a density compute finishes, nudge the per-engine
-// correction toward actual/predicted so subsequent estimates converge to this
-// machine's reality (EMA, clamped). Absorbs the backend's scale-dependent
-// native-speedup × slice-contention factor that a fixed constant can't.
-function updateEstimateCorrection(actualMs) {
-  const cal = state.calibration;
-  const lr = state.lastRun;
-  if (!cal || !lr || !lr.wantDensity || !(actualMs > 0)) return;
-  const predictedRaw = predictComputeMs(cal, lr, false);
-  if (!(predictedRaw > 0)) return;
-  const ratio = Math.min(5, Math.max(0.2, actualMs / predictedRaw));
-  const key = lr.backend ? "corrBackend" : "corrBrowser";
-  cal[key] = Math.min(5, Math.max(0.2, 0.5 * (cal[key] || 1) + 0.5 * ratio));
+// Online correction: after a run finishes, nudge the per-PHASE correction
+// toward actual/predicted so subsequent estimates converge to this machine's
+// reality (EMA, clamped). The compute phase keys by engine (browser/backend/
+// graph); the interp phase has its own factor — keeping them separate stops
+// a slow interp from inflating the compute correction (and vice-versa).
+function updateEstimateCorrection(computeMs, interpMs) {
+  const cal = state.calibration, lr = state.lastRun;
+  if (!cal || !lr) return;
+  const nudge = (key, actual, predicted) => {
+    if (!(actual > 0) || !(predicted > 0)) return;
+    const ratio = Math.min(5, Math.max(0.2, actual / predicted));
+    cal[key] = Math.min(5, Math.max(0.2, 0.5 * (cal[key] || 1) + 0.5 * ratio));
+  };
+  // Correct the compute phase only for the perf-critical paths (density and
+  // graph), not the fast single-point modes — they share corrBrowser but have
+  // a different cost shape, so learning from them would muddy the density one.
+  if (computeMs > 0 && (lr.wantDensity || lr.graph)) {
+    const key = lr.graph ? "corrGraph" : (lr.backend ? "corrBackend" : "corrBrowser");
+    nudge(key, computeMs, predictComputeMs(cal, lr, false));
+  }
+  if (interpMs > 0 && lr.interp) {
+    nudge("corrInterp", interpMs, predictInterpMs(lr));
+  }
 }
 
 function formatDuration(ms) {
