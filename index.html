@@ -700,6 +700,37 @@
         <div class="meta" id="vec-meta" data-i18n="net.no_network">No network loaded.</div>
       </div>
 
+      <div class="group" id="impassable-group">
+        <h2 data-i18n="group.impassable">1c. Optional impassable mask (water, GeoTIFF)</h2>
+        <input type="file" id="impassable-file" accept=".tif,.tiff" />
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
+          <input type="checkbox" id="impassable-invert" />
+          <span data-i18n="imp.invert">Invert (raster marks passable cells)</span>
+        </label>
+        <button type="button" class="secondary" id="impassable-clear" data-i18n="imp.clear" style="margin-top: 4px;">Clear mask</button>
+        <label id="imp-corridor-row" style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text); opacity: 0.55;">
+          <input type="checkbox" id="imp-corridor" disabled />
+          <span data-i18n="imp.corridor">Network carves passable corridors across the mask</span>
+        </label>
+        <div class="row" id="imp-offset-row" style="margin-top: 3px; display: none;">
+          <div>
+            <label data-i18n="imp.offset">bridge centre offset (m, −5…+15)</label>
+            <input type="number" id="imp-offset" value="0" min="-5" max="15" step="0.5" />
+          </div>
+        </div>
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
+          <input type="checkbox" id="imp-show" />
+          <span data-i18n="imp.show">Show mask + corridors on map</span>
+        </label>
+        <div class="row" id="imp-opacity-row" style="margin-top: 3px; display: none;">
+          <div>
+            <label data-i18n="imp.opacity">overlay opacity</label>
+            <input type="range" id="imp-opacity" min="0" max="1" step="0.05" value="0.5" data-i18n-aria="aria.opacity_impassable" />
+          </div>
+        </div>
+        <div class="meta" id="imp-meta" data-i18n="imp.none">No impassable mask loaded.</div>
+      </div>
+
       <div class="group" id="pick-points-group">
         <h2 data-i18n="group.pick_points">2. Pick points</h2>
         <!-- src/dst picking. Faded out in density mode (references replace the
@@ -1091,6 +1122,9 @@
           <h4 data-i18n="help.h.load_dem">1 · Carregar um DEM</h4>
           <p data-i18n-html="help.p.load_dem"></p>
 
+          <h4 data-i18n="help.h.impassable">1c · Máscara de barreira</h4>
+          <p data-i18n-html="help.p.impassable"></p>
+
           <h4 data-i18n="help.h.points">2 · Marcar pontos</h4>
           <p data-i18n-html="help.p.points"></p>
           <p data-i18n-html="help.p.density_pts"></p>
@@ -1164,6 +1198,17 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v18</strong> — 2026-06-19<br/>
+              Optional impassable mask (group 1c). Upload a binary GeoTIFF (1 = impassable, e.g.
+              water bodies); it's resampled onto the DEM grid by area-coverage majority (≥50% of a
+              cell's footprint impassable ⇒ blocked; outside the mask's extent = passable), so it can
+              have a different extent / resolution / CRS than the DEM. Masked cells block routing.
+              With a vector network loaded (1b), an optional toggle carves narrow passable "bridge"
+              corridors across the mask, each levelled to a smooth profile (land elevation at the
+              shores, ramping to a ±offset at the bridge centre, clamped −5…+15 m). A "show on map"
+              toggle paints blocked water (red) and corridors (green), and bundles gain
+              impassable.tif. Engines unchanged — a run with no mask reproduces prior results
+              exactly.</p>
               <p><strong>v17</strong> — 2026-06-19<br/>
               UI / accessibility pass. The "Load DEM" and "vector network" groups now light up once
               their data is loaded. Parameter &amp; visualization choices persist across reloads

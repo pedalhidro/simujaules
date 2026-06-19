@@ -9,6 +9,33 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v18 — 2026-06-19
+
+### New features
+
+- **Impassable mask (group 1c).** Upload a binary GeoTIFF (1 = impassable,
+  e.g. water bodies). It's resampled onto the DEM grid by area-coverage
+  majority (a DEM cell is impassable iff ≥50% of its footprint is impassable
+  in the source; outside the mask's extent cells are passable), so the mask
+  can have a different extent / resolution / CRS than the DEM. Masked cells
+  block all routing.
+- **Network-carved bridge corridors.** With a vector network loaded (1b), an
+  optional toggle lets the network carve narrow passable corridors across the
+  mask. Each corridor is levelled to a smooth bridge profile — land elevation
+  at each shore, a linear ramp up to a `±` offset at the bridge centre
+  (clamped −5…+15 m), then back down — so routing crosses cleanly even where
+  the DEM has no-data over water.
+- **Verification overlay + bundle round-trip.** A "show on map" toggle paints
+  the blocked water (red) and reopened corridors (green). Bundles now include
+  `impassable.tif` and restore the mask, corridors and settings on reload.
+
+### Internal
+
+- The impassable mask, corridors and bridge offset are composed entirely
+  app-side (`buildComputeGrid()`), so `energy-worker.js` and the Rust backend
+  are unchanged — engine bit-parity is preserved. A run with no mask (or an
+  all-zero mask) reproduces prior results exactly.
+
 ## v17 — 2026-06-19
 
 ### Improvements

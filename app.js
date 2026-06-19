@@ -73,6 +73,22 @@ const STRINGS = {
   "net.smoothing":       { pt: "suavizações", en: "smoothing iters" },
   "net.no_network":      { pt: "Nenhuma rede carregada.", en: "No network loaded." },
 
+  // ---- Group: Impassable mask ------------------------------------------
+  "group.impassable":    { pt: "1c. Máscara de barreira opcional (água, GeoTIFF)", en: "1c. Optional impassable mask (water, GeoTIFF)" },
+  "imp.invert":          { pt: "Inverter (raster marca células passáveis)", en: "Invert (raster marks passable cells)" },
+  "imp.clear":           { pt: "Limpar máscara", en: "Clear mask" },
+  "imp.corridor":        { pt: "Rede abre corredores passáveis sobre a máscara", en: "Network carves passable corridors across the mask" },
+  "imp.offset":          { pt: "deslocamento no centro da ponte (m, −5…+15)", en: "bridge centre offset (m, −5…+15)" },
+  "imp.show":            { pt: "Mostrar máscara + corredores no mapa", en: "Show mask + corridors on map" },
+  "imp.opacity":         { pt: "opacidade da camada", en: "overlay opacity" },
+  "imp.none":            { pt: "Nenhuma máscara carregada.", en: "No impassable mask loaded." },
+  "imp.meta.cells":      { pt: "{0} células barradas ({1}% da grade)", en: "{0} impassable cells ({1}% of grid)" },
+  "imp.meta.corridor":   { pt: "{0} células de corredor (pontes)", en: "{0} bridge-corridor cells" },
+  "imp.cell_blocked":    { pt: "Célula intransponível (máscara de barreira) — escolha outra.", en: "Impassable cell (barrier mask) — pick another." },
+  "aria.opacity_impassable": { pt: "opacidade da máscara de barreira", en: "impassable mask opacity" },
+  "help.h.impassable":   { pt: "1c · Máscara de barreira", en: "1c · Impassable mask" },
+  "help.p.impassable":   { pt: "Suba um GeoTIFF binário (1=intransponível, p.ex. corpos d'água). É reamostrado para a grade do DEM por maioria de área (≥50% intransponível ⇒ célula barrada); fora da extensão da máscara assume-se passável. Pode estar em extensão/resolução/CRS diferentes do DEM. Opcionalmente, a rede vetorial (1b) abre corredores passáveis (pontes) sobre a máscara, com um deslocamento suave de elevação que sobe linearmente das margens até o centro da ponte.", en: "Upload a binary GeoTIFF (1=impassable, e.g. water bodies). It is resampled onto the DEM grid by area-coverage majority (≥50% impassable ⇒ blocked cell); outside the mask extent cells are assumed passable. It may have a different extent/resolution/CRS than the DEM. Optionally the vector network (1b) carves passable corridors (bridges) across the mask, with a smooth elevation offset that ramps linearly from the shores up to the bridge centre." },
+
   // ---- Group: Pick points ----------------------------------------------
   "group.pick_points":   { pt: "2. Marcar pontos", en: "2. Pick points" },
   "pts.click_map":       { pt: "— clicar mapa —", en: "— click map —" },
@@ -173,6 +189,7 @@ const STRINGS = {
   "order.hint":          { pt: "O topo da lista é desenhado por cima. Marcadores e tooltips ficam sempre acima. Aplicado na hora; lembrado neste dispositivo.", en: "Top of the list is drawn on top. Markers and tooltips always stay above. Applied immediately; remembered on this device." },
   "order.reset":         { pt: "Restaurar padrão", en: "Reset to default" },
   "order.relief":        { pt: "Relevo (DEM)", en: "Relief (DEM)" },
+  "order.impassable":    { pt: "Máscara de barreira", en: "Impassable mask" },
   "order.energy":        { pt: "Energia", en: "Energy" },
   "order.network":       { pt: "Rede vetorial (linhas)", en: "Vector network (lines)" },
   "order.passes":        { pt: "Passagens", en: "Passes" },
@@ -209,7 +226,7 @@ const STRINGS = {
   "help.h.viz":          { pt: "5 · Visualização", en: "5 · Visualisation" },
   "help.p.viz":          { pt: "As camadas <em>Energia</em> e <em>Passagens</em> têm visibilidade, opacidade e blend independentes. Mudanças de colormap, range, gamma, filtro média e blend ficam pendentes até <em>Atualizar estilo</em> — evita re-renderizar a cada digitação em DEMs grandes.", en: 'The <em>Energy</em> and <em>Passes</em> layers have independent visibility, opacity, and blend. Changes to colormap, range, gamma, mean filter, and blend stay pending until you click <em>Refresh style</em> — saves re-rendering on every keystroke for large DEMs.' },
   "help.h.bundle":       { pt: "6 · Salvar / restaurar", en: "6 · Save / reload" },
-  "help.p.bundle":       { pt: "<em>Baixar bundle (.zip)</em> empacota um <code>metadata.jsonld</code> com todos os parâmetros, mais GeoTIFFs georeferenciados (energy.tif, passes.tif, network.tif) que abrem direto no QGIS. Para reproduzir: carregue o mesmo DEM, depois leia o JSON-LD ou ZIP.", en: '<em>Download bundle (.zip)</em> packs a <code>metadata.jsonld</code> with every parameter, plus georeferenced GeoTIFFs (energy.tif, passes.tif, network.tif) that open directly in QGIS. To reproduce: load the same DEM, then read the JSON-LD or ZIP back.' },
+  "help.p.bundle":       { pt: "<em>Baixar bundle (.zip)</em> empacota um <code>metadata.jsonld</code> com todos os parâmetros, mais GeoTIFFs georeferenciados (energy.tif, passes.tif, network.tif, impassable.tif) que abrem direto no QGIS. Para reproduzir: carregue o mesmo DEM, depois leia o JSON-LD ou ZIP.", en: '<em>Download bundle (.zip)</em> packs a <code>metadata.jsonld</code> with every parameter, plus georeferenced GeoTIFFs (energy.tif, passes.tif, network.tif, impassable.tif) that open directly in QGIS. To reproduce: load the same DEM, then read the JSON-LD or ZIP back.' },
   "help.h.cost":         { pt: "Modelo de custo assimétrico", en: "Asymmetric cost model" },
   "help.p.cost":         { pt: "Cada movimento entre células adjacentes (4 cardeais + 4 diagonais) tem custo em \"joules normalizados\". Com <code>Δh = h_v − h_u</code>:", en: 'Each move between adjacent cells (4 cardinal + 4 diagonal) costs "normalised joules". With <code>Δh = h_v − h_u</code>:' },
   "help.formula":        { pt: "subida (Δh ≥ 0):  α·dist + β·Δh\ndescida (Δh < 0): max(0, α·dist − η·β·|Δh|)",
@@ -765,6 +782,41 @@ document.addEventListener("DOMContentLoaded", () => {
   const vecClearBtn = document.getElementById("vec-clear");
   if (vecClearBtn) vecClearBtn.addEventListener("click", clearVectorNetwork);
   document.getElementById("vec-osm")?.addEventListener("click", loadOsmNetwork);
+
+  // --- Impassable mask (group 1c) ---
+  const impFile = document.getElementById("impassable-file");
+  if (impFile) {
+    impFile.addEventListener("change", async (ev) => {
+      const f = ev.target.files[0];
+      if (f) await loadImpassableMaskFromFile(f);
+      ev.target.value = ""; // re-picking the same file fires change again
+    });
+  }
+  document.getElementById("impassable-clear")?.addEventListener("click", clearImpassableMask);
+  document.getElementById("impassable-invert")?.addEventListener("change", () => {
+    // Re-resample the cached source with the flipped convention (no re-upload).
+    if (state.impassableRaster) applyImpassableRaster(state.impassableRaster, state.impassableMeta?.name);
+  });
+  document.getElementById("imp-corridor")?.addEventListener("change", (ev) => {
+    const row = document.getElementById("imp-offset-row");
+    if (row) row.style.display = ev.target.checked ? "" : "none";
+    recomputeCorridors();   // corridors appear/disappear → geometry change
+    updateImpassableMeta();
+    markImpassableDirty(true);
+  });
+  document.getElementById("imp-offset")?.addEventListener("change", () => {
+    // Offset shifts corridor heights only (geometry unchanged) → no reprobe;
+    // buildComputeGrid re-applies the offset to the cached corridor base/ramp.
+    markImpassableDirty(false);
+  });
+  document.getElementById("imp-show")?.addEventListener("change", (ev) => {
+    const row = document.getElementById("imp-opacity-row");
+    if (row) row.style.display = ev.target.checked ? "" : "none";
+    applyImpassableOverlay();
+  });
+  document.getElementById("imp-opacity")?.addEventListener("input", () => {
+    if (state.impassableOverlay) state.impassableOverlay.setOpacity(impassableOverlayOpacity());
+  });
   // Switching the displayed energy field (constrained / unconstrained /
   // difference) re-renders cached arrays — never recomputes.
   document.getElementById("energy-source")?.addEventListener("change", () => {
@@ -884,13 +936,14 @@ const map = L.map("map", { preferCanvas: true }).setView([-23.55, -46.63], 12);
 // persisted to localStorage. Default, bottom → top:
 // relief < energy < network lines < passes < routes/path.
 const LAYER_PANES = {
-  relief:  "reliefPane",
-  energy:  "energyPane",
-  network: "networkPane",
-  passes:  "passesPane",
-  routes:  "routesPane",
+  relief:     "reliefPane",
+  impassable: "impassablePane",
+  energy:     "energyPane",
+  network:    "networkPane",
+  passes:     "passesPane",
+  routes:     "routesPane",
 };
-const DEFAULT_LAYER_ORDER = ["relief", "energy", "network", "passes", "routes"]; // bottom → top
+const DEFAULT_LAYER_ORDER = ["relief", "impassable", "energy", "network", "passes", "routes"]; // bottom → top
 let layerOrder = DEFAULT_LAYER_ORDER.slice();
 try {
   const saved = JSON.parse(localStorage.getItem("simu-layer-order") || "null");
@@ -1021,6 +1074,22 @@ const state = {
   // Graph energy is shown as an interpolated RASTER (like grid), not vector
   // edges — rasterised from the graph then IDW-filled. Cached for restyle.
   graphEnergyRaster: null,
+  // Optional impassable mask (water, etc.). `impassable` is resampled to the
+  // DEM grid (1 = impassable); `impassableRaster` keeps the parsed source so
+  // the Invert toggle re-resamples without a re-upload. The vector network can
+  // carve bridge corridors across it: corridorCells/Base/Ramp cache the
+  // reopened cells and their smooth bridge-elevation profile (see
+  // recomputeCorridors / buildComputeGrid). impassableToken is bumped on any
+  // mask/corridor/offset/invert change so the cached network graph rebuilds.
+  impassable: null,
+  impassableRaster: null,
+  impassableMeta: null,
+  corridorCells: null,
+  corridorBase: null,
+  corridorRamp: null,
+  corridorSet: null, // Set of corridor cell indices, for O(1) click-validity lookup
+  impassableToken: 0,
+  impassableOverlay: null,
   // Multi-reference density: list of [r, c] pixel coords plus their map markers.
   refPoints: [],
   refMarkers: [],
@@ -1481,7 +1550,22 @@ async function loadDemFromArrayBuffer(buf, label) {
   // Drop any previously loaded vector network — its rasterised mask is
   // sized to the *previous* DEM's H×W and would corrupt the next compute
   // (or crash) if reused. The user re-uploads the .gpkg if they want it.
+  // Drop the impassable mask + corridors BEFORE clearing the network: they're
+  // sized to the previous DEM's grid, and clearVectorNetwork →
+  // onNetworkCorridorsChanged would otherwise recalibrate against a stale,
+  // wrong-sized mask. No dirty cascade — the loader already cancelled compute
+  // and starts its own probe below.
+  state.impassable = null;
+  state.impassableRaster = null;
+  state.impassableMeta = null;
+  state.corridorCells = null; state.corridorBase = null; state.corridorRamp = null;
+  state.corridorSet = null;
+  if (state.impassableOverlay) { state.impassableOverlay.remove(); state.impassableOverlay = null; }
+  const impInputReset = document.getElementById("impassable-file");
+  if (impInputReset) impInputReset.value = "";
   clearVectorNetwork();
+  updateImpassableMeta();
+  updateCorridorAvailability();
   syncRefDisplay();
   document.getElementById("src-display").textContent = "— click map —";
   document.getElementById("dst-display").textContent = "— optional —";
@@ -1882,6 +1966,7 @@ async function loadVectorNetwork(file) {
     state.networkLines = collected;
     applyNetworkLinesOverlay();
     syncLoadedHighlights(); // light up group 1B
+    onNetworkCorridorsChanged(); // a new network may carve corridors over the mask
   } finally {
     db.close();
     progress.classList.remove("active");
@@ -1941,6 +2026,7 @@ function installNetworkFromLines(lines, srsId, sourceLabel) {
   state.networkLines = kept;
   applyNetworkLinesOverlay();
   syncLoadedHighlights(); // light up group 1B
+  onNetworkCorridorsChanged(); // a new network may carve corridors over the mask
   return true;
 }
 
@@ -2018,6 +2104,117 @@ function clearVectorNetwork() {
   const inp = document.getElementById("vector-file");
   if (inp) inp.value = "";
   syncLoadedHighlights(); // group 1B no longer "loaded"
+  // Corridors depend on the network — drop them, disable the toggle, recalibrate.
+  onNetworkCorridorsChanged();
+}
+
+// ---- Optional impassable mask (water bodies, etc.) ------------------------
+// Upload a binary GeoTIFF (1=impassable); it's resampled onto the DEM grid by
+// area-coverage majority. The loaded vector network can carve bridge corridors
+// across it, optionally with a smooth elevation offset. All composition happens
+// in buildComputeGrid() — engines unchanged.
+
+// Invalidate everything a loaded mask affects. reprobe re-runs the compute-time
+// calibration (only on geometry changes — not on every offset keystroke).
+function markImpassableDirty(reprobe = false) {
+  cancelActiveCompute();      // an in-flight run used the previous grid
+  state.lastResult = null;    // stale render
+  state.impassableToken++;    // rebuild the cached network graph (heights/validity changed)
+  state.networkGraph = null; state.networkGraphToken = null;
+  applyImpassableOverlay();
+  if (reprobe && state.dem) {
+    state.calibration = null;
+    state.calibrationGen++;
+    if (state.probeWorker) { state.probeWorker.terminate(); state.probeWorker = null; }
+    startCalibrationProbe();
+  }
+  estimateRunTime();
+}
+
+async function loadImpassableMaskFromFile(file) {
+  if (!state.dem) { status.innerHTML = '<span style="color:#ff6b6b">Load a DEM first.</span>'; return; }
+  const meta = document.getElementById("imp-meta");
+  try {
+    if (meta) meta.textContent = `Reading ${file.name}…`;
+    const buf = await readFileWithProgress(file, () => {});
+    const raster = await readMaskGeoTIFF(buf);
+    applyImpassableRaster(raster, file.name);
+  } catch (err) {
+    console.error("[impassable]", err);
+    if (meta) meta.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(err.message)}</span>`;
+  }
+}
+
+// (Re)resample the cached source raster onto the DEM grid with the current
+// Invert setting, refresh derived state, and invalidate. Re-callable so the
+// Invert toggle doesn't require a re-upload.
+function applyImpassableRaster(raster, name) {
+  if (!raster || !state.dem) return;
+  state.impassableRaster = raster;
+  const invert = !!document.getElementById("impassable-invert")?.checked;
+  const imp = resampleMaskToDem(raster, state.dem, { invert });
+  let cells = 0;
+  for (let i = 0; i < imp.length; i++) if (imp[i]) cells++;
+  state.impassable = imp;
+  state.impassableMeta = {
+    name: name ?? state.impassableMeta?.name ?? "mask",
+    width: raster.width, height: raster.height, srs: raster.epsg, cellsImpassable: cells,
+  };
+  recomputeCorridors();
+  updateImpassableMeta();
+  updateCorridorAvailability();
+  markImpassableDirty(true);
+}
+
+function updateImpassableMeta() {
+  const meta = document.getElementById("imp-meta");
+  if (!meta) return;
+  if (!state.impassable) { meta.textContent = t("imp.none"); return; }
+  const m = state.impassableMeta || {};
+  const N = state.dem ? state.dem.H * state.dem.W : 0;
+  const pct = N ? (100 * (m.cellsImpassable || 0) / N).toFixed(1) : "0";
+  const corr = state.corridorCells ? state.corridorCells.length : 0;
+  let html = `${escapeHtml(m.name || "mask")} · ` +
+    t("imp.meta.cells", (m.cellsImpassable || 0).toLocaleString(), pct);
+  if (corr) html += `<br/>${t("imp.meta.corridor", corr.toLocaleString())}`;
+  meta.innerHTML = html;
+}
+
+function clearImpassableMask() {
+  state.impassable = null;
+  state.impassableRaster = null;
+  state.impassableMeta = null;
+  state.corridorCells = null; state.corridorBase = null; state.corridorRamp = null;
+  state.corridorSet = null;
+  const inp = document.getElementById("impassable-file");
+  if (inp) inp.value = "";
+  updateImpassableMeta();
+  updateCorridorAvailability();
+  markImpassableDirty(true);
+}
+
+// Enable the "carve corridors" toggle only when a network is loaded.
+function updateCorridorAvailability() {
+  const cb = document.getElementById("imp-corridor");
+  const row = document.getElementById("imp-corridor-row");
+  const hasNet = !!state.networkMask;
+  if (cb) cb.disabled = !hasNet;
+  if (row) row.style.opacity = hasNet ? "1" : "0.55";
+}
+
+// A network load/clear can add/remove bridge corridors, changing the effective
+// compute grid. Recompute them, refresh the toggle, and — when a mask is present
+// so the grid actually changed — fully invalidate (overlay + graph token +
+// recalibration + estimate) via markImpassableDirty, exactly like a mask change.
+function onNetworkCorridorsChanged() {
+  recomputeCorridors();
+  updateCorridorAvailability();
+  if (state.impassable) {
+    markImpassableDirty(true); // overlay + token bump + graph invalidation + reprobe + estimate
+  } else {
+    applyImpassableOverlay();
+    state.impassableToken++;
+  }
 }
 
 // ---- Optional vector-network rendering (black lines, fixed ground width) --
@@ -2200,7 +2397,7 @@ function graphModeActive() {
 }
 // Identity of everything the cached graph depends on — a change rebuilds it.
 function computeNetworkGraphToken() {
-  return `${state.networkFeatureCount}|${graphJunctionMode()}|${state.dem ? state.dem.W + "x" + state.dem.H : "0"}`;
+  return `${state.networkFeatureCount}|${graphJunctionMode()}|${state.dem ? state.dem.W + "x" + state.dem.H : "0"}|imp${state.impassableToken}`;
 }
 
 // Draw a path/route (sequence of node ids) as a polyline over the edges.
@@ -2379,8 +2576,15 @@ map.on("click", (e) => {
   // nearest passable network cell within the configured radius.
   const px = snapToNetwork(rawPx);
   const [r, c] = px;
-  if (!state.dem.mask[r * state.dem.W + c]) {
+  const clickIdx = r * state.dem.W + c;
+  if (!state.dem.mask[clickIdx]) {
     status.textContent = "Clicked cell is nodata.";
+    return;
+  }
+  if (!effectivePassableAt(clickIdx)) {
+    // Impassable (barrier mask) and not reopened as a bridge corridor — the
+    // compute would silently never seed/settle here.
+    status.textContent = t("imp.cell_blocked");
     return;
   }
   if (networkConstraintActive() && !state.networkMask[r * state.dem.W + c]) {
@@ -2482,7 +2686,7 @@ const makeRefIcon    = (idx)   => makeLabelIcon(String(idx), ICON_REF_SIZE, ICON
 function addRefPoint(rc) {
   if (!state.dem) return;
   const [r, c] = rc;
-  if (!state.dem.mask[r * state.dem.W + c]) return;
+  if (!effectivePassableAt(r * state.dem.W + c)) return; // nodata or blocked (barrier mask)
   state.refPoints.push([r, c]);
   const { originX, originY, dx, dy } = state.dem;
   const latlng = L.latLng(originY - (r + 0.5) * dy, originX + (c + 0.5) * dx);
@@ -2645,7 +2849,7 @@ async function loadRefPointsFromFile(file) {
   let skipped = 0;
   for (const [lng, lat] of coords) {
     const rc = latLngToPixel(L.latLng(lat, lng));
-    if (rc && state.dem.mask[rc[0] * state.dem.W + rc[1]]) valid.push(rc);
+    if (rc && effectivePassableAt(rc[0] * state.dem.W + rc[1])) valid.push(rc);
     else skipped++;
   }
   if (!valid.length) return fail("ref.load.no_points", file.name);
@@ -2903,10 +3107,10 @@ runBtn.addEventListener("click", async () => {
   // Per-worker DEM clones — buffers are transferred, so each worker needs
   // its own copy. The pool sizing below accounts for this memory.
   const demPayload = () => {
-    const height = new Float32Array(state.dem.height);
-    const mask = new Uint8Array(state.dem.mask);
+    // buildComputeGrid composes the impassable mask + bridge corridors into the
+    // height/mask; networkMask stays the separate constraint slot the worker ANDs.
+    const { height, mask, transfer } = buildComputeGrid();
     const networkMask = constrainNet ? new Uint8Array(state.networkMask) : null;
-    const transfer = [height.buffer, mask.buffer];
     if (networkMask) transfer.push(networkMask.buffer);
     return { height, mask, networkMask, transfer };
   };
@@ -2947,7 +3151,9 @@ runBtn.addEventListener("click", async () => {
     status.textContent = "Interpolating across the network…";
     progressBar.style.width = "0%";
     const interpPayload = () => ({
-      mask: new Uint8Array(state.dem.mask),
+      // Effective mask (impassable blocked, corridors open) so IDW energy never
+      // bleeds across water; networkMask stays the fill seed.
+      mask: buildComputeGrid({ maskOnly: true }).mask,
       networkMask: new Uint8Array(state.networkMask),
     });
     const smoothThenResolve = (filled) => {
@@ -3099,10 +3305,8 @@ runBtn.addEventListener("click", async () => {
             computeFailed(m.message);
           }
         });
-        const height = new Float32Array(state.dem.height);
-        const mask = new Uint8Array(state.dem.mask);
+        const { height, mask, transfer } = buildComputeGrid();
         const networkMask = useNetwork ? new Uint8Array(state.networkMask) : null;
-        const transfer = [height.buffer, mask.buffer];
         if (networkMask) transfer.push(networkMask.buffer);
         w.postMessage(
           {
@@ -3169,8 +3373,11 @@ runBtn.addEventListener("click", async () => {
       const json = new TextEncoder().encode(JSON.stringify(params));
       const head = new Uint8Array(4);
       new DataView(head.buffer).setUint32(0, json.length, true);
+      // Compose the impassable mask + bridge corridors into the grid the native
+      // backend computes on (sent as raw bytes — no Rust change, parity kept).
+      const { height: gridHeight, mask: gridMask } = buildComputeGrid();
       const body = new Blob([
-        head, json, state.dem.height, state.dem.mask,
+        head, json, gridHeight, gridMask,
         ...(useNetwork ? [state.networkMask] : []),
       ]);
       const resp = await fetch(`${baseUrl}/density`, { method: "POST", body });
@@ -3283,8 +3490,9 @@ runBtn.addEventListener("click", async () => {
     {
       // No network, no path/top-N extras — same mode/cost/budget; passes
       // mirror the primary so the overlay is comparable across scenarios.
-      const height = new Float32Array(state.dem.height);
-      const mask = new Uint8Array(state.dem.mask);
+      // Bridges are terrain, so the composed grid applies here too (only the
+      // networkMask constraint slot differs from the primary).
+      const { height, mask, transfer } = buildComputeGrid();
       wB.postMessage(
         {
           ...baseMsg,
@@ -3294,7 +3502,7 @@ runBtn.addEventListener("click", async () => {
           wantNetworkInterp: false,
           maximizeLength: 0,
         },
-        [height.buffer, mask.buffer],
+        transfer,
       );
     }
   };
@@ -3361,7 +3569,7 @@ runBtn.addEventListener("click", async () => {
         status.textContent = "Interpolating energy field…";
         const seedMask = new Uint8Array(eGrid.length);
         for (let i = 0; i < eGrid.length; i++) seedMask[i] = Number.isFinite(eGrid[i]) ? 1 : 0;
-        const mask = new Uint8Array(state.dem.mask);
+        const mask = buildComputeGrid({ maskOnly: true }).mask; // don't fill across water
         const interpStart = performance.now();
         const w = spawnWorker((m) => {
           if (m.kind === "interp-done") {
@@ -3416,8 +3624,11 @@ runBtn.addEventListener("click", async () => {
         runOnGraph(m.graph);
       } else if (m.kind === "error") computeFailed(m.message);
     });
+    // Compose the impassable mask + bridge corridors so graph node elevations
+    // get the bridge profile and water nodes are marked invalid.
+    const grid = buildComputeGrid();
     const dem = {
-      height: new Float32Array(state.dem.height), mask: new Uint8Array(state.dem.mask),
+      height: grid.height, mask: grid.mask,
       H: state.dem.H, W: state.dem.W, dxM: state.dem.dxM, dyM: state.dem.dyM,
     };
     wb.postMessage(
@@ -4143,6 +4354,48 @@ function applyDemReliefOverlay() {
   ).addTo(map);
 }
 
+function impassableOverlayOpacity() {
+  const v = parseFloat(document.getElementById("imp-opacity")?.value);
+  return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.5;
+}
+
+// Paint the EFFECTIVE impassable state to a dataURL for verification: blocked
+// water red, reopened bridge corridors green. Returns null when nothing to show.
+function renderImpassableDataURL() {
+  if (!state.dem || !state.impassable) return null;
+  const { H, W } = state.dem;
+  const imp = state.impassable;
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  const img = ctx.createImageData(W, H);
+  const d = img.data;
+  for (let i = 0; i < imp.length; i++) {
+    if (imp[i]) { const o = i << 2; d[o] = 220; d[o + 1] = 48; d[o + 2] = 48; d[o + 3] = 255; } // blocked
+  }
+  const cells = state.corridorCells;
+  if (cells) for (let k = 0; k < cells.length; k++) {
+    const o = cells[k] << 2; d[o] = 40; d[o + 1] = 200; d[o + 2] = 90; d[o + 3] = 255; // corridor
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
+// Build the impassable-layer Leaflet imageOverlay from the current mask +
+// corridors. Driven by the #imp-show / #imp-opacity controls in group 1c.
+function applyImpassableOverlay() {
+  if (state.impassableOverlay) { state.impassableOverlay.remove(); state.impassableOverlay = null; }
+  const show = !!document.getElementById("imp-show")?.checked;
+  if (!show || !state.dem || !state.dem.isGeographic || !state.impassable) return;
+  const url = renderImpassableDataURL();
+  if (!url) return;
+  const { H, W, originX, originY, dx, dy } = state.dem;
+  const bounds = [[originY - H * dy, originX], [originY, originX + W * dx]];
+  state.impassableOverlay = L.imageOverlay(url, bounds, {
+    opacity: impassableOverlayOpacity(), pane: "impassablePane",
+  }).addTo(map);
+}
+
 // Linearly interpolate the p-th percentile (0..100) from a sorted ascending
 // array. Returns NaN if the array is empty.
 function percentileFromSorted(sorted, p) {
@@ -4360,7 +4613,10 @@ function startCalibrationProbe() {
   if (state.computeStartedAt) return; // a compute is running — retried in computeDone
   if (state.probeWorker) { state.probeWorker.terminate(); state.probeWorker = null; }
 
-  const { H, W, mask } = state.dem;
+  const { H, W } = state.dem;
+  // Probe the EFFECTIVE compute grid (impassable blocked, corridors reopened)
+  // so the time estimate reflects the terrain a real run actually traverses.
+  const { height: probeHeight, mask } = buildComputeGrid();
   // Two deterministic interior, on-mask reference cells (sample real relief,
   // not a corner). Spiral out from each target to the nearest valid cell.
   const findValid = (r0, c0) => {
@@ -4428,17 +4684,15 @@ function startCalibrationProbe() {
   // full grid). On a 135 M-cell DEM ≈ 3×1 M cells ≈ ~1 s search + first-touch.
   const N = H * W;
   const maxSettled = Math.min(PROBE_MAX_SETTLED, Math.max(50_000, Math.floor(0.4 * N)));
-  const height = new Float32Array(state.dem.height);
-  const maskCopy = new Uint8Array(mask);
   w.postMessage(
     {
       kind: "probe",
-      height, mask: maskCopy, H, W,
+      height: probeHeight, mask, H, W,
       dx: state.dem.dxM, dy: state.dem.dyM,
       alpha, beta, eta, maxSettled,
       refPoints: refs,
     },
-    [height.buffer, maskCopy.buffer],
+    [probeHeight.buffer, mask.buffer],
   );
   estimateRunTime(); // show "estimating…" until the probe lands
 }
@@ -4905,6 +5159,305 @@ async function readRasterFromGeoTIFF(arrayBuffer, expectedKind) {
   return raster;
 }
 
+// ===================== Impassable mask + bridge corridors =====================
+// An optional binary raster ("water") marks cells impassable. It is resampled
+// onto the DEM grid by AREA-COVERAGE MAJORITY (a DEM cell is impassable iff
+// ≥50% of its footprint is impassable in the source). The loaded vector network
+// can OPTIONALLY carve passable "bridge" corridors across the mask: each
+// corridor cell is levelled to a smooth profile — land elevation at each shore
+// entrance, a linear ramp up to (+/-offset) at the bridge centre, then back
+// down. Everything is composed in buildComputeGrid() *before* the grid reaches
+// the worker/backend, so the engines are unchanged AND a run with no/all-zero
+// mask is byte-identical to before (see buildComputeGrid).
+
+function geoKeysToEpsg(gk) {
+  if (!gk) return null;
+  return gk.ProjectedCSTypeGeoKey || gk.ProjectedCRSGeoKey ||
+         gk.GeographicTypeGeoKey || gk.GeodeticCRSGeoKey || null;
+}
+
+// Resolve a proj4 source key for an EPSG code, registering WGS84/UTM defs
+// formulaically (proj4 only ships 4326 + a handful). Returns "EPSG:4326" for
+// geographic codes, a registered "EPSG:<code>" for WGS84/UTM, or null if the
+// code is projected-but-unknown (caller then assumes DEM-aligned coords).
+function proj4DefForEpsg(code) {
+  if (!code || code === 4326 || code === 4269 || code === 4979) return "EPSG:4326";
+  const key = `EPSG:${code}`;
+  try { if (proj4.defs(key)) return key; } catch {}
+  if (code >= 32601 && code <= 32660) {
+    proj4.defs(key, `+proj=utm +zone=${code - 32600} +datum=WGS84 +units=m +no_defs`);
+    return key;
+  }
+  if (code >= 32701 && code <= 32760) {
+    proj4.defs(key, `+proj=utm +zone=${code - 32700} +south +datum=WGS84 +units=m +no_defs`);
+    return key;
+  }
+  return null;
+}
+
+// Parse an uploaded mask GeoTIFF → { width, height, data, dx, dy, originX,
+// originY, epsg }. dx/dy are positive (pixel size); originX/Y is the top-left.
+async function readMaskGeoTIFF(arrayBuffer) {
+  const tiff = await GeoTIFF.fromArrayBuffer(arrayBuffer);
+  const image = await tiff.getImage();
+  const width = image.getWidth();
+  const height = image.getHeight();
+  const tiePoints = await image.getTiePoints();
+  const scale = image.fileDirectory.getValue("ModelPixelScale");
+  if (!scale || !tiePoints?.length) {
+    throw new Error("Mask GeoTIFF lacks geotransform metadata (ModelPixelScale / tie points).");
+  }
+  const data = await image.readRasters({ interleave: true });
+  let geoKeys = null;
+  try { geoKeys = image.getGeoKeys ? image.getGeoKeys() : null; } catch {}
+  return {
+    width, height, data,
+    dx: Math.abs(scale[0]), dy: Math.abs(scale[1]),
+    originX: tiePoints[0].x, originY: tiePoints[0].y,
+    epsg: geoKeysToEpsg(geoKeys),
+  };
+}
+
+// Resample a parsed mask raster onto the DEM grid → Uint8Array (1=impassable),
+// area-coverage majority (≥50%) via adaptive S×S sub-sampling of each DEM cell.
+// Sub-points outside the source extent count as PASSABLE (the "missing = passable"
+// rule). Only meaningful for geographic DEMs (the rest of the app is gated the
+// same way). `invert` flips the source convention (uploaded raster marks passable).
+function resampleMaskToDem(raster, dem, opts = {}) {
+  const invert = !!opts.invert;
+  const { H, W, originX, originY, dx, dy, isGeographic } = dem;
+  const out = new Uint8Array(W * H); // 0 = passable
+  // Nearest-pixel sub-point sampler: value>0 (xor invert) → impassable.
+  const sample = (mx, my) => {
+    const mc = Math.floor((mx - raster.originX) / raster.dx);
+    const mr = Math.floor((raster.originY - my) / raster.dy);
+    if (mc < 0 || mc >= raster.width || mr < 0 || mr >= raster.height) return 0; // missing = passable
+    const v = raster.data[mr * raster.width + mc] > 0;
+    return (v !== invert) ? 1 : 0;
+  };
+  // CRS: DEM is lon/lat (4326) when geographic. Reproject DEM sub-points into
+  // the mask CRS only when it differs and we can build a def; otherwise assume
+  // the mask shares the DEM's coordinate space (fail-safe: surfaces as a 0-cell
+  // result in imp-meta if it doesn't).
+  const demKey = isGeographic ? "EPSG:4326" : proj4DefForEpsg(geoKeysToEpsg(dem.geoKeys));
+  const maskKey = proj4DefForEpsg(raster.epsg);
+  const reproject = (demKey && maskKey && demKey !== maskKey)
+    ? (x, y) => proj4(demKey, maskKey, [x, y]) : null;
+  // Sub-samples per axis ≈ source pixels spanned by a DEM cell, capped at 8.
+  // A finer source is area-averaged; an equal/coarser source collapses to S=1
+  // (a single centre sample — correct, one source pixel spans the DEM cell).
+  const S = reproject ? 4 : Math.max(1, Math.min(8, Math.ceil(dx / raster.dx)));
+  const S2 = S * S;
+  for (let r = 0; r < H; r++) {
+    for (let c = 0; c < W; c++) {
+      let hit = 0;
+      for (let j = 0; j < S; j++) {
+        const y = originY - (r + (j + 0.5) / S) * dy;
+        for (let i = 0; i < S; i++) {
+          const x = originX + (c + (i + 0.5) / S) * dx;
+          if (reproject) { const p = reproject(x, y); hit += sample(p[0], p[1]); }
+          else hit += sample(x, y);
+        }
+      }
+      out[r * W + c] = (hit * 2 >= S2) ? 1 : 0; // ≥50% coverage → impassable
+    }
+  }
+  return out;
+}
+
+// The corridor elevation offset, clamped to the supported bridge range.
+function corridorOffsetMetres() {
+  const v = parseFloat(document.getElementById("imp-offset")?.value);
+  if (!Number.isFinite(v)) return 0;
+  return Math.max(-5, Math.min(15, v));
+}
+
+// Local-graph Dijkstra (binary heap) from a set of seed nodes; edge weights in
+// metres. Returns a Float64Array of geodesic distances (Infinity if unreached —
+// e.g. cells in a different corridor component). m = node count.
+function dijkstraLocal(seeds, nbr, nbrLen, m) {
+  const dist = new Float64Array(m).fill(Infinity);
+  const heap = []; // [dist, node]
+  const push = (d, n) => {
+    heap.push([d, n]); let i = heap.length - 1;
+    while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; }
+  };
+  const pop = () => {
+    const top = heap[0], last = heap.pop();
+    if (heap.length) {
+      heap[0] = last; let i = 0;
+      for (;;) {
+        let l = 2 * i + 1, rr = 2 * i + 2, s = i;
+        if (l < heap.length && heap[l][0] < heap[s][0]) s = l;
+        if (rr < heap.length && heap[rr][0] < heap[s][0]) s = rr;
+        if (s === i) break;
+        [heap[s], heap[i]] = [heap[i], heap[s]]; i = s;
+      }
+    }
+    return top;
+  };
+  for (const s of seeds) if (dist[s] !== 0) { dist[s] = 0; push(0, s); }
+  while (heap.length) {
+    const [d, u] = pop();
+    if (d > dist[u]) continue;
+    const ns = nbr[u], ls = nbrLen[u];
+    for (let k = 0; k < ns.length; k++) {
+      const v = ns[k], nd = d + ls[k];
+      if (nd < dist[v]) { dist[v] = nd; push(nd, v); }
+    }
+  }
+  return dist;
+}
+
+// Recompute the cached bridge corridors (network ∩ impassable cells, reopened
+// and levelled). Runs only on mask/network/corridor-toggle change — cheap, and
+// keeps buildComputeGrid() a pure apply. Per connected corridor component:
+//   • shore "entrances" = corridor cells touching a valid land-network cell,
+//     grouped into clusters (the two bridge ends);
+//   • base elevation = linear interpolation between the two ends (t along the
+//     bridge); 1 end → flat; ≥3 ends → inverse-distance blend (rare junctions);
+//   • ramp = geodesic distance to the nearest entrance ÷ its component max
+//     (0 at the entrances, 1 at the centre) — the offset is scaled by this, so
+//     height = base + offset·ramp gives a smooth ramp up to the bridge centre.
+// Components with no land entrance are left blocked (can't bridge to nowhere).
+function recomputeCorridors() {
+  state.corridorCells = null; state.corridorBase = null; state.corridorRamp = null;
+  state.corridorSet = null;
+  const dem = state.dem, imp = state.impassable, net = state.networkMask;
+  const on = !!document.getElementById("imp-corridor")?.checked;
+  if (!dem || !imp || !net || !on) return;
+  const { H, W, dxM, dyM, height, mask: dmask } = dem;
+  const N = H * W;
+  // 1) corridor cells (network ∩ impassable) + global→local index map.
+  const cells = []; const local = new Map();
+  for (let i = 0; i < N; i++) if (net[i] && imp[i]) { local.set(i, cells.length); cells.push(i); }
+  const m = cells.length;
+  if (!m) return;
+  const drs = [-1, -1, -1, 0, 0, 1, 1, 1], dcs = [-1, 0, 1, -1, 1, -1, 0, 1];
+  const diag = Math.hypot(dxM, dyM);
+  const stepLen = [diag, dyM, diag, dxM, dxM, diag, dyM, diag];
+  // 2) local adjacency among corridor cells + summed adjacent land elevations.
+  const nbr = new Array(m), nbrLen = new Array(m);
+  const entElev = new Float64Array(m), entCnt = new Int32Array(m);
+  for (let li = 0; li < m; li++) {
+    const i = cells[li]; const r = (i / W) | 0, c = i - r * W;
+    const ns = [], ls = [];
+    for (let k = 0; k < 8; k++) {
+      const nr = r + drs[k], nc = c + dcs[k];
+      if (nr < 0 || nr >= H || nc < 0 || nc >= W) continue;
+      const j = nr * W + nc;
+      const lj = local.get(j);
+      if (lj !== undefined) { ns.push(lj); ls.push(stepLen[k]); }
+      else if (net[j] && !imp[j] && dmask[j]) { entElev[li] += height[j]; entCnt[li]++; }
+    }
+    nbr[li] = ns; nbrLen[li] = ls;
+  }
+  // 3) connected components over the corridor graph.
+  const comp = new Int32Array(m).fill(-1); let nComp = 0;
+  for (let li = 0; li < m; li++) {
+    if (comp[li] >= 0) continue;
+    const cid = nComp++; const q = [li]; comp[li] = cid;
+    while (q.length) { const x = q.pop(); for (const y of nbr[x]) if (comp[y] < 0) { comp[y] = cid; q.push(y); } }
+  }
+  // 4) entrance clusters (8-connected entrance cells) — naturally per-component.
+  const isEnt = new Uint8Array(m);
+  for (let li = 0; li < m; li++) if (entCnt[li] > 0) isEnt[li] = 1;
+  const clusterId = new Int32Array(m).fill(-1);
+  const clusters = []; const clustersByComp = Array.from({ length: nComp }, () => []);
+  for (let li = 0; li < m; li++) {
+    if (!isEnt[li] || clusterId[li] >= 0) continue;
+    const cid = clusters.length; const q = [li]; clusterId[li] = cid;
+    const cc = []; let esum = 0, ecnt = 0;
+    while (q.length) {
+      const x = q.pop(); cc.push(x); esum += entElev[x]; ecnt += entCnt[x];
+      for (const y of nbr[x]) if (isEnt[y] && clusterId[y] < 0) { clusterId[y] = cid; q.push(y); }
+    }
+    clusters.push({ cells: cc, elev: ecnt ? esum / ecnt : 0, comp: comp[li] });
+    clustersByComp[comp[li]].push(cid);
+  }
+  // 5) per-cluster geodesic distance + nearest-entrance distance for the ramp.
+  const distOf = clusters.map((cl) => dijkstraLocal(cl.cells, nbr, nbrLen, m));
+  const dNear = new Float64Array(m).fill(Infinity);
+  for (const d of distOf) for (let li = 0; li < m; li++) if (d[li] < dNear[li]) dNear[li] = d[li];
+  const compMaxNear = new Float64Array(nComp);
+  for (let li = 0; li < m; li++) { const cm = comp[li]; if (Number.isFinite(dNear[li]) && dNear[li] > compMaxNear[cm]) compMaxNear[cm] = dNear[li]; }
+  // 6) base + ramp per corridor cell; drop cells whose component has no shore.
+  const outCells = [], outBase = [], outRamp = [];
+  for (let li = 0; li < m; li++) {
+    const cl = clustersByComp[comp[li]];
+    if (!cl.length) continue; // no entrance reachable → leave blocked
+    let base;
+    if (cl.length === 2) {
+      const dA = distOf[cl[0]][li], dB = distOf[cl[1]][li];
+      const t = (dA + dB) > 0 ? dA / (dA + dB) : 0.5;
+      base = (1 - t) * clusters[cl[0]].elev + t * clusters[cl[1]].elev;
+    } else if (cl.length === 1) {
+      base = clusters[cl[0]].elev;
+    } else {
+      let num = 0, den = 0;
+      for (const ci of cl) {
+        const d = distOf[ci][li];
+        if (d <= 1e-9) { num = clusters[ci].elev; den = 1; break; }
+        const w = 1 / d; num += w * clusters[ci].elev; den += w;
+      }
+      base = den ? num / den : clusters[cl[0]].elev;
+    }
+    const mx = compMaxNear[comp[li]];
+    outCells.push(cells[li]);
+    outBase.push(base);
+    outRamp.push(mx > 0 && Number.isFinite(dNear[li]) ? dNear[li] / mx : 0);
+  }
+  if (!outCells.length) return;
+  state.corridorCells = Int32Array.from(outCells);
+  state.corridorBase = Float32Array.from(outBase);
+  state.corridorRamp = Float32Array.from(outRamp);
+  state.corridorSet = new Set(outCells);
+}
+
+// True if a cell is traversable in the EFFECTIVE compute grid (raw DEM mask AND
+// not impassable-unless-reopened-as-a-corridor). Used to validate point picks so
+// clicks/refs can't land on blocked water that the compute would silently drop.
+function effectivePassableAt(idx) {
+  if (!state.dem || !state.dem.mask[idx]) return false;
+  if (state.impassable && state.impassable[idx]) {
+    return !!(state.corridorSet && state.corridorSet.has(idx));
+  }
+  return true;
+}
+
+// THE single source of truth for the compute grid. Returns fresh, transferable
+// height+mask with the impassable mask blocked and bridge corridors reopened +
+// levelled. When state.impassable is null OR has no impassable cells (so
+// recomputeCorridors produced no corridors), this returns byte-identical copies
+// of state.dem.height/mask — guaranteeing prior results are reproduced exactly.
+// Must be used by EVERY compute serialization site (worker, density pool,
+// backend Blob, compare-secondary, graph build, probe) — there is no single
+// dispatch choke point.
+function buildComputeGrid(opts = {}) {
+  const maskOnly = !!opts.maskOnly; // for the IDW interp DOMAIN (no height needed)
+  const dem = state.dem;
+  const height = maskOnly ? null : new Float32Array(dem.height);
+  const mask = new Uint8Array(dem.mask);
+  const imp = state.impassable;
+  if (imp) {
+    const N = mask.length;
+    for (let i = 0; i < N; i++) if (imp[i] && mask[i]) mask[i] = 0; // block water on valid land
+    const cells = state.corridorCells;
+    if (cells && cells.length) {
+      const off = maskOnly ? 0 : corridorOffsetMetres();
+      const base = state.corridorBase, ramp = state.corridorRamp;
+      for (let k = 0; k < cells.length; k++) {
+        const i = cells[k];
+        mask[i] = 1;                                  // reopen the corridor (even over nodata water)
+        if (!maskOnly) height[i] = base[k] + off * ramp[k]; // smooth bridge profile
+      }
+    }
+  }
+  return maskOnly
+    ? { mask, transfer: [mask.buffer] }
+    : { height, mask, transfer: [height.buffer, mask.buffer] };
+}
+
 // Vocab IRI deliberately points at the actual deployed file rather than an
 // abstract namespace. Trade-off: bundles tie themselves to this serving URL,
 // but in exchange the @vocab term resolves to a real document instead of a
@@ -5087,6 +5640,21 @@ function buildMetadata(result, withOutputs = true) {
     interpMaxDistance: parseInt(document.getElementById("net-interp-max-dist")?.value, 10) || 50,
     interpSmoothing:   parseInt(document.getElementById("net-interp-smoothing")?.value, 10) || 0,
   };
+  // Impassable mask + bridge-corridor settings (the resampled mask raster is
+  // saved separately as impassable.tif — see downloadBundle).
+  const impassable = {
+    enabled:          !!state.impassable,
+    corridorOverride: !!document.getElementById("imp-corridor")?.checked,
+    elevationOffset:  corridorOffsetMetres(),
+    invert:           !!document.getElementById("impassable-invert")?.checked,
+    show:             !!document.getElementById("imp-show")?.checked,
+    opacity:          impassableOverlayOpacity(),
+    sourceName:       state.impassableMeta?.name || null,
+    srcWidth:         state.impassableMeta?.width || null,
+    srcHeight:        state.impassableMeta?.height || null,
+    srs:              state.impassableMeta?.srs || null,
+    cells:            state.impassableMeta?.cellsImpassable || 0,
+  };
 
   const md = {
     "@context":           SIMU_CONTEXT,
@@ -5117,6 +5685,7 @@ function buildMetadata(result, withOutputs = true) {
     params,
     viz,
     network,
+    impassable,
     stats: {
       maxE:        state.lastAutoMax ?? null,
       maxPasses:   state.lastPassesAutoMax ?? null,
@@ -5148,6 +5717,12 @@ function buildMetadata(result, withOutputs = true) {
         type:   "Uint8",
         shape:  [dem.H, dem.W],
         file:   "network.tif",
+      } : null,
+      impassable: state.impassable ? {
+        format: "GeoTIFF",
+        type:   "Uint8",
+        shape:  [dem.H, dem.W],
+        file:   "impassable.tif",
       } : null,
       routes: result.routes && result.routes.length ? {
         format: "GeoJSON",
@@ -5268,6 +5843,11 @@ async function downloadBundle() {
     if (state.networkMask) {
       zip.file("network.tif", new Uint8Array(writeRasterAsGeoTIFF(state.networkMask, dem, "uint8")));
     }
+    // The resampled impassable mask (DEM-aligned uint8) reproduces the blocked
+    // water + bridge corridors on reload without re-uploading the source raster.
+    if (state.impassable) {
+      zip.file("impassable.tif", new Uint8Array(writeRasterAsGeoTIFF(state.impassable, dem, "uint8")));
+    }
     if (r.routes && r.routes.length && !graphMode) {
       zip.file("routes.geojson", JSON.stringify(routesFCFromList(r.routes, dem), null, 2));
     }
@@ -5335,6 +5915,8 @@ async function loadBundleFile(file) {
       } else if (nBin) {
         bin.network = new Uint8Array(await nBin.async("arraybuffer"));
       }
+      const iTif = zip.file("impassable.tif");
+      if (iTif) bin.impassable = await readRasterFromGeoTIFF(await iTif.async("arraybuffer"), "uint8");
       // Route/path vector geometry. These ride alongside the rasters and get
       // re-rendered (converted back to cell indices) once a matching DEM is
       // present — no recompute needed. Held in `bin` so the pending-bundle
@@ -5447,6 +6029,20 @@ function applyMetadataToUI(md, bin = {}) {
   set("vec-render-opacity", net.renderOpacity);
   updateNetworkLineStyle();
 
+  // ---- Impassable mask params (mask restore happens further down) --------
+  const imp = md.impassable || {};
+  check("impassable-invert", imp.invert);
+  set("imp-offset", Number.isFinite(imp.elevationOffset) ? imp.elevationOffset : 0);
+  set("imp-opacity", Number.isFinite(imp.opacity) ? imp.opacity : 0.5);
+  check("imp-corridor", imp.corridorOverride);
+  check("imp-show", imp.show);
+  // Reveal the dependent rows to match the restored toggles (without firing the
+  // change handlers — corridors are recomputed once the mask is restored below).
+  { const r = document.getElementById("imp-offset-row");
+    if (r) r.style.display = document.getElementById("imp-corridor")?.checked ? "" : "none"; }
+  { const r = document.getElementById("imp-opacity-row");
+    if (r) r.style.display = document.getElementById("imp-show")?.checked ? "" : "none"; }
+
   // (Engine preference is no longer user-selectable — JS only.
   // md.enginePreference from older bundles is read but ignored.)
 
@@ -5524,6 +6120,29 @@ function applyMetadataToUI(md, bin = {}) {
       console.warn(
         `[bundle] network.bin size mismatch: ${bin.network.length} bytes vs H*W=${N}. Discarded.`
       );
+    }
+  }
+
+  // ---- Impassable mask restore -------------------------------------------
+  // After the network mask (corridors depend on it) and under the same dim
+  // check. We only have the DEM-aligned resampled mask here, not the source
+  // raster, so the Invert toggle won't re-resample (already baked in).
+  if (bin.impassable && state.dem && demDimsMatch === true) {
+    const N = state.dem.H * state.dem.W;
+    if (bin.impassable.length === N) {
+      let cells = 0;
+      for (let i = 0; i < N; i++) if (bin.impassable[i]) cells++;
+      state.impassable = bin.impassable;
+      state.impassableMeta = {
+        name: imp.sourceName || "mask", width: imp.srcWidth || null,
+        height: imp.srcHeight || null, srs: imp.srs || null, cellsImpassable: cells,
+      };
+      recomputeCorridors();
+      updateImpassableMeta();
+      updateCorridorAvailability();
+      applyImpassableOverlay();
+    } else {
+      console.warn(`[bundle] impassable.tif size mismatch: ${bin.impassable.length} vs H*W=${N}. Discarded.`);
     }
   }
 

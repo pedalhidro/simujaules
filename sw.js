@@ -142,7 +142,16 @@
 //              a global :focus-visible ring was added, and the example DEM
 //              loaders are now <button>s instead of <a href="#">. Bumped so
 //              the updated app.js / index.html install.
-const VERSION  = "v17";
+//   v17 → v18: Optional impassable mask (group 1c). Upload a binary GeoTIFF
+//              (1=impassable, e.g. water); it's resampled onto the DEM grid by
+//              area-coverage majority (≥50% ⇒ blocked) and blocks routing. The
+//              vector network can carve passable "bridge" corridors across it,
+//              with a smooth elevation offset (linear ramp from each shore to a
+//              +/- peak at the bridge centre, clamped −5…+15 m). Composed
+//              app-side in buildComputeGrid() — energy-worker.js and the Rust
+//              backend are unchanged (bit-parity preserved). Bundles gain
+//              impassable.tif. Bumped so the updated app.js / index.html install.
+const VERSION  = "v18";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
