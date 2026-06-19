@@ -263,7 +263,15 @@
        groups. The card border still gives the eye a clear stop without
        wasting 12 px of internal padding. */
     .group { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
+    /* A loaded DEM / network lights up its whole group: accent border + a
+       left accent bar. Toggled from JS off state.dem / state.networkMask
+       (see syncLoadedHighlights). Style-only — never affects compute. */
+    .group.loaded { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
     .group h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 5px 0; font-weight: 500; }
+    /* Keyboard focus ring. There was none before — custom-styled controls on
+       the near-black theme relied on the faint UA outline. accent-2 (#4cc9f0)
+       reads ~8.8:1 on the panel. :focus-visible keeps it off mouse clicks. */
+    :focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
     label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px; margin-top: 5px; }
     label:first-child { margin-top: 0; }
     input[type="number"], select {
@@ -351,10 +359,15 @@
     .examples {
       margin-top: 5px;
     }
+    /* .ex-link is now a <button> (these are actions, not navigation). The
+       universal `button` rule would make them full-orange and bold; the
+       class overrides keep the original flat, transparent, normal-weight
+       look. width:100% matches the old full-width anchors. */
     .ex-link {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      width: 100%;
       padding: 3px 6px;
       margin-top: 2px;
       border: 1px solid var(--border);
@@ -362,7 +375,10 @@
       color: var(--text);
       text-decoration: none;
       font-size: 11px;
+      font-weight: normal;
+      text-align: left;
       background: transparent;
+      cursor: pointer;
     }
     .ex-link:hover {
       border-color: var(--accent-2);
@@ -592,23 +608,23 @@
         <button type="button" class="help-button" id="help-btn" aria-label="Help" data-i18n-title="help.title" title="How it works">?</button>
       </div>
 
-      <div class="group">
+      <div class="group" id="load-dem-group">
         <h2 data-i18n="group.load_dem">1. Load DEM</h2>
         <input type="file" id="dem-file" accept=".tif,.tiff" />
         <div class="examples">
           <div class="hint" data-i18n="examples.heading" style="margin-bottom: 4px;">or download (locally) an example:</div>
-          <a href="#" class="ex-link" id="ex-aguapreta">
+          <button type="button" class="ex-link" id="ex-aguapreta">
             <span data-i18n="ex.aguapreta">Entorno da Água Preta</span> <span class="ex-tag" data-i18n="ex.tag.aguapreta">~2 MB · imediato</span>
-          </a>
-          <a href="#" class="ex-link" id="ex-centro">
+          </button>
+          <button type="button" class="ex-link" id="ex-centro">
             <span data-i18n="ex.centro">Sampa Centro Expandido</span> <span class="ex-tag" data-i18n="ex.tag.centro">~34 MB · rápido</span>
-          </a>
-          <a href="#" class="ex-link" id="ex-geral">
+          </button>
+          <button type="button" class="ex-link" id="ex-geral">
             <span data-i18n="ex.geral">Sampa Sítio Urbano</span> <span class="ex-tag" data-i18n="ex.tag.geral">~540 MB · lento</span>
-          </a>
-          <a href="#" class="ex-link" id="ex-fabdem-view">
+          </button>
+          <button type="button" class="ex-link" id="ex-fabdem-view">
             <span data-i18n="ex.fabdem">Carregar FABDEM para a janela atual</span> <span class="ex-tag" data-i18n="ex.tag.fabdem">≤ 50 MB</span>
-          </a>
+          </button>
         </div>
         <div class="meta" id="dem-meta" data-i18n="dem.no_dem">No DEM loaded.</div>
         <div class="hint" data-i18n="bundle.reload_hint" style="margin-top: 6px;">
@@ -617,11 +633,10 @@
         <input type="file" id="bundle-file" accept=".zip,.jsonld,.json" style="margin-top: 3px;" />
       </div>
 
-      <div class="group">
+      <div class="group" id="network-group">
         <h2 data-i18n="group.network">1b. Optional vector network (.gpkg)</h2>
         <input type="file" id="vector-file" accept=".gpkg" />
         <button type="button" class="secondary" id="vec-osm" data-i18n="net.osm" style="margin-top: 4px;">Pull streets from OSM (highway=*)</button>
-        <div class="hint" data-i18n="net.osm_hint">Queries Overpass over the current map view ∩ DEM extent. Large areas can take a while or hit Overpass limits — zoom in first.</div>
         <div class="row" style="margin-top: 5px;">
           <div>
             <label data-i18n="net.line_width">line width (cells)</label>
@@ -687,11 +702,24 @@
 
       <div class="group" id="pick-points-group">
         <h2 data-i18n="group.pick_points">2. Pick points</h2>
-        <div class="point-row-inline">
-          <span class="point-cell"><span class="point-label">src</span><span class="point-display" id="src-display" data-i18n="pts.click_map">— click map —</span></span>
-          <span class="point-cell"><span class="point-label">dst</span><span class="point-display" id="dst-display" data-i18n="pts.optional">— optional —</span></span>
+        <!-- src/dst picking. Faded out in density mode (references replace the
+             single src/dst there). Wrapped so the fade targets only this
+             block — the reference-action buttons below stay usable. -->
+        <div id="pick-points-srcdst">
+          <div class="point-row-inline">
+            <span class="point-cell"><span class="point-label">src</span><span class="point-display" id="src-display" data-i18n="pts.click_map">— click map —</span></span>
+            <span class="point-cell"><span class="point-label">dst</span><span class="point-display" id="dst-display" data-i18n="pts.optional">— optional —</span></span>
+          </div>
+          <button class="secondary" id="clear-points" data-i18n="pts.clear" style="margin-top: 5px;">Clear points</button>
         </div>
-        <button class="secondary" id="clear-points" data-i18n="pts.clear" style="margin-top: 5px;">Clear points</button>
+        <!-- Reference-point actions (density mode only). Moved up from the
+             density panel so the three point/reference buttons cluster
+             together with "Clear points" on top. Shown/hidden by the density
+             toggle's sync(). -->
+        <div class="row" id="ref-actions-row" style="display: none; margin-top: 5px;">
+          <button type="button" class="secondary" id="ref-place-random" data-i18n="ref.place_random">Place random</button>
+          <button type="button" class="secondary" id="ref-clear" data-i18n="ref.clear">Clear refs</button>
+        </div>
       </div>
 
       <div class="group">
@@ -728,7 +756,6 @@
             <option value="leg"   data-i18n="budget.leg">each leg (out OR back)</option>
             <option value="total" data-i18n="budget.total">round trip (total)</option>
           </select>
-          <div class="hint" data-i18n="budget_mode.hint">Round-trip mode only. "Each leg": a cell is shown if out ≤ budget AND back ≤ budget (totals can reach 2×). "Total": out + back ≤ budget.</div>
         </div>
         <label style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
           <input type="checkbox" id="want-passes" />
@@ -749,7 +776,6 @@
         <div id="maximize-extra" style="display: none;">
           <label data-i18n="param.max_length">Path length L (edges, 0 = unconstrained)</label>
           <input type="number" id="maximize-length" value="0" min="0" max="5000" step="1" />
-          <div class="hint" data-i18n="param.max_length.hint">0: inverted Dijkstra (geometrically short, cost-dense). L&gt;0: layered DP finds the max-cost path of exactly L edges from src to dst. Memory cap ≈ 256 MB ⇒ L·H·W must fit; large DEMs limit L to a few dozen.</div>
         </div>
         <div id="density-extra" style="display: none;">
           <div class="row">
@@ -765,18 +791,12 @@
               </select>
             </div>
           </div>
-          <div class="hint" data-i18n="ref.direction_hint" style="margin-top: 3px;">Direction follows the Mode above.</div>
           <label data-i18n="param.sampling" style="margin-top: 4px;">Sampling strategy</label>
           <select id="ref-sampling">
             <option value="random" data-i18n="sampling.random">pseudo-random</option>
             <option value="sobol"  data-i18n="sampling.sobol">Sobol (quasi-random)</option>
             <option value="halton" data-i18n="sampling.halton">Halton (quasi-random)</option>
           </select>
-          <div class="hint" data-i18n="sampling.hint">Quasi-random (QMC) sequences cover the area evenly, without the clumps and gaps of pseudo-random — the density converges with fewer references. Successive clicks continue the sequence rather than repeat it.</div>
-          <div class="row" style="margin-top: 4px;">
-            <button type="button" class="secondary" id="ref-place-random" data-i18n="ref.place_random">Place random</button>
-            <button type="button" class="secondary" id="ref-clear" data-i18n="ref.clear">Clear refs</button>
-          </div>
           <div class="hint" id="ref-display" data-i18n="ref.none" style="margin-top: 3px;">no references placed</div>
           <label style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
             <input type="checkbox" id="refs-visible" checked />
@@ -784,7 +804,6 @@
           </label>
           <label data-i18n="ref.load_file" style="margin-top: 6px;">Load reference points (GeoJSON)</label>
           <input type="file" id="ref-file" accept=".geojson,.json" />
-          <div class="hint" data-i18n="ref.load_file.hint" style="margin-top: 3px;">Load a GeoJSON of Point features (e.g. census/points.geojson). Each point becomes a reference; points outside the DEM are skipped. Replaces the current references; capped at 2000.</div>
           <label style="display: flex; align-items: center; gap: 6px; margin-top: 6px;">
             <input type="checkbox" id="use-backend" />
             <span data-i18n="param.use_backend">Use native backend (Rust)</span>
@@ -792,11 +811,9 @@
           <div id="backend-extra" style="display: none;">
             <label data-i18n="param.backend_url">Backend URL</label>
             <input type="text" id="backend-url" value="http://127.0.0.1:8077" spellcheck="false" />
-            <div class="hint" data-i18n="backend.hint">Optional local server (backend/ in the repo, cargo run --release). Density runs are sent there and computed on all cores; if unreachable, the app silently falls back to the in-browser worker pool.</div>
           </div>
           <label data-i18n="param.max_workers" style="margin-top: 6px;">Max compute workers (0 = auto)</label>
           <input type="number" id="max-workers" value="0" min="0" max="64" step="1" />
-          <div class="hint" data-i18n="max_workers.hint">Advanced: parallelise density across this many Web Workers. 0 = auto (sized to cores and available memory). Only raise it if your machine has more RAM than the browser reports — each worker needs roughly 5 GB on a large DEM, so over-committing can crash the tab.</div>
         </div>
         <div id="topn-extra" style="display: none;">
           <div class="row">
@@ -826,7 +843,10 @@
       <button id="run" data-i18n="btn.compute" disabled>Compute</button>
       <div id="time-estimate" style="font-size: 10px; color: var(--muted); margin-top: 3px; text-align: center;"></div>
       <div class="progress" id="progress"><div class="bar"></div></div>
-      <div id="status"></div>
+      <!-- Primary feedback channel (load / compute / done / errors / point
+           picking). role=status + aria-live=polite so assistive tech
+           announces each update; aria-atomic re-reads the whole line. -->
+      <div id="status" role="status" aria-live="polite" aria-atomic="true"></div>
 
       <div class="group" style="margin-top: 8px;">
         <h2 data-i18n="group.result">Result</h2>
@@ -863,11 +883,7 @@
               <input type="checkbox" id="tile-visible" checked />
               <span data-i18n="layer.tiles">rmsampa-v2 tiles</span>
             </label>
-            <input type="range" id="tile-opacity" min="0" max="1" step="0.05" value="0.85" />
-          </div>
-          <div class="hint" data-i18n-html="layer.tiles.hint">
-            <a href="https://telhas.pedalhidrografi.co/rmsampa-v2/" target="_blank" rel="noopener" style="color: var(--accent-2);">XYZ tiles</a>
-            from pedalhidrografi.co.
+            <input type="range" id="tile-opacity" min="0" max="1" step="0.05" value="0.85" data-i18n-aria="aria.opacity_tiles" />
           </div>
         </div>
 
@@ -880,9 +896,8 @@
               <input type="checkbox" id="relief-visible" />
               <span data-i18n="layer.relief">Relief (DEM)</span>
             </label>
-            <input type="range" id="relief-opacity" min="0" max="1" step="0.05" value="0.85" />
+            <input type="range" id="relief-opacity" min="0" max="1" step="0.05" value="0.85" data-i18n-aria="aria.opacity_relief" />
           </div>
-          <div class="hint" data-i18n="layer.relief.hint">cmocean.phase, p5–p80 · slope 0–p80, γ=1.2</div>
         </div>
 
         <!-- Energy layer controls -->
@@ -892,7 +907,7 @@
               <input type="checkbox" id="energy-visible" checked />
               <span data-i18n="layer.energy">Energy</span>
             </label>
-            <input type="range" id="energy-opacity" min="0" max="1" step="0.05" value="0.85" />
+            <input type="range" id="energy-opacity" min="0" max="1" step="0.05" value="0.85" data-i18n-aria="aria.opacity_energy" />
           </div>
           <!-- Shown only when a compare run produced both scenarios. -->
           <div id="energy-source-row" style="display: none;">
@@ -913,7 +928,6 @@
               <input type="number" id="vmax" placeholder="auto" step="any" />
             </div>
           </div>
-          <div class="hint" data-i18n="energy.range_hint">Auto = sqrt-stretched; pin either bound for linear with clamping.</div>
         </div>
 
         <!-- Passes layer controls (overlaid above energy) -->
@@ -923,7 +937,7 @@
               <input type="checkbox" id="passes-visible" checked />
               <span data-i18n="layer.passes">Passes (overlay)</span>
             </label>
-            <input type="range" id="passes-opacity" min="0" max="1" step="0.05" value="0.7" />
+            <input type="range" id="passes-opacity" min="0" max="1" step="0.05" value="0.7" data-i18n-aria="aria.opacity_passes" />
           </div>
           <div class="row">
             <div>
@@ -950,7 +964,6 @@
                controls above drive the red (constrained) channel. Blank =
                inherit the red channel's resolved value. -->
           <div id="passes-dual-row" style="display: none;">
-            <div class="hint" data-i18n="passes.dual" style="margin-top: 4px;">Green channel (unconstrained) — blank = same as red</div>
             <div class="row">
               <div>
                 <label>min</label>
@@ -981,7 +994,6 @@
             <option value="overlay"      data-i18n="blend.overlay">overlay</option>
             <option value="energy"       data-i18n="blend.energy">energy color (passes = opacity)</option>
           </select>
-          <div class="hint" data-i18n="passes.hint">Greyscale ramp; with "add" mode high-pass cells brighten the energy field beneath. "Energy color" paints corridors with the energy field's colormap and uses passes for opacity — min/max/γ shape the alpha ramp. Same auto / pinned-range behaviour as Energy.</div>
         </div>
 
         <button class="secondary" id="range-reset" data-i18n="btn.range_reset" style="margin-top: 4px;">Reset ranges to auto</button>
@@ -1085,12 +1097,23 @@
 
           <h4 data-i18n="help.h.params">3 · Parâmetros</h4>
           <p data-i18n-html="help.p.params"></p>
+          <p data-i18n-html="help.p.budget_mode"></p>
+
+          <h4 data-i18n="help.h.maximize">Maximizar energia</h4>
+          <p data-i18n-html="help.p.maximize"></p>
 
           <h4 data-i18n="help.h.compute">4 · Computar</h4>
           <p data-i18n-html="help.p.compute"></p>
+          <p data-i18n-html="help.p.backend"></p>
+          <p data-i18n-html="help.p.workers"></p>
 
           <h4 data-i18n="help.h.viz">5 · Visualização</h4>
           <p data-i18n-html="help.p.viz"></p>
+          <p data-i18n-html="help.p.energy_range"></p>
+          <p data-i18n-html="help.p.passes_blend"></p>
+          <p data-i18n-html="help.p.passes_dual"></p>
+          <p data-i18n-html="help.p.relief"></p>
+          <p data-i18n-html="help.p.tiles"></p>
 
           <h4 data-i18n="help.h.bundle">6 · Salvar / restaurar</h4>
           <p data-i18n-html="help.p.bundle"></p>
@@ -1118,10 +1141,14 @@
 
           <h4 data-i18n="help.h.density">Densidade multi-referência</h4>
           <p data-i18n-html="help.p.density"></p>
+          <p data-i18n-html="help.p.sampling"></p>
+          <p data-i18n-html="help.p.ref_file"></p>
+          <p data-i18n-html="help.p.ref_direction"></p>
 
           <h4 data-i18n="help.h.network">Restrição por rede vetorial (.gpkg)</h4>
           <p data-i18n-html="help.p.network"></p>
           <p data-i18n-html="help.p.network_extra"></p>
+          <p data-i18n-html="help.p.network_osm"></p>
 
           <h4 data-i18n="help.h.interp">Interpolação fora da rede</h4>
           <p data-i18n-html="help.p.interp"></p>
@@ -1137,6 +1164,17 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v17</strong> — 2026-06-19<br/>
+              UI / accessibility pass. The "Load DEM" and "vector network" groups now light up once
+              their data is loaded. Parameter &amp; visualization choices persist across reloads
+              (localStorage; session data like the DEM and points isn't saved — that's what bundles
+              are for). The clear-points / place-random / clear-refs buttons are clustered together,
+              and only the src/dst picker fades in density mode. The sidebar hint paragraphs were
+              removed and their content moved into this Help modal (now also covering maximize, the
+              OSM pull, the native backend, worker sizing and QMC sampling). Accessibility: the
+              status line is an aria-live region, field labels are associated with their inputs,
+              opacity sliders have labels, there's a keyboard focus ring, and the example loaders
+              are buttons.</p>
               <p><strong>v16</strong> — 2026-06-19<br/>
               Time estimate fixed for network/graph runs. Graph mode ("follow the vectors") was
               estimated with the raster model (~1000× too high — a graph search is ∝ edges, not

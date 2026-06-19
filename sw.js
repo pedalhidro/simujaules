@@ -127,7 +127,22 @@
 //              corrected independently (a slow interp no longer inflates the
 //              compute estimate), and toggling interp / graph / constrain now
 //              moves the number. Bumped so the updated app.js installs.
-const VERSION  = "v16";
+//   v16 → v17: UI/accessibility pass. The "Load DEM" and "vector network"
+//              groups light up (accent border + bar) once their data is
+//              loaded. Parameter/visualization choices now persist across
+//              reloads (localStorage). The clear-points / place-random /
+//              clear-refs buttons are clustered together (clear-points on
+//              top); only the src/dst picker fades in density mode now, not
+//              the whole group. Sidebar hint paragraphs were removed and
+//              their content migrated into the Help modal (which now also
+//              documents maximize, OSM pull, the native backend, worker
+//              sizing, QMC sampling, etc.). Accessibility: #status is an
+//              aria-live region, field labels are programmatically
+//              associated with their inputs, opacity sliders got aria-labels,
+//              a global :focus-visible ring was added, and the example DEM
+//              loaders are now <button>s instead of <a href="#">. Bumped so
+//              the updated app.js / index.html install.
+const VERSION  = "v17";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

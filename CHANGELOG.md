@@ -9,6 +9,41 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v17 — 2026-06-19
+
+### Improvements
+
+- **Loaded-state highlight.** The "Load DEM" (1) and "vector network" (1b)
+  groups now light up (accent border + left bar) once their data is loaded,
+  so it's obvious at a glance what's in play.
+- **Choices persist across reloads.** Parameter and visualization settings
+  (mode, α/β/η, budget, toggles, N refs, sampling, colormaps, opacities,
+  ranges, network params, basemap, …) are saved to `localStorage` and
+  restored on the next visit. Session data (the loaded DEM, src/dst, reference
+  points) is deliberately not persisted — that's what bundles are for.
+- **Point/reference buttons clustered.** "Clear points", "Place random" and
+  "Clear refs" now sit together in the Pick-points group with "Clear points"
+  on top. In density mode only the src/dst picker fades out (it's replaced by
+  references) instead of the whole group, so the reference actions stay live.
+
+### Accessibility
+
+- The status line is now an `aria-live` region, so loads / computes / errors /
+  point-picking are announced to assistive tech.
+- Every field label is programmatically associated with its input; the layer
+  opacity sliders got `aria-label`s; a keyboard `:focus-visible` ring was
+  added (there was none); and the example-DEM loaders are real `<button>`s
+  instead of `<a href="#">`.
+
+### Sidebar declutter
+
+- The explanatory hint paragraphs were removed from the sidebar and their
+  content migrated into the Help modal (`?`), which now also documents the
+  maximize/length-DP mode, the OSM/Overpass pull, the native backend,
+  worker-pool sizing, QMC sampling, GeoJSON reference loading, the round-trip
+  budget modes, and the energy/passes range & blend controls. Nothing was
+  lost — just rehomed.
+
 ## v16 — 2026-06-19
 
 ### Fixes

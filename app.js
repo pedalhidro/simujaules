@@ -15,6 +15,7 @@
 //   data-i18n="key"       → textContent
 //   data-i18n-html="key"  → innerHTML  (use for strings with markup)
 //   data-i18n-title="key" → title attribute
+//   data-i18n-aria="key"  → aria-label (controls with no visible label)
 //
 // JS-set strings (status messages, computed labels) call t("key") directly.
 
@@ -61,7 +62,7 @@ const STRINGS = {
   "net.junctions_crossings": { pt: "também nos cruzamentos", en: "also at crossings" },
   "net.junctions_shared":    { pt: "só em extremos compartilhados", en: "only shared endpoints" },
   "net.osm":             { pt: "Puxar ruas do OSM (highway=*)", en: "Pull streets from OSM (highway=*)" },
-  "net.osm_hint":        { pt: "Consulta o Overpass sobre a vista atual ∩ extensão do DEM. Áreas grandes podem demorar ou estourar limites do Overpass — aproxime o zoom primeiro.", en: "Queries Overpass over the current map view ∩ DEM extent. Large areas can take a while or hit Overpass limits — zoom in first." },
+  "help.p.network_osm":  { pt: "Consulta o Overpass sobre a vista atual ∩ extensão do DEM. Áreas grandes podem demorar ou estourar limites do Overpass — aproxime o zoom primeiro.", en: "Queries Overpass over the current map view ∩ DEM extent. Large areas can take a while or hit Overpass limits — zoom in first." },
   "net.compare":         { pt: "Comparar com cenário sem rede", en: "Compare with unconstrained" },
   "layer.energy_source": { pt: "Cenário exibido (energia e passagens)", en: "Displayed scenario (energy & passes)" },
   "esrc.constrained":    { pt: "restrito à rede", en: "network-constrained" },
@@ -93,34 +94,34 @@ const STRINGS = {
   "param.budget_mode":   { pt: "Orçamento aplica-se a", en: "Budget applies to" },
   "budget.leg":          { pt: "cada perna (ida OU volta)", en: "each leg (out OR back)" },
   "budget.total":        { pt: "ida e volta (total)", en: "round trip (total)" },
-  "budget_mode.hint":    { pt: "Só no modo ida-e-volta. \"Cada perna\": célula visível se ida ≤ orçamento E volta ≤ orçamento (total pode chegar a 2×). \"Total\": ida + volta ≤ orçamento. A contagem de passagens conta apenas trajetos até células exibidas (dentro do orçamento); células-corredor ainda acumulam os trajetos que passam por elas.", en: 'Round-trip mode only. "Each leg": a cell is shown if out ≤ budget AND back ≤ budget (totals can reach 2×). "Total": out + back ≤ budget. The passes count only counts trajectories to displayed (within-budget) cells; corridor cells still accumulate the trajectories passing through them.' },
+  "help.p.budget_mode":  { pt: "Só no modo ida-e-volta. \"Cada perna\": célula visível se ida ≤ orçamento E volta ≤ orçamento (total pode chegar a 2×). \"Total\": ida + volta ≤ orçamento. A contagem de passagens conta apenas trajetos até células exibidas (dentro do orçamento); células-corredor ainda acumulam os trajetos que passam por elas.", en: 'Round-trip mode only. "Each leg": a cell is shown if out ≤ budget AND back ≤ budget (totals can reach 2×). "Total": out + back ≤ budget. The passes count only counts trajectories to displayed (within-budget) cells; corridor cells still accumulate the trajectories passing through them.' },
   "param.want_passes":   { pt: "Calcular contagem de passagens", en: "Compute passes count (route density)" },
   "param.want_topn":     { pt: "Calcular top-N rotas", en: "Compute top-N routes" },
   "param.want_density":  { pt: "Calcular densidade multi-referência", en: "Compute multi-reference density" },
   "param.use_backend":   { pt: "Usar backend nativo (Rust)", en: "Use native backend (Rust)" },
   "param.backend_url":   { pt: "URL do backend", en: "Backend URL" },
-  "backend.hint":        { pt: "Servidor local opcional (backend/ no repositório, cargo run --release). Execuções de densidade são enviadas para lá e computadas em todos os núcleos; se inacessível, o app volta silenciosamente para o pool de workers do navegador.", en: "Optional local server (backend/ in the repo, cargo run --release). Density runs are sent there and computed on all cores; if unreachable, the app silently falls back to the in-browser worker pool." },
+  "help.p.backend":      { pt: "Servidor local opcional (backend/ no repositório, cargo run --release). Execuções de densidade são enviadas para lá e computadas em todos os núcleos; se inacessível, o app volta silenciosamente para o pool de workers do navegador.", en: "Optional local server (backend/ in the repo, cargo run --release). Density runs are sent there and computed on all cores; if unreachable, the app silently falls back to the in-browser worker pool." },
   "param.max_workers":   { pt: "Máx. de workers de cálculo (0 = auto)", en: "Max compute workers (0 = auto)" },
-  "max_workers.hint":    { pt: "Avançado: paraleliza a densidade entre este número de Web Workers. 0 = auto (dimensionado pelos núcleos e memória disponível). Só aumente se sua máquina tiver mais RAM do que o navegador reporta — cada worker usa cerca de 5 GB em um DEM grande, então exceder pode travar a aba.", en: "Advanced: parallelise density across this many Web Workers. 0 = auto (sized to cores and available memory). Only raise it if your machine has more RAM than the browser reports — each worker needs roughly 5 GB on a large DEM, so over-committing can crash the tab." },
+  "help.p.workers":      { pt: "Avançado: paraleliza a densidade entre este número de Web Workers. 0 = auto (dimensionado pelos núcleos e memória disponível). Só aumente se sua máquina tiver mais RAM do que o navegador reporta — cada worker usa cerca de 5 GB em um DEM grande, então exceder pode travar a aba.", en: "Advanced: parallelise density across this many Web Workers. 0 = auto (sized to cores and available memory). Only raise it if your machine has more RAM than the browser reports — each worker needs roughly 5 GB on a large DEM, so over-committing can crash the tab." },
   "param.maximize":      { pt: "Maximizar energia (inverter otimização)", en: "Maximize energy (reverse optimization)" },
   "param.max_length":    { pt: "Comprimento L (arestas, 0 = sem restrição)", en: "Path length L (edges, 0 = unconstrained)" },
-  "param.max_length.hint": { pt: "0: Dijkstra invertido (geometricamente curto, custo denso). L>0: DP em camadas encontra o caminho de custo máximo com exatamente L arestas entre src e dst. Limite de memória ≈ 256 MB ⇒ L·H·W precisa caber; DEMs grandes limitam L a poucas dezenas.", en: "0: inverted Dijkstra (geometrically short, cost-dense). L>0: layered DP finds the max-cost path of exactly L edges from src to dst. Memory cap ≈ 256 MB ⇒ L·H·W must fit; large DEMs limit L to a few dozen." },
+  "help.p.maximize":     { pt: "0: Dijkstra invertido (geometricamente curto, custo denso). L>0: DP em camadas encontra o caminho de custo máximo com exatamente L arestas entre src e dst. Limite de memória ≈ 256 MB ⇒ L·H·W precisa caber; DEMs grandes limitam L a poucas dezenas.", en: "0: inverted Dijkstra (geometrically short, cost-dense). L>0: layered DP finds the max-cost path of exactly L edges from src to dst. Memory cap ≈ 256 MB ⇒ L·H·W must fit; large DEMs limit L to a few dozen." },
   "param.n_refs":        { pt: "N referências", en: "N references" },
   "param.ref_source":    { pt: "Origem das referências", en: "Reference source" },
   "ref.click":           { pt: "clicar no mapa", en: "click on map" },
   "ref.random":          { pt: "aleatórias", en: "random" },
-  "ref.direction_hint":  { pt: "A direção segue o Modo acima.", en: "Direction follows the Mode above." },
+  "help.p.ref_direction": { pt: "A direção segue o Modo acima.", en: "Direction follows the Mode above." },
   "ref.place_random":    { pt: "Distribuir aleatórias", en: "Place random" },
   "param.sampling":      { pt: "Estratégia de amostragem", en: "Sampling strategy" },
   "sampling.random":     { pt: "pseudoaleatória", en: "pseudo-random" },
   "sampling.sobol":      { pt: "Sobol (quase-aleatória)", en: "Sobol (quasi-random)" },
   "sampling.halton":     { pt: "Halton (quase-aleatória)", en: "Halton (quasi-random)" },
-  "sampling.hint":       { pt: "Sequências quase-aleatórias (QMC) cobrem a área uniformemente sem aglomerados nem vazios — melhor convergência da densidade com menos referências. Cliques sucessivos continuam a sequência em vez de repeti-la.", en: "Quasi-random (QMC) sequences cover the area evenly, without the clumps and gaps of pseudo-random — the density converges with fewer references. Successive clicks continue the sequence rather than repeat it." },
+  "help.p.sampling":     { pt: "Sequências quase-aleatórias (QMC) cobrem a área uniformemente sem aglomerados nem vazios — melhor convergência da densidade com menos referências. Cliques sucessivos continuam a sequência em vez de repeti-la.", en: "Quasi-random (QMC) sequences cover the area evenly, without the clumps and gaps of pseudo-random — the density converges with fewer references. Successive clicks continue the sequence rather than repeat it." },
   "ref.clear":           { pt: "Limpar referências", en: "Clear refs" },
   "ref.none":            { pt: "nenhuma referência marcada", en: "no references placed" },
   "ref.show_markers":    { pt: "Mostrar marcadores de referência", en: "Show reference markers" },
   "ref.load_file":       { pt: "Carregar referências (GeoJSON)", en: "Load reference points (GeoJSON)" },
-  "ref.load_file.hint":  { pt: "Carregue um GeoJSON de pontos (Point), ex.: census/points.geojson. Cada ponto vira uma referência; pontos fora do DEM são ignorados. Substitui as referências atuais; limite de 2000.", en: "Load a GeoJSON of Point features (e.g. census/points.geojson). Each point becomes a reference; points outside the DEM are skipped. Replaces the current references; capped at 2000." },
+  "help.p.ref_file":     { pt: "Carregue um GeoJSON de pontos (Point), ex.: census/points.geojson. Cada ponto vira uma referência; pontos fora do DEM são ignorados. Substitui as referências atuais; limite de 2000.", en: "Load a GeoJSON of Point features (e.g. census/points.geojson). Each point becomes a reference; points outside the DEM are skipped. Replaces the current references; capped at 2000." },
   "ref.loaded":          { pt: "{0} referências carregadas de {1}.", en: "Loaded {0} reference points from {1}." },
   "ref.loaded.skipped":  { pt: "{0} referências carregadas de {1} ({2} fora do DEM ignoradas).", en: "Loaded {0} reference points from {1} ({2} skipped outside the DEM)." },
   "ref.load.no_dem":     { pt: "Carregue um DEM antes de carregar referências.", en: "Load a DEM before loading reference points." },
@@ -130,9 +131,15 @@ const STRINGS = {
   "param.n_routes":      { pt: "N (1–20)", en: "N (1–20)" },
   "param.penalty":       { pt: "penalidade / força", en: "penalty / strength" },
   "param.repulsion":     { pt: "Modo de repulsão", en: "Repulsion mode" },
-  "rep.per_cell":        { pt: "por célula (penalidade^usadas) — afiada", en: "per-cell (penalty^used) — sharp" },
-  "rep.linear":          { pt: "linear 1/(d+1) — suave, ampla", en: "linear 1/(d+1) — soft, wide" },
-  "rep.square":          { pt: "quadrática 1/(d²+1) — suave, local", en: "square 1/(d²+1) — soft, local" },
+  // Screen-reader names for the opacity sliders (no visible label of their
+  // own — they sit beside the layer checkbox). Applied via data-i18n-aria.
+  "aria.opacity_tiles":  { pt: "Opacidade da camada de tiles", en: "Tile layer opacity" },
+  "aria.opacity_relief": { pt: "Opacidade da camada de relevo", en: "Relief layer opacity" },
+  "aria.opacity_energy": { pt: "Opacidade da camada de energia", en: "Energy layer opacity" },
+  "aria.opacity_passes": { pt: "Opacidade da camada de passagens", en: "Passes layer opacity" },
+  "rep.per_cell":        { pt: "por célula (penalidade^usadas)", en: "per-cell (penalty^used)" },
+  "rep.linear":          { pt: "linear 1/(d+1)", en: "linear 1/(d+1)" },
+  "rep.square":          { pt: "quadrática 1/(d²+1)", en: "square 1/(d²+1)" },
   "param.routes_cmap":   { pt: "Colormap das rotas", en: "Routes colormap" },
   "param.field_cmap":    { pt: "Colormap do campo", en: "Field colormap" },
 
@@ -144,15 +151,15 @@ const STRINGS = {
   "btn.refresh_style":   { pt: "Atualizar estilo", en: "Refresh style" },
   "result.empty":        { pt: "—", en: "—" },
   "layer.tiles":         { pt: "rmsampa-v2 tiles", en: "rmsampa-v2 tiles" },
-  "layer.tiles.hint":    { pt: '<a href="https://telhas.pedalhidrografi.co/rmsampa-v2/" target="_blank" rel="noopener" style="color: var(--accent-2);">Tiles XYZ</a> de pedalhidrografi.co.', en: '<a href="https://telhas.pedalhidrografi.co/rmsampa-v2/" target="_blank" rel="noopener" style="color: var(--accent-2);">XYZ tiles</a> from pedalhidrografi.co.' },
+  "help.p.tiles":        { pt: '<a href="https://telhas.pedalhidrografi.co/rmsampa-v2/" target="_blank" rel="noopener" style="color: var(--accent-2);">Tiles XYZ</a> de pedalhidrografi.co.', en: '<a href="https://telhas.pedalhidrografi.co/rmsampa-v2/" target="_blank" rel="noopener" style="color: var(--accent-2);">XYZ tiles</a> from pedalhidrografi.co.' },
   "layer.relief":        { pt: "Relevo (DEM)", en: "Relief (DEM)" },
-  "layer.relief.hint":   { pt: "cmocean.phase, p5–p80 · declividade 0–p80 (γ=1.2) multiplicada", en: "cmocean.phase, p5–p80 · slope 0–p80 (γ=1.2) multiplied" },
+  "help.p.relief":       { pt: "Camada de relevo do DEM: cmocean.phase, p5–p80 · declividade 0–p80 (γ=1.2) multiplicada.", en: "DEM relief layer: cmocean.phase, p5–p80 · slope 0–p80 (γ=1.2) multiplied." },
   "layer.energy":        { pt: "Energia", en: "Energy" },
   "vmin.label":          { pt: "min (auto = p1)", en: "min (auto = p1)" },
   "vmax.label":          { pt: "max (auto = p80)", en: "max (auto = p80)" },
   "vmin.passes":         { pt: "min (auto = p10)", en: "min (auto = p10)" },
   "vmax.passes":         { pt: "max (auto = p90)", en: "max (auto = p90)" },
-  "energy.range_hint":   { pt: "Auto = sqrt-stretched; pino qualquer limite para linear com clamping.", en: "Auto = sqrt-stretched; pin either bound for linear with clamping." },
+  "help.p.energy_range": { pt: "Faixa da energia: Auto = esticada por raiz quadrada; fixe qualquer limite (min/max) para escala linear com clamping.", en: "Energy range: Auto = sqrt-stretched; pin either bound (min/max) for a linear scale with clamping." },
   "layer.passes":        { pt: "Passagens (overlay)", en: "Passes (overlay)" },
   "layer.basemap":       { pt: "Mapa base", en: "Basemap" },
   "basemap.osm":         { pt: "OSM (padrão)", en: "OSM (default)" },
@@ -179,8 +186,8 @@ const STRINGS = {
   "blend.multiply":      { pt: "multiply", en: "multiply" },
   "blend.overlay":       { pt: "overlay", en: "overlay" },
   "blend.energy":        { pt: "cor da energia (passagens = opacidade)", en: "energy color (passes = opacity)" },
-  "passes.dual":         { pt: "Canal verde (sem restrição) — vazio = igual ao vermelho", en: "Green channel (unconstrained) — blank = same as red" },
-  "passes.hint":         { pt: "Rampa cinza; com modo \"soma\", células de alta passagem clareiam o campo de energia abaixo. \"Cor da energia\" pinta os corredores com o colormap do campo de energia e usa as passagens como opacidade — min/max/γ moldam a rampa de alfa. Mesmo comportamento auto/pinado da Energia.", en: 'Greyscale ramp; with "add" mode high-pass cells brighten the energy field beneath. "Energy color" paints corridors with the energy field\'s colormap and uses passes for opacity — min/max/γ shape the alpha ramp. Same auto / pinned-range behaviour as Energy.' },
+  "help.p.passes_dual":  { pt: "Vista de diferença: o canal verde (cenário sem restrição) — deixar em branco usa o mesmo valor do vermelho (cenário com restrição).", en: "Difference view: the green channel (unconstrained scenario) — leave blank to use the same value as the red (constrained) channel." },
+  "help.p.passes_blend": { pt: "Mistura das passagens: rampa cinza; com modo \"soma\", células de alta passagem clareiam o campo de energia abaixo. \"Cor da energia\" pinta os corredores com o colormap do campo de energia e usa as passagens como opacidade — min/max/γ moldam a rampa de alfa. Mesmo comportamento auto/pinado da Energia.", en: 'Greyscale ramp; with "add" mode high-pass cells brighten the energy field beneath. "Energy color" paints corridors with the energy field\'s colormap and uses passes for opacity — min/max/γ shape the alpha ramp. Same auto / pinned-range behaviour as Energy.' },
   "btn.range_reset":     { pt: "Reset auto", en: "Reset ranges to auto" },
   "btn.download_bundle": { pt: "Baixar bundle (.zip)", en: "Download bundle (.zip)" },
   "btn.export_rendered": { pt: "Exportar imagens renderizadas (.zip)", en: "Export rendered images (.zip)" },
@@ -196,6 +203,7 @@ const STRINGS = {
   "help.p.density_pts":  { pt: "<strong>Densidade multi-referência:</strong> ative <em>Calcular densidade multi-referência</em>. Os cliques agora adicionam pontos numerados. Use \"Distribuir aleatórias\" ou ajuste <em>N referências</em>. Política FIFO: ao exceder N, o mais antigo é descartado.", en: '<strong>Multi-reference density:</strong> turn on <em>Compute multi-reference density</em>. Clicks now add numbered reference points. Use "Place random" or adjust <em>N references</em>. FIFO policy: above N, the oldest is dropped.' },
   "help.h.params":       { pt: "3 · Parâmetros", en: "3 · Parameters" },
   "help.p.params":       { pt: "<code>α</code> custo por metro horizontal · <code>β</code> custo por metro de subida · <code>η</code> fração da subida recuperada na descida (0–1) · <em>Orçamento</em> para podar caminhos acima de um limiar (≤0 = sem orçamento).", en: '<code>α</code> cost per horizontal metre · <code>β</code> cost per metre uphill · <code>η</code> fraction of the climb recovered on descent (0–1) · <em>Budget</em> prunes paths above a threshold (≤0 = no budget).' },
+  "help.h.maximize":     { pt: "Maximizar energia", en: "Maximize energy" },
   "help.h.compute":      { pt: "4 · Calcular", en: "4 · Compute" },
   "help.p.compute":      { pt: "Aperte <em>Calcular</em>. Habilitado quando há fonte (modo padrão) ou pelo menos uma referência (modo densidade). Estimativa de tempo aparece antes; durante a execução, a barra mostra o tempo restante.", en: 'Hit <em>Compute</em>. Enabled when a source is set (default mode) or at least one reference (density mode). A time estimate appears beforehand; during the run, the bar shows time remaining.' },
   "help.h.viz":          { pt: "5 · Visualização", en: "5 · Visualisation" },
@@ -258,6 +266,11 @@ function applyTranslations() {
   document.querySelectorAll("[data-i18n-title]").forEach((el) => {
     el.title = t(el.dataset.i18nTitle);
   });
+  // aria-label for controls with no visible label of their own (e.g. the
+  // layer opacity sliders) — kept in sync with the language toggle.
+  document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
+    el.setAttribute("aria-label", t(el.dataset.i18nAria));
+  });
   // The lang pill displays the OTHER language (the one a click would switch to)
   // — clearer affordance than showing the current language.
   const pill = document.getElementById("lang-tag");
@@ -271,6 +284,105 @@ function setLang(lang) {
   currentLang = lang;
   try { localStorage.setItem("simu-lang", lang); } catch {}
   applyTranslations();
+}
+
+// ---- Loaded-group highlight (style only — never affects compute) --------
+// Lights up the whole "Load DEM" / "vector network" group while its data is
+// present. There is no central state-change event in this app — DOM is
+// driven off polled state — so this is called at every DEM/network load and
+// clear site. `.toggle(..., bool)` makes the clear paths self-heal.
+function syncLoadedHighlights() {
+  document.getElementById("load-dem-group")?.classList.toggle("loaded", !!state.dem);
+  document.getElementById("network-group")?.classList.toggle("loaded", !!state.networkMask);
+}
+
+// ---- Accessible names for standalone labels -----------------------------
+// Most numeric/select fields are labelled by a sibling <label> with no `for`,
+// so assistive tech reads them as unnamed. Associate each orphan label with
+// the form control immediately after it (those controls all carry ids).
+// Labels that WRAP their control (the checkbox rows) already name it — skip.
+// Run once after the DOM is ready; the associations don't change with language.
+function associateOrphanLabels() {
+  document.querySelectorAll("label:not([for])").forEach((lab) => {
+    if (lab.querySelector("input, select, textarea")) return; // wrapping label
+    const ctrl = lab.nextElementSibling;
+    if (ctrl && /^(INPUT|SELECT|TEXTAREA)$/.test(ctrl.tagName) && ctrl.id) {
+      lab.htmlFor = ctrl.id;
+    }
+  });
+}
+
+// ---- Parameter persistence (remember choices across reloads) ------------
+// Saves the parameter / network / visualization control values to
+// localStorage and restores them on load, so the user's knob settings
+// survive a page reload. Deliberately EXCLUDES session data (the loaded DEM,
+// src/dst, reference points — those ride in bundles) and `max-workers`
+// (already persisted separately as simu-max-workers).
+const PERSIST_KEY = "simu-params";
+const PERSIST_IDS = [
+  // Parameters
+  "mode", "alpha", "beta", "eta", "e-max", "e-max-mode",
+  "want-passes", "want-topn", "want-density", "maximize", "maximize-length",
+  "n-refs", "ref-source", "ref-sampling", "refs-visible",
+  "use-backend", "backend-url", "n-routes", "penalty", "repulsion-mode",
+  "routes-colormap", "colormap",
+  // Vector network
+  "vec-width", "vec-snap", "vec-constrain", "vec-graph-mode", "vec-junction-mode",
+  "vec-compare", "vec-render", "vec-render-width", "vec-render-opacity",
+  "net-interp", "net-interp-max-dist", "net-interp-smoothing",
+  // Visualization
+  "basemap-select", "tile-visible", "tile-opacity", "relief-visible", "relief-opacity",
+  "energy-visible", "energy-opacity", "vmin", "vmax",
+  "passes-visible", "passes-opacity", "passes-vmin", "passes-vmax",
+  "passes-gamma", "passes-mean-window", "passes-blend",
+  "passes-vmin-b", "passes-vmax-b", "passes-gamma-b", "passes-mean-window-b",
+];
+// Restored controls whose change must re-fire dependent UI (sub-panel
+// show/hide, basemap swap). We dispatch a synthetic change after restoring so
+// the existing sync handlers reconcile the panel. Deliberately EXCLUDES the
+// colormap selects — their change handler calls markStyleDirty(), which would
+// flag a bogus "● refresh" on load; the legend is reconciled directly via the
+// activeColormap assignment + applyColormapToLegend() call below instead.
+const PERSIST_REFIRE = [
+  "mode", "want-density", "want-topn", "maximize", "use-backend", "basemap-select",
+];
+
+function savePersistedParams() {
+  const out = {};
+  for (const id of PERSIST_IDS) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    out[id] = el.type === "checkbox" ? !!el.checked : el.value;
+  }
+  try { localStorage.setItem(PERSIST_KEY, JSON.stringify(out)); } catch {}
+}
+
+// Restore saved values, reconcile dependent UI, then wire change→save.
+// Call LATE in init (after colormap selects are populated and the sub-panel
+// sync handlers are wired) so dispatched changes find their listeners.
+function setupParamPersistence() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(PERSIST_KEY) || "null"); } catch {}
+  if (saved && typeof saved === "object") {
+    for (const id of PERSIST_IDS) {
+      if (!(id in saved)) continue;
+      const el = document.getElementById(id);
+      if (!el) continue;
+      if (el.type === "checkbox") el.checked = !!saved[id];
+      else {
+        el.value = saved[id];
+        if (id === "colormap" && COLORMAPS[saved[id]]) activeColormap = saved[id];
+      }
+    }
+    for (const id of PERSIST_REFIRE) {
+      document.getElementById(id)?.dispatchEvent(new Event("change"));
+    }
+    applyColormapToLegend();
+    applyLayerControls();
+  }
+  for (const id of PERSIST_IDS) {
+    document.getElementById(id)?.addEventListener("change", savePersistedParams);
+  }
 }
 
 // ------- Compute workers -------
@@ -336,6 +448,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // wiring that might read element text. This populates static labels,
   // option text in select elements, etc.
   applyTranslations();
+  // Give every standalone field label an accessible association (for=…).
+  associateOrphanLabels();
   // Language toggle pill — flips PT ↔ EN, persists to localStorage.
   const langPill = document.getElementById("lang-tag");
   if (langPill) {
@@ -538,12 +652,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Drop any source/destination state when entering density mode —
       // it's not used and the leftover markers / UI labels are confusing.
-      // Also fade the "Pick points" group so it's clearly inactive.
-      const pickGroup = document.getElementById("pick-points-group");
-      if (pickGroup) {
-        pickGroup.style.opacity = on ? "0.45" : "1";
-        pickGroup.style.pointerEvents = on ? "none" : "";
+      // Fade ONLY the src/dst picker (references replace it); the reference-
+      // action buttons clustered below it must stay live in density mode.
+      const srcdst = document.getElementById("pick-points-srcdst");
+      if (srcdst) {
+        srcdst.style.opacity = on ? "0.45" : "1";
+        srcdst.style.pointerEvents = on ? "none" : "";
       }
+      // The "Place random" / "Clear refs" cluster only applies in density mode.
+      const refActions = document.getElementById("ref-actions-row");
+      if (refActions) refActions.style.display = on ? "" : "none";
       if (on) {
         state.src = null;
         state.dst = null;
@@ -748,6 +866,11 @@ document.addEventListener("DOMContentLoaded", () => {
     applyLayerOrder();
     renderOrderList();
   });
+
+  // Restore saved parameter/viz choices and start persisting future edits.
+  // Last so the colormap selects are populated and every sub-panel sync
+  // handler is already wired (restore dispatches synthetic change events).
+  setupParamPersistence();
 });
 
 const map = L.map("map", { preferCanvas: true }).setView([-23.55, -46.63], 12);
@@ -1382,6 +1505,7 @@ async function loadDemFromArrayBuffer(buf, label) {
   `;
   status.textContent = `${label} loaded. Click on the map to set source point.`;
   updateRunButtonState();
+  syncLoadedHighlights(); // light up group 1A (and 1B was just cleared above)
   estimateRunTime();
 
   // Build the cmocean.phase + slope hillshade for the new DEM. Renders
@@ -1757,6 +1881,7 @@ async function loadVectorNetwork(file) {
     cancelActiveCompute();   // …and so would an in-flight one
     state.networkLines = collected;
     applyNetworkLinesOverlay();
+    syncLoadedHighlights(); // light up group 1B
   } finally {
     db.close();
     progress.classList.remove("active");
@@ -1815,6 +1940,7 @@ function installNetworkFromLines(lines, srsId, sourceLabel) {
   }
   state.networkLines = kept;
   applyNetworkLinesOverlay();
+  syncLoadedHighlights(); // light up group 1B
   return true;
 }
 
@@ -1891,6 +2017,7 @@ function clearVectorNetwork() {
   if (meta) meta.innerHTML = "No network loaded.";
   const inp = document.getElementById("vector-file");
   if (inp) inp.value = "";
+  syncLoadedHighlights(); // group 1B no longer "loaded"
 }
 
 // ---- Optional vector-network rendering (black lines, fixed ground width) --
