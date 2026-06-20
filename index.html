@@ -1222,6 +1222,20 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v19</strong> — 2026-06-19<br/>
+              Optional OSM bridges &amp; tunnels (group 1d). A dedicated "Pull bridges &amp; tunnels from
+              OSM" control queries Overpass for bridge (and optionally tunnel) ways over the DEM
+              extent and models each as a level deck between its two ground abutments — useful for
+              inland viaducts over valleys/saddles, not just water (a bare-earth DEM omits the deck,
+              so routing over a bridge otherwise dives into the gap below). Each deck becomes a portal
+              edge between its end cells at the flat-deck cost, relaxed alongside the grid edges, so
+              the route over a bridge and the route under it (a cross-street beneath a viaduct) both
+              stay correct — true multi-level routing on a 2.5-D grid. Graph mode ("follow the
+              vectors") also goes multi-level: the OSM streets pull captures bridge/tunnel/layer tags,
+              so a deck crossing a road at a different layer doesn't connect and deck edges read ~flat.
+              Decks render on the map and persist in bundles as bridges.geojson. The native backend
+              gained matching portal support (bit-for-bit parity). With no bridges loaded, results are
+              unchanged.</p>
               <p><strong>v18</strong> — 2026-06-19<br/>
               Optional impassable mask (group 1c). Upload a binary GeoTIFF (1 = impassable, e.g.
               water bodies); it's resampled onto the DEM grid by area-coverage majority (≥50% of a

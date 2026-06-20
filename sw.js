@@ -151,7 +151,23 @@
 //              app-side in buildComputeGrid() — energy-worker.js and the Rust
 //              backend are unchanged (bit-parity preserved). Bundles gain
 //              impassable.tif. Bumped so the updated app.js / index.html install.
-const VERSION  = "v18";
+//   v18 → v19: Optional OSM bridges & tunnels (group 1d). A dedicated pull
+//              queries Overpass for way[bridge] (+ tunnel=yes) over the DEM
+//              extent and models each as a level deck between its two ground
+//              abutments. In the raster compute each deck is a PORTAL EDGE
+//              between its end cells at the flat-deck cost, relaxed alongside
+//              the grid edges — the cells UNDER the deck keep ground elevation,
+//              so the route over a bridge and the route under it both stay
+//              correct (true multi-level on a 2.5-D grid). Engine change:
+//              dijkstra/densityField (energy-worker.js) + dijkstra_tree
+//              (backend/src/main.rs) gain portal relaxation; portal costs
+//              match bit-for-bit (test-backend.mjs +portals cases). Graph mode
+//              ("follow the vectors") also goes multi-level: the OSM streets
+//              pull captures bridge/tunnel/layer tags, and graph-engine.js
+//              suppresses different-layer crossing junctions + flattens deck
+//              edges. Bundles gain bridges.geojson. Bumped so the updated
+//              worker/backend/app install.
+const VERSION  = "v19";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

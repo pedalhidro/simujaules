@@ -79,6 +79,32 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   other; `node backend/test-backend.mjs` enforces energy bit-parity.
   Backend passes may differ from JS only on EXACT f64 cost ties (radix heap
   vs binary heap tie order) — both trees are valid optima.
+- BRIDGE PORTAL EDGES (OSM bridges/tunnels, group 1d) are relaxed ALONGSIDE
+  the 8-connected grid edges in `dijkstra`, `densityField` and the Rust
+  `dijkstra_tree`: a directed shortcut between a bridge's two abutment cells at
+  the flat-deck cost (`alpha*deckLenM + beta*dh`, downhill-clamped; `reverse`
+  uses the opposite direction's cost). The cells UNDER a deck are never
+  touched, so over- and under-bridge routes coexist on the 2.5-D grid. Portal
+  costs are derived from the same shared inputs (deck length, endpoint heights
+  widened f32→f64, params) in JS (`buildPortalAdj`) and Rust (`build_portals`),
+  so they stay bit-parity — `test-backend.mjs` has `+portals` cases. Per-cell
+  portal iteration order (JS Map vs Rust HashMap) must match insertion order so
+  exact-tie passes agree. App-side, `buildPortals()` packs `state.bridges` into
+  portalU/V/lenM, threaded via `baseMsg` (CLONED, never transferred — shared
+  across the density pool) and appended to the backend Blob (`nPortals`). A*
+  top-N, the max-cost DP path, AND maximize mode do NOT use portals (admissible
+  heuristic; and a long deck cost would invert against the single-grid-edge
+  `maxEdgeCost` to a clamped-0 free shortcut). The OSM bridge pull is refused on
+  a projected DEM (`isGeographic` guard) — lon/lat would map to garbage cells.
+- GRAPH MODE bridges are SEPARATE from the raster portals: graph mode is
+  portal-blind. Instead, the OSM streets pull captures per-way `{deck, layer}`
+  into `state.networkLinesMeta` (parallel to `networkLines`, null for .gpkg),
+  threaded into `graphBuild` as `opts.lineMeta`. `graph-engine.js` then (a)
+  suppresses a crossing junction when a deck crosses a way at a different
+  `layer` (overpass), and (b) flattens deck edges' profiles to a straight line
+  between the line's ground-endpoint elevations (arc-length interpolated). So
+  `state.bridges` (the 1d pull) must NOT invalidate the cached graph, and
+  `state.bridgesToken` is NOT in `computeNetworkGraphToken`.
 - The backend bounds concurrent rayon slices by a memory budget
   (auto-detected, or `SIMU_MAX_MEM_GB` / `--max-mem-gb` / `RAYON_NUM_THREADS`)
   so high ref counts on huge DEMs don't OOM — fewer slices just run more refs

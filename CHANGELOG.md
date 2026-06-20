@@ -9,6 +9,39 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v19 — 2026-06-19
+
+### New features
+
+- **OSM bridges & tunnels (group 1d).** A dedicated "Pull bridges & tunnels
+  from OSM" control queries Overpass for `way[bridge]` (and optionally
+  `tunnel=yes`) over the DEM extent and models each structure as a level deck
+  between its two ground abutments. Decks render on the map and persist in
+  bundles as `bridges.geojson`. Useful for inland viaducts over valleys/saddles,
+  not just water — a bare-earth DEM omits the deck, so routing over a bridge
+  otherwise dives into the gap below.
+- **Multi-level routing via hybrid portal edges (raster modes).** Each deck
+  becomes a portal edge between its end cells at the flat-deck cost, relaxed
+  alongside the 8-connected grid edges. The cells **under** the deck keep their
+  ground elevation, so the route **over** a bridge and the route **under** it
+  (e.g. a cross-street beneath a viaduct) both stay correct — the true
+  multi-level case a single-elevation cell-override cannot represent.
+- **Graph mode ("follow the vectors") multi-level.** The OSM streets pull now
+  captures each way's bridge/tunnel/layer tags; in graph mode a deck crossing a
+  way at a different layer no longer forms a junction (overpass), and deck edges
+  are flattened to a straight profile between their ground endpoints — so a
+  viaduct reads ~flat and routes independently of the road beneath it.
+
+### Internal
+
+- Engine change: `dijkstra`/`densityField` (energy-worker.js) and
+  `dijkstra_tree` (backend/src/main.rs) gain portal relaxation; portal costs are
+  derived from the deck length + endpoint heights with the same asymmetric model
+  in both, so they match bit-for-bit (`backend/test-backend.mjs` gains `+portals`
+  parity cases; `test-worker-pool.mjs` gains portal regression cases). With no
+  bridges loaded the path is inert — results are byte-identical. A* top-N and the
+  max-cost DP path don't use portals yet (an admissible A* heuristic would break).
+
 ## v18 — 2026-06-19
 
 ### New features
