@@ -28,6 +28,25 @@ const STRINGS = {
   "locate.requesting":   { pt: "Buscando localização…",                 en: "Locating…" },
   "locate.centered":     { pt: "Centralizado em {0}, {1}.",             en: "Centred at {0}, {1}." },
   "locate.denied":       { pt: "Acesso à localização negado.",          en: "Location access denied." },
+  // ---- Status / feedback line (#status) ---------------------------------
+  // High-frequency lifecycle + validation messages and the FABDEM loader
+  // (which was written in PT, so EN users saw stray Portuguese). {0}-style
+  // placeholders are filled by t(); user-derived text is escaped by callers.
+  "status.loading_dem":      { pt: "Carregando DEM…",                                  en: "Loading DEM…" },
+  "status.computing":        { pt: "Calculando…",                                      en: "Computing…" },
+  "status.done_ms":          { pt: "Concluído em {0} ms.",                             en: "Done in {0} ms." },
+  "status.network_loaded":   { pt: "Rede carregada.",                                  en: "Network loaded." },
+  "status.load_dem_first":   { pt: "Carregue um DEM primeiro.",                        en: "Load a DEM first." },
+  "status.src_set":          { pt: "Origem definida. Clique de novo para o destino, ou rode.", en: "Source set. Click again to set destination, or run." },
+  "status.both_set":         { pt: "Os dois pontos definidos. Rode para calcular.",    en: "Both points set. Run to compute." },
+  "status.src_replaced":     { pt: "Origem substituída. Clique para o destino, ou rode.", en: "Source replaced. Click to set destination, or run." },
+  "status.density_needs_ref":{ pt: "O modo densidade precisa de ao menos um ponto de referência — clique no mapa ou use \"Distribuir aleatórias\".", en: "Density mode needs at least one reference point — click on the map or use \"Place random\"." },
+  "status.topn_needs_dst":   { pt: "Top-N de rotas exige um ponto de destino.",        en: "Top-N routes requires a destination point." },
+  "status.fabdem_too_large": { pt: "Janela ~{0} MB ({1}×{2} células), acima do limite de {3} MB. Aproxime o zoom.", en: "Viewport ~{0} MB ({1}×{2} cells), over the {3} MB limit. Zoom in." },
+  "status.fabdem_none":      { pt: "Nenhum tile FABDEM encontrado para esta janela (provavelmente oceano ou fora da cobertura ±60° lat).", en: "No FABDEM tiles found for this viewport (likely ocean or outside ±60° lat coverage)." },
+  "status.fabdem_fetching":  { pt: "Buscando {0} tile(s) FABDEM…",                     en: "Fetching {0} FABDEM tile(s)…" },
+  "status.fabdem_mosaic":    { pt: "Mosaico: tile {0}/{1}…",                           en: "Mosaicking: tile {0}/{1}…" },
+  "status.fabdem_all_failed":{ pt: "FABDEM: todos os tiles falharam na leitura (rede?). Tente novamente.", en: "FABDEM: all tile reads failed (network?). Try again." },
   "locate.unavailable":  { pt: "Localização indisponível.",             en: "Location unavailable." },
   "locate.timeout":      { pt: "Tempo esgotado ao buscar localização.", en: "Location lookup timed out." },
   "locate.error":        { pt: "Erro ao buscar localização.",           en: "Location lookup failed." },
@@ -1173,7 +1192,7 @@ state.tileOverlay = L.tileLayer(RMSAMPA_URL, {
 demFile.addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  status.textContent = "Loading DEM…";
+  status.textContent = t("status.loading_dem");
   try {
     const buf = await file.arrayBuffer();
     state.demSourceUrl = null;
@@ -1297,8 +1316,7 @@ async function loadFabdemForView() {
   const estBytes = outW * outH * 4;
   if (estBytes > FABDEM_MAX_BYTES) {
     status.innerHTML =
-      `<span style="color:#ff6b6b">Janela ~${(estBytes / 1024 / 1024).toFixed(0)} MB ` +
-      `(${outW}×${outH} cells), acima do limite de ${FABDEM_MAX_BYTES / 1024 / 1024} MB. Aproxime o zoom.</span>`;
+      `<span style="color:#ff6b6b">${t("status.fabdem_too_large", (estBytes / 1024 / 1024).toFixed(0), outW, outH, FABDEM_MAX_BYTES / 1024 / 1024)}</span>`;
     return;
   }
 
@@ -1321,7 +1339,7 @@ async function loadFabdemForView() {
     }
   }
 
-  status.textContent = `Buscando ${tileSpecs.length} tile(s) FABDEM…`;
+  status.textContent = t("status.fabdem_fetching", tileSpecs.length);
   progress.classList.add("active");
   progressBar.style.width = "0%";
 
@@ -1344,8 +1362,7 @@ async function loadFabdemForView() {
 
     if (!opened.length) {
       status.innerHTML =
-        '<span style="color:#ff6b6b">Nenhum tile FABDEM encontrado para esta janela ' +
-        '(provavelmente oceano ou fora da cobertura ±60° lat).</span>';
+        `<span style="color:#ff6b6b">${t("status.fabdem_none")}</span>`;
       return;
     }
 
@@ -1425,11 +1442,11 @@ async function loadFabdemForView() {
         console.warn(`[fabdem] tile ${fabdemTileName(t.lat, t.lon)} read failed — skipping:`, err);
       }
       progressBar.style.width = `${(30 + (i + 1) / opened.length * 70).toFixed(1)}%`;
-      status.textContent = `Mosaico: tile ${i + 1}/${opened.length}…`;
+      status.textContent = t("status.fabdem_mosaic", i + 1, opened.length);
     }
     if (placed === 0) {
       progress.classList.remove("active");
-      status.innerHTML = '<span style="color:#ff6b6b">FABDEM: todos os tiles falharam na leitura (rede?). Tente novamente.</span>';
+      status.innerHTML = `<span style="color:#ff6b6b">${t("status.fabdem_all_failed")}</span>`;
       return;
     }
 
@@ -1848,7 +1865,7 @@ function readFileWithProgress(file, onFrac) {
 
 async function loadVectorNetwork(file) {
   if (!state.dem) {
-    status.innerHTML = '<span style="color:#ff6b6b">Load a DEM first.</span>';
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.load_dem_first")}</span>`;
     return;
   }
 
@@ -2034,7 +2051,7 @@ async function loadVectorNetwork(file) {
     document.getElementById("vec-meta").innerHTML =
       `EPSG:${srsId} · <span class="v">${rasterised}</span> lines drawn<br/>` +
       `<span class="v">${networkCells.toLocaleString()}</span> network cells (${(100 * networkCells / (W * H)).toFixed(1)}% of grid)`;
-    status.textContent = "Network loaded.";
+    status.textContent = t("status.network_loaded");
     state.lastResult = null; // previous compute used the un-constrained mask
     cancelActiveCompute();   // …and so would an in-flight one
     state.networkLines = collected;
@@ -2086,7 +2103,7 @@ function installNetworkFromLines(lines, srsId, sourceLabel) {
   document.getElementById("vec-meta").innerHTML =
     `${escapeHtml(sourceLabel)} · <span class="v">${rasterised}</span> lines drawn<br/>` +
     `<span class="v">${networkCells.toLocaleString()}</span> network cells (${(100 * networkCells / (W * H)).toFixed(1)}% of grid)`;
-  status.textContent = "Network loaded.";
+  status.textContent = t("status.network_loaded");
   state.lastResult = null;
   cancelActiveCompute();
   // Keep geometry for the optional vector rendering, same cap as the gpkg path.
@@ -2110,7 +2127,7 @@ const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
 async function loadOsmNetwork() {
   if (!state.dem) {
-    status.innerHTML = '<span style="color:#ff6b6b">Load a DEM first.</span>';
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.load_dem_first")}</span>`;
     return;
   }
   const { originX, originY, H, W, dx, dy } = state.dem;
@@ -2206,7 +2223,7 @@ function markImpassableDirty(reprobe = false) {
 }
 
 async function loadImpassableMaskFromFile(file) {
-  if (!state.dem) { status.innerHTML = '<span style="color:#ff6b6b">Load a DEM first.</span>'; return; }
+  if (!state.dem) { status.innerHTML = `<span style="color:#ff6b6b">${t("status.load_dem_first")}</span>`; return; }
   const meta = document.getElementById("imp-meta");
   try {
     if (meta) meta.textContent = `Reading ${file.name}…`;
@@ -2638,7 +2655,7 @@ function renderGraphOverlay() {
 
 map.on("click", (e) => {
   if (!state.dem) {
-    status.textContent = "Load a DEM first.";
+    status.textContent = t("status.load_dem_first");
     return;
   }
   const rawPx = latLngToPixel(e.latlng);
@@ -2689,7 +2706,7 @@ map.on("click", (e) => {
       .addTo(map).bindTooltip("Source");
     document.getElementById("src-display").textContent = `r=${r}, c=${c}`;
     document.getElementById("src-display").classList.add("set");
-    status.textContent = "Source set. Click again to set destination, or run.";
+    status.textContent = t("status.src_set");
     updateRunButtonState();
   } else if (!state.dst) {
     state.dst = px;
@@ -2698,7 +2715,7 @@ map.on("click", (e) => {
       .addTo(map).bindTooltip("Destination");
     document.getElementById("dst-display").textContent = `r=${r}, c=${c}`;
     document.getElementById("dst-display").classList.add("set");
-    status.textContent = "Both points set. Run to compute.";
+    status.textContent = t("status.both_set");
   } else {
     // Reset and start over
     state.src = px;
@@ -2711,7 +2728,7 @@ map.on("click", (e) => {
     document.getElementById("src-display").textContent = `r=${r}, c=${c}`;
     document.getElementById("dst-display").textContent = "— click again —";
     document.getElementById("dst-display").classList.remove("set");
-    status.textContent = "Source replaced. Click to set destination, or run.";
+    status.textContent = t("status.src_replaced");
   }
 });
 
@@ -2972,7 +2989,7 @@ runBtn.addEventListener("click", async () => {
   if (!state.dem) return;
   if (!wantDensity && !state.src) return;
   if (wantDensity && (!state.refPoints || state.refPoints.length === 0)) {
-    status.innerHTML = '<span style="color:#ff6b6b">Density mode needs at least one reference point — click on the map or use "Place random".</span>';
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.density_needs_ref")}</span>`;
     return;
   }
   // Mobile: close the drawer so the user sees the result land on the map
@@ -3015,7 +3032,7 @@ runBtn.addEventListener("click", async () => {
   const densityMode  = mode;
 
   if (wantTopN && !state.dst) {
-    status.innerHTML = '<span style="color:#ff6b6b">Top-N routes requires a destination point.</span>';
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.topn_needs_dst")}</span>`;
     return;
   }
 
@@ -3098,7 +3115,7 @@ runBtn.addEventListener("click", async () => {
   cancelActiveCompute();
   const gen = state.computeGen;
 
-  status.textContent = "Computing…";
+  status.textContent = t("status.computing");
   progress.classList.add("active");
   progressBar.style.width = "0%";
   runBtn.disabled = true;
@@ -3136,7 +3153,7 @@ runBtn.addEventListener("click", async () => {
     updateRunButtonState();
     state.computeStartedAt = 0;
     renderResult(m);
-    status.textContent = `Done in ${m.elapsedMs.toFixed(0)} ms.`;
+    status.textContent = t("status.done_ms", m.elapsedMs.toFixed(0));
     // Learn from this run: nudge the estimate toward reality (single runs
     // only — compare runs carry energyAlt and time ~2 scenarios). Compute and
     // interp phases are corrected separately (m.computeMs/m.interpMs when the
