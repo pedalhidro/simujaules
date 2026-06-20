@@ -409,6 +409,8 @@ function setLang(lang) {
 function syncLoadedHighlights() {
   document.getElementById("load-dem-group")?.classList.toggle("loaded", !!state.dem);
   document.getElementById("network-group")?.classList.toggle("loaded", !!state.networkMask);
+  document.getElementById("impassable-group")?.classList.toggle("loaded", !!state.impassable);
+  document.getElementById("bridges-group")?.classList.toggle("loaded", !!(state.bridges && state.bridges.length));
 }
 
 // ---- Accessible names for standalone labels -----------------------------
@@ -2415,11 +2417,12 @@ function clearBridges() {
 function updateBridgeMeta() {
   const meta = document.getElementById("bridge-meta");
   if (!meta) return;
-  if (!state.bridges) { meta.textContent = t("bridge.none"); return; }
+  if (!state.bridges) { meta.textContent = t("bridge.none"); syncLoadedHighlights(); return; }
   const m = state.bridgesMeta || {};
   let html = t("bridge.meta.count", String(state.bridges.length));
   if (m.skipped) html += `<br/>${t("bridge.meta.skipped", String(m.skipped))}`;
   meta.innerHTML = html;
+  syncLoadedHighlights();
 }
 
 // Bridges change the RASTER routing (portal edges), so invalidate the compute
@@ -2557,7 +2560,7 @@ function applyImpassableRaster(raster, name) {
 function updateImpassableMeta() {
   const meta = document.getElementById("imp-meta");
   if (!meta) return;
-  if (!state.impassable) { meta.textContent = t("imp.none"); return; }
+  if (!state.impassable) { meta.textContent = t("imp.none"); syncLoadedHighlights(); return; }
   const m = state.impassableMeta || {};
   const N = state.dem ? state.dem.H * state.dem.W : 0;
   const pct = N ? (100 * (m.cellsImpassable || 0) / N).toFixed(1) : "0";
@@ -2566,6 +2569,7 @@ function updateImpassableMeta() {
     t("imp.meta.cells", (m.cellsImpassable || 0).toLocaleString(), pct);
   if (corr) html += `<br/>${t("imp.meta.corridor", corr.toLocaleString())}`;
   meta.innerHTML = html;
+  syncLoadedHighlights();
 }
 
 function clearImpassableMask() {
@@ -3449,6 +3453,7 @@ runBtn.addEventListener("click", async () => {
     progress.classList.remove("active");
     updateRunButtonState();
     state.computeStartedAt = 0;
+    stampBridgeDeckPasses(m.passes); // deck cells carry the bridge flow (portals skip them)
     renderResult(m);
     status.textContent = t("status.done_ms", m.elapsedMs.toFixed(0));
     // Learn from this run: nudge the estimate toward reality (single runs
@@ -5920,6 +5925,46 @@ function buildPortals() {
   const u = new Int32Array(n), v = new Int32Array(n), lenM = new Float64Array(n);
   for (let i = 0; i < n; i++) { u[i] = brs[i].endA; v[i] = brs[i].endB; lenM[i] = brs[i].deckLenM; }
   return { u, v, lenM, n };
+}
+
+// Grid cells a bridge's deck geometry passes through (Bresenham along its
+// polyline), clipped to the DEM. Used to paint deck passes/density.
+function bridgeDeckCells(br) {
+  const { W, H } = state.dem;
+  const pts = br.latlngs.map(([lat, lng]) => llToCell(lat, lng));
+  const cells = [];
+  for (let i = 1; i < pts.length; i++) {
+    let r = pts[i - 1][0], c = pts[i - 1][1];
+    const r1 = pts[i][0], c1 = pts[i][1];
+    const dr = Math.abs(r1 - r), dc = Math.abs(c1 - c), sr = r < r1 ? 1 : -1, sc = c < c1 ? 1 : -1;
+    let err = dc - dr;
+    for (;;) {
+      if (r >= 0 && r < H && c >= 0 && c < W) cells.push(r * W + c);
+      if (r === r1 && c === c1) break;
+      const e2 = 2 * err;
+      if (e2 > -dr) { err -= dr; c += sc; }
+      if (e2 < dc) { err += dc; r += sr; }
+    }
+  }
+  return cells;
+}
+
+// A bridge portal jumps abutment→abutment, so the deck's interior cells aren't
+// in the path tree and carry no passes. Paint them with the flow crossing the
+// bridge so the deck shows up: flow = min(passes[endA], passes[endB]) — which is
+// exactly the portal's tree-edge flow (the downstream abutment's subtree) for a
+// single source, and a tight estimate for round/density. max() so a deck cell
+// with heavier ground traffic underneath isn't lowered. Raster modes only —
+// graph mode already routes the (flattened) deck edges, so they carry passes.
+function stampBridgeDeckPasses(passes) {
+  if (!passes || !state.bridges || !state.dem) return;
+  for (const br of state.bridges) {
+    const a = passes[br.endA], b = passes[br.endB];
+    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+    const flow = Math.min(a, b);
+    if (!(flow > 0)) continue;
+    for (const cell of bridgeDeckCells(br)) if (flow > passes[cell]) passes[cell] = flow;
+  }
 }
 
 // Vocab IRI deliberately points at the actual deployed file rather than an
