@@ -62,14 +62,18 @@ for (const portals of [false, true]) {
   }
   cases.push({ dmode: "round", eMax: 20000, eMaxMode: "total", portals });
 }
+// Reverse-optimisation (maximize) density: the edge-inversion path +
+// max_edge_cost derivation are identical in both engines but were never
+// parity-checked, so a future divergence would slip past the suite.
+cases.push({ dmode: "from", eMax: 0, eMaxMode: "leg", maximize: true });
 
-for (const { dmode, eMax, eMaxMode, portals } of cases) {
+for (const { dmode, eMax, eMaxMode, portals = false, maximize = false } of cases) {
   {
     const nPortals = portals ? portalU.length : 0;
     // backend
     const params = {
       h: H, w: W, dx: 30, dy: 30, alpha: 1, beta: 30, eta: 0.3, eMax, eMaxMode,
-      densityMode: dmode, refPoints: refs, hasNetwork: false, maximize: false,
+      densityMode: dmode, refPoints: refs, hasNetwork: false, maximize,
       nPortals,
     };
     const json = new TextEncoder().encode(JSON.stringify(params));
@@ -89,7 +93,7 @@ for (const { dmode, eMax, eMaxMode, portals } of cases) {
     const ref = runWorker({
       kind: "run", H, W, dx: 30, dy: 30, alpha: 1, beta: 30, eta: 0.3, eMax, eMaxMode,
       seedR: -1, seedC: -1, goalR: -1, goalC: -1, mode: dmode,
-      wantDensity: true, refPoints: refs, densityMode: dmode,
+      wantDensity: true, refPoints: refs, densityMode: dmode, maximize,
       height: new Float32Array(height), mask: new Uint8Array(mask),
       portalU: portals ? portalU : null,
       portalV: portals ? portalV : null,
@@ -106,7 +110,7 @@ for (const { dmode, eMax, eMaxMode, portals } of cases) {
     const ok = maxD < 1e-15 && maxE < 1e-3 && bad === 0;
     allOk = allOk && ok;
     console.log(
-      `mode=${dmode} eMax=${eMax}${eMaxMode === "total" ? " (total)" : ""}${portals ? " +portals" : ""}: ` +
+      `mode=${dmode} eMax=${eMax}${eMaxMode === "total" ? " (total)" : ""}${portals ? " +portals" : ""}${maximize ? " (maximize)" : ""}: ` +
       `max|Δdensity|=${maxD.toExponential(2)}, ` +
       `max|Δenergy|=${maxE.toExponential(2)}, finite-mismatch=${bad} ${ok ? "✓" : "✗"}`,
     );

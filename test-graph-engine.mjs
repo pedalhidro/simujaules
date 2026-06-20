@@ -149,6 +149,16 @@ const alpha = 0.008, beta = 1.0, eta = 0.1;
   ok("passes stop at the DEM extent (3 in-bounds edges)", reached === 3, `reached=${reached}`);
 }
 
+// Connected-component count over the graph CSR — shared by the crossings tests.
+function graphComps(g) {
+  const seen = new Uint8Array(g.nNodes); let c = 0;
+  for (let s = 0; s < g.nNodes; s++) {
+    if (seen[s]) continue; c++; const stack = [s]; seen[s] = 1;
+    while (stack.length) { const u = stack.pop(); for (let he = g.csrHead[u]; he < g.csrHead[u + 1]; he++) { const v = g.csrTarget[he]; if (!seen[v]) { seen[v] = 1; stack.push(v); } } }
+  }
+  return c;
+}
+
 // ---- 9. Phase C: bridge/tunnel deck flattening (lineMeta) -------------------
 {
   const dxM = 10;
@@ -172,22 +182,51 @@ const alpha = 0.008, beta = 1.0, eta = 0.1;
 {
   const dem = flatDem(5, 5, 0);
   const lines = [[[0, 0], [4, 4]], [[0, 4], [4, 0]]]; // cross at (2,2), no shared vtx
-  const comps = (g) => {
-    const seen = new Uint8Array(g.nNodes); let c = 0;
-    for (let s = 0; s < g.nNodes; s++) {
-      if (seen[s]) continue; c++; const stack = [s]; seen[s] = 1;
-      while (stack.length) { const u = stack.pop(); for (let he = g.csrHead[u]; he < g.csrHead[u + 1]; he++) { const v = g.csrTarget[he]; if (!seen[v]) { seen[v] = 1; stack.push(v); } } }
-    }
-    return c;
-  };
-  // A deck (layer 1) crossing a ground road (layer 0): no junction → 2 components.
+  // A deck (layer 1) crossing a ground road (layer 0): no junction -> 2 components.
   const over = GraphEngine.buildGraph(lines, dem, { junctionMode: "crossings", lineMeta: [{ deck: true, layer: 1 }, { deck: false, layer: 0 }] });
   ok("overpass: crossing suppressed (no center node)", over.nNodes === 4, `nNodes=${over.nNodes}`);
   ok("overpass: lines stay unsplit (2 edges)", over.nEdges === 2, `nEdges=${over.nEdges}`);
-  ok("overpass: deck & road stay disconnected", comps(over) === 2, `comps=${comps(over)}`);
+  ok("overpass: deck & road stay disconnected", graphComps(over) === 2, `comps=${graphComps(over)}`);
   // Two ways at the SAME layer still cross at-grade (1 component).
   const same = GraphEngine.buildGraph(lines, dem, { junctionMode: "crossings", lineMeta: [{ deck: true, layer: 1 }, { deck: true, layer: 1 }] });
-  ok("same-layer crossing still connects", comps(same) === 1, `comps=${comps(same)}`);
+  ok("same-layer crossing still connects", graphComps(same) === 1, `comps=${graphComps(same)}`);
+}
+
+// ---- 11. crossings mode finds NON-axis-aligned intersections (fuzz) ---------
+// Regression for the bucket-rasterisation miss: the old length-stepped DDA
+// inserted one floor cell per Euclidean step and could skip cells, so two
+// genuinely-crossing segments shared no bucket and stayed in separate
+// components. We fuzz random segment pairs that PROPERLY cross (interior to
+// both) and assert crossings mode merges them into one connected component.
+{
+  // Orientation sign of (p,q,r); 0 = collinear. Points are [r,c] -> (x=c,y=r).
+  const orient = (p, q, r) => Math.sign((q[1] - p[1]) * (r[0] - p[0]) - (q[0] - p[0]) * (r[1] - p[1]));
+  // Proper interior crossing (no shared endpoint, no collinearity).
+  const properCross = (a, b, c, d) => {
+    const o1 = orient(a, b, c), o2 = orient(a, b, d), o3 = orient(c, d, a), o4 = orient(c, d, b);
+    return o1 !== 0 && o2 !== 0 && o3 !== 0 && o4 !== 0 && o1 !== o2 && o3 !== o4;
+  };
+  // Deterministic PRNG (mulberry32) so the test never flakes.
+  let seed = 0x1234abcd;
+  const rnd = () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const G = 24, dem = flatDem(G, G, 0);
+  const pt = () => [1 + rnd() * (G - 3), 1 + rnd() * (G - 3)]; // [r,c], interior to extent
+  let crossingsTested = 0, missed = 0, trials = 0;
+  while (crossingsTested < 400 && trials < 40000) {
+    trials++;
+    const a = pt(), b = pt(), c0 = pt(), d = pt();
+    if (!properCross(a, b, c0, d)) continue;
+    crossingsTested++;
+    const g = GraphEngine.buildGraph([[a, b], [c0, d]], dem, { junctionMode: "crossings" });
+    if (graphComps(g) !== 1) missed++;
+  }
+  ok("crossings: fuzz finds every proper intersection", missed === 0,
+     `tested ${crossingsTested} crossings, ${missed} missed`);
+  // Explicit shallow (non-45 deg) diagonal X - the kind the old DDA dropped.
+  {
+    const g = GraphEngine.buildGraph([[[1, 1], [3, 21]], [[3, 1], [1, 21]]], flatDem(24, 24, 0), { junctionMode: "crossings" });
+    ok("crossings: shallow-diagonal X is one component", graphComps(g) === 1, `comps=${graphComps(g)}`);
+  }
 }
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);

@@ -36,6 +36,7 @@
 use rayon::prelude::*;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::io::Read; // Take/read_to_end on the request body reader
 use std::time::Instant;
 use tiny_http::{Header, Method, Response, Server};
 
@@ -524,7 +525,9 @@ fn compute_density(g: &Grid, p: &Params, portals: &PortalAdj) -> (Vec<f64>, Vec<
     let n64 = n as u64;
     let scratch_bytes = 17 * n64;
     let acc_bytes = 20 * n64;
-    let per_slice = if round { 2 * scratch_bytes + acc_bytes + n64 } else { scratch_bytes + acc_bytes };
+    // .max(1) guards the divisor: handle_density already rejects n==0, but a
+    // zero per_slice here would panic the request loop (defensive belt).
+    let per_slice = (if round { 2 * scratch_bytes + acc_bytes + n64 } else { scratch_bytes + acc_bytes }).max(1);
     let mem_cap = (density_mem_budget_bytes() / per_slice).max(1) as usize;
     let n_slices = refs.len()
         .min(rayon::current_num_threads())
@@ -609,8 +612,20 @@ fn respond_json(req: tiny_http::Request, status: u16, body: &str) {
 
 fn handle_density(mut req: tiny_http::Request) {
     let t0 = Instant::now();
-    let mut body = Vec::with_capacity(req.body_length().unwrap_or(0));
-    if req.as_reader().read_to_end(&mut body).is_err() {
+    // Ceiling on the request body (covers the largest supported DEMs:
+    // ~6 bytes/cell × ~135 M cells ≈ 0.8 GB, so 2 GiB is generous). Without
+    // it, a bogus Content-Length pre-allocs an enormous Vec (abort on alloc
+    // failure) and read_to_end would stream unbounded data — a trivial DoS.
+    const MAX_BODY: u64 = 2 * 1024 * 1024 * 1024;
+    let declared = req.body_length().unwrap_or(0) as u64;
+    if declared > MAX_BODY {
+        return respond_json(req, 413, r#"{"error":"body too large"}"#);
+    }
+    let mut body = Vec::with_capacity(declared.min(MAX_BODY) as usize);
+    // Hard-cap the read so a client streaming more than it declared can't grow
+    // the body unbounded. An over-long body truncates at MAX_BODY and then
+    // fails the exact-length check below (→ 400).
+    if req.as_reader().take(MAX_BODY).read_to_end(&mut body).is_err() {
         return respond_json(req, 400, r#"{"error":"body read failed"}"#);
     }
     if body.len() < 4 {
@@ -625,6 +640,12 @@ fn handle_density(mut req: tiny_http::Request) {
         Err(e) => return respond_json(req, 400, &format!(r#"{{"error":"bad params: {}"}}"#, e)),
     };
     let n = params.h * params.w;
+    // An empty grid (h or w == 0) is meaningless and would make per_slice == 0
+    // in compute_density → a divide-by-zero panic that, on this single-threaded
+    // request loop, takes down the whole server. Reject it up front.
+    if n == 0 {
+        return respond_json(req, 400, r#"{"error":"empty grid (h or w is 0)"}"#);
+    }
     let masks = if params.has_network { 2 } else { 1 };
     // Bridge portals append portalU (i32×P) + portalV (i32×P) + portalLenM (f64×P).
     let portal_bytes = params.n_portals * 16;

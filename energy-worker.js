@@ -440,13 +440,21 @@ function densityField(opts) {
   // settle count (order length). reverse flips dh (energy TO the seed).
   function search(seedR, seedC, reverse, Ea, settledA, parentsA, orderA) {
     let orderLen = 0; rClear();
+    // Reset per search and record every settle: on a maxSettled break this is
+    // the cap cell's energy, on clean exhaustion the frontier (last settled)
+    // energy. Previously only the break assigned it, so a search that
+    // exhausted before the cap reported a STALE budget (0 for the first ref,
+    // or the prior ref's), which floored the probe's bStar to 1 and blew up
+    // the budget→explored extrapolation.
+    lastStopG = 0;
     const seed = seedR * W + seedC;
     Ea[seed] = 0; rPush(0, seed);
     while (rPop()) {
       const g = rTop[0], idx = rTop[1] | 0;
       if (settledA[idx]) continue;
       settledA[idx] = 1; orderA[orderLen++] = idx;
-      if (maxSettled !== 0 && orderLen >= maxSettled) { lastStopG = g; break; }
+      lastStopG = g; // energy of the most-recently-settled cell (non-decreasing)
+      if (maxSettled !== 0 && orderLen >= maxSettled) break;
       const r = (idx / W) | 0, c = idx - r * W, hHere = height[idx];
       const inner = r > 0 && r < H - 1 && c > 0 && c < W - 1;
       for (let k = 0; k < 8; k++) {
@@ -596,12 +604,17 @@ function astar(opts) {
 
   while (heap.size > 0) {
     const idx = heap.payloads[0];
+    const fTop = heap.priorities[0]; // f = g + h (f64) — read BEFORE removeTop
     heapRemoveTop(heap);
     if (settled[idx]) continue;
     settled[idx] = 1;
     if (idx === goalIdx) break;
 
-    const g = E[idx];
+    // Recover g from the f64 heap priority (g = f − h) rather than the f32
+    // E[idx]: keeps the accumulated path cost f64-exact along the route, like
+    // dijkstra()'s `g = heap.priorities[0]`. h is deterministic (0 in maximize
+    // mode), so f − h reproduces the f64 tentative that was pushed.
+    const g = fTop - heuristic(idx);
     const r = (idx / W) | 0;
     const c = idx - r * W;
     const hHere = height[idx];
