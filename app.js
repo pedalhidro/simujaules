@@ -47,6 +47,71 @@ const STRINGS = {
   "status.fabdem_fetching":  { pt: "Buscando {0} tile(s) FABDEM…",                     en: "Fetching {0} FABDEM tile(s)…" },
   "status.fabdem_mosaic":    { pt: "Mosaico: tile {0}/{1}…",                           en: "Mosaicking: tile {0}/{1}…" },
   "status.fabdem_all_failed":{ pt: "FABDEM: todos os tiles falharam na leitura (rede?). Tente novamente.", en: "FABDEM: all tile reads failed (network?). Try again." },
+  "status.fabdem_failed":    { pt: "Falha ao carregar FABDEM: {0}",                  en: "FABDEM load failed: {0}" },
+  // DEM loading
+  "status.fetching":         { pt: "Buscando {0}…",                                  en: "Fetching {0}…" },
+  "status.loading_label":    { pt: "Carregando {0}…",                                en: "Loading {0}…" },
+  "status.error_generic":    { pt: "Erro: {0}",                                      en: "Error: {0}" },
+  "status.dem_lonlat":       { pt: "DEM em lon/lat — distâncias aproximadas pela latitude (boas a ~0,3% em extensões < ~50 km).", en: "DEM is in lon/lat — distances approximated from latitude (good to ~0.3% under ~50 km extent)." },
+  "status.dem_loaded":       { pt: "{0} carregado. Clique no mapa para definir o ponto de origem.", en: "{0} loaded. Click on the map to set source point." },
+  "status.dem_projected":    { pt: "{0} carregado, mas o CRS é projetado/desconhecido — o mapa é só lon/lat (EPSG:4326), então cliques e camadas não estão disponíveis. Reprojete o DEM para EPSG:4326 para interagir no mapa.", en: "{0} loaded, but its CRS is projected/unknown — the map is lon/lat (EPSG:4326) only, so click-to-pick and overlays are unavailable. Reproject the DEM to EPSG:4326 to interact on the map." },
+  "status.map_not_ready":    { pt: "Mapa não está pronto.",                          en: "Map not ready." },
+  "status.map_bounds_failed":{ pt: "Não foi possível ler os limites do mapa.",       en: "Couldn't read map bounds." },
+  "status.compute_failed":   { pt: "Falha inesperada no cálculo — {0}. Tente de novo (um DEM ou orçamento menor se foi memória).", en: "Compute failed unexpectedly — {0}. Try again (a smaller DEM or budget if it was memory)." },
+  // Network (.gpkg / OSM)
+  "status.gpkg_failed":      { pt: "Falha ao carregar .gpkg: {0}",                   en: ".gpkg load failed: {0}" },
+  "status.net_zero_cells":   { pt: "Rede rasterizada para 0 células neste DEM — não aplicada. Verifique o CRS do .gpkg e se contém geometria LineString sobrepondo a extensão do DEM.", en: "Network rasterised to 0 cells on this DEM — not applied. Check the .gpkg CRS and that it contains LineString geometry overlapping the DEM extent." },
+  "status.net_zero_cells_src":{ pt: "{0}: rasterizado para 0 células neste DEM — não aplicado.", en: "{0}: rasterised to 0 cells on this DEM — not applied." },
+  "status.net_too_large":    { pt: "Rede grande demais para renderização vetorial (máscara raster ainda ativa).", en: "Network too large for vector rendering (raster mask still active)." },
+  "status.osm_no_intersect": { pt: "A vista atual do mapa não intersecta o DEM — vá até o DEM primeiro.", en: "The current map view doesn't intersect the DEM — pan to the DEM first." },
+  "status.osm_querying":     { pt: "Consultando OSM (Overpass) por highway=* …",     en: "Querying OSM (Overpass) for highway=* …" },
+  "status.osm_parsing":      { pt: "Lendo resposta do OSM…",                         en: "Parsing OSM response…" },
+  "status.osm_rasterising":  { pt: "Rasterizando {0} vias do OSM…",                  en: "Rasterising {0} OSM ways…" },
+  "status.osm_failed":       { pt: "Falha ao puxar a rede do OSM: {0}",              en: "OSM network pull failed: {0}" },
+  "status.vec_reading":      { pt: "Lendo {0} ({1} MB)…",                            en: "Reading {0} ({1} MB)…" },
+  "status.vec_init_sql":     { pt: "Inicializando sql.js…",                          en: "Initializing sql.js…" },
+  "status.vec_rasterising_of":   { pt: "Rasterizando… <span class=\"v\">{0}</span>/{1} ({2} desenhadas)", en: "Rasterising… <span class=\"v\">{0}</span>/{1} ({2} drawn)" },
+  "status.vec_rasterising_scan": { pt: "Rasterizando… <span class=\"v\">{0}</span> varridas, {1} desenhadas", en: "Rasterising… <span class=\"v\">{0}</span> scanned, {1} drawn" },
+  "status.net_meta_drawn":   { pt: "<span class=\"v\">{0}</span> linhas desenhadas<br/><span class=\"v\">{1}</span> células de rede ({2}% da grade)", en: "<span class=\"v\">{0}</span> lines drawn<br/><span class=\"v\">{1}</span> network cells ({2}% of grid)" },
+  "status.net_meta_zero":    { pt: "EPSG:{0} · varridas <span class=\"v\">{1}</span> feições, desenhadas {2} — <span style=\"color:#ff6b6b\">0 células neste DEM</span>", en: "EPSG:{0} · scanned <span class=\"v\">{1}</span> features, drew {2} — <span style=\"color:#ff6b6b\">0 cells on this DEM</span>" },
+  // Point picking / snapping
+  "status.click_outside":    { pt: "Clique fora do DEM, ou DEM em CRS não geográfico (este protótipo só suporta DEMs EPSG:4326 — veja as notas).", en: "Click is outside the DEM, or DEM is in a non-geographic CRS (this prototype supports EPSG:4326 DEMs only — see notes)." },
+  "status.click_nodata":     { pt: "A célula clicada é nodata.",                     en: "Clicked cell is nodata." },
+  "status.net_no_snap_click":{ pt: "A rede carregada não tem células úteis neste DEM (verifique CRS/geometria) — não dá para agarrar cliques. Desmarque \"Restringir cálculo à rede\" ou limpe a rede para continuar.", en: "The loaded network has no usable cells on this DEM (check its CRS/geometry) — clicks can't be snapped. Untick \"Constrain compute to network\" or clear the network to continue." },
+  "status.ref_random_mode":  { pt: "A colocação de referências está em \"aleatória\" — use \"Distribuir aleatórias\" ou mude para cliques.", en: "Ref placement is set to \"random\" — use \"Place random\" or switch placement to clicks." },
+  "status.snap_failed_label":{ pt: "{0} não pode ser agarrado — a rede carregada não tem células úteis neste DEM (verifique CRS/geometria), ou desmarque \"Restringir cálculo à rede\".", en: "{0} can't be snapped — the loaded network has no usable cells on this DEM (check its CRS/geometry), or untick \"Constrain compute to network\"." },
+  "status.refs_no_snap":     { pt: "Os pontos de referência não podem ser agarrados — a rede carregada não tem células úteis neste DEM, ou desmarque \"Restringir cálculo à rede\".", en: "Reference points can't be snapped — the loaded network has no usable cells on this DEM, or untick \"Constrain compute to network\"." },
+  // Compute progress / backend / interp / graph
+  "status.worker_error":     { pt: "Erro no worker: {0}",                            en: "Worker error: {0}" },
+  "status.density_progress": { pt: "Calculando densidade: ref {0}/{1} ({2}%)",       en: "Computing density: ref {0}/{1} ({2}%)" },
+  "status.computing_pct":    { pt: "Calculando… {0}%",                               en: "Computing… {0}%" },
+  "status.time_left":        { pt: "{0} — faltam {1}",                               en: "{0} — {1} left" },
+  "status.interpolating_net":   { pt: "Interpolando pela rede…",                     en: "Interpolating across the network…" },
+  "status.interpolating_energy":{ pt: "Interpolando o campo de energia…",            en: "Interpolating energy field…" },
+  "status.backend_computing":   { pt: "Calculando no backend nativo…",              en: "Computing on native backend…" },
+  "status.backend_computing_elapsed":{ pt: "Calculando no backend nativo… {0} decorridos", en: "Computing on native backend… {0} elapsed" },
+  "status.backend_fallback": { pt: "Backend nativo indisponível — usando workers do navegador…", en: "Native backend unavailable — using browser workers…" },
+  "status.building_graph":   { pt: "Construindo o grafo da rede…",                   en: "Building network graph…" },
+  "status.graph_done":       { pt: "Concluído em {0} ms (grafo: {1} nós, {2} arestas){3}.", en: "Done in {0} ms (graph: {1} nodes, {2} edges){3}." },
+  "status.graph_route_note": { pt: " · {0} rota(s)",                                 en: " · {0} route(s)" },
+  // Bundle / export
+  "status.nothing_rendered": { pt: "Nada renderizado ainda — rode um cálculo primeiro.", en: "Nothing rendered yet — run a compute first." },
+  "status.no_layers_export": { pt: "Nenhuma camada renderizada para exportar.",      en: "No rendered layers to export." },
+  "status.exported_layers":  { pt: "Exportadas {0} camada(s) renderizada(s) ({1} MB).", en: "Exported {0} rendered layer(s) ({1} MB)." },
+  "status.export_failed":    { pt: "Falha ao exportar: {0}",                         en: "Export failed: {0}" },
+  "status.download_need_dem":{ pt: "Carregue um DEM, rode o Compute e então baixe.", en: "Load a DEM first, then run Compute, then download." },
+  "status.download_need_compute":{ pt: "Nada para baixar ainda — clique em Compute primeiro.", en: "Nothing to download yet — click Compute first." },
+  "status.jszip_failed":     { pt: "JSZip não carregou — verifique a rede/console.", en: "JSZip didn't load — check the network/console." },
+  "status.building_bundle":  { pt: "Montando o bundle…",                            en: "Building bundle…" },
+  "status.bundle_saved":     { pt: "Bundle salvo ({0} MB).",                         en: "Saved bundle ({0} MB)." },
+  "status.download_failed":  { pt: "Falha ao baixar: {0}",                           en: "Download failed: {0}" },
+  "status.reload_failed":    { pt: "Falha ao recarregar: {0}",                       en: "Reload failed: {0}" },
+  "status.bundle_restored":  { pt: "Bundle restaurado do cache — todas as camadas salvas re-renderizadas. Sem recálculo.", en: "Bundle restored from cache — all saved layers re-rendered. No recompute needed." },
+  "status.bundle_dem_mismatch":{ pt: "Tamanho do DEM não bate — o bundle era para {0}×{1}, o DEM carregado é {2}×{3}. Parâmetros aplicados; saídas binárias ignoradas. Carregue o DEM correspondente para restaurar as camadas.", en: "DEM size mismatch — bundle was for {0}×{1}, loaded DEM is {2}×{3}. Parameters applied; binary outputs skipped. Load the matching DEM to restore overlays." },
+  "status.bundle_dem_mismatch_pending":{ pt: "DEM carregado ({0}×{1}) não corresponde ao bundle pendente ({2}×{3}) — carregue o DEM correspondente para restaurá-lo.", en: "DEM loaded ({0}×{1}) doesn't match the pending bundle ({2}×{3}) — load the matching DEM to restore it." },
+  "status.bundle_params_loaded":{ pt: "Parâmetros do bundle carregados. Clique em Compute para reproduzir.", en: "Bundle parameters loaded. Click Compute to reproduce." },
+  "status.bundle_need_dem":  { pt: "Bundle carregado. Agora carregue o DEM correspondente{0} e clique em Compute.", en: "Bundle loaded. Now load the matching DEM{0} and click Compute." },
+  "status.bundle_loaded":    { pt: "Bundle carregado. Clique no mapa para definir o ponto de origem.", en: "Bundle loaded. Click on the map to set source point." },
   "locate.unavailable":  { pt: "Localização indisponível.",             en: "Location unavailable." },
   "locate.timeout":      { pt: "Tempo esgotado ao buscar localização.", en: "Location lookup timed out." },
   "locate.error":        { pt: "Erro ao buscar localização.",           en: "Location lookup failed." },
@@ -795,7 +860,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch (err) {
         console.error(err);
         progress.classList.remove("active");
-        status.innerHTML = `<span style="color:#ff6b6b">.gpkg load failed: ${escapeHtml(err.message)}</span>`;
+        status.innerHTML = `<span style="color:#ff6b6b">${t("status.gpkg_failed", escapeHtml(err.message))}</span>`;
       }
       // Reset the input so re-picking the same file fires `change` again.
       ev.target.value = "";
@@ -1166,7 +1231,7 @@ function handleWedgedCompute(detail) {
   cancelActiveCompute();
   const msg = (detail && detail.message) || String(detail || "unknown error");
   status.innerHTML =
-    `<span style="color:#ff6b6b">Compute failed unexpectedly — ${escapeHtml(msg)}. Try again (a smaller DEM or budget if it was memory).</span>`;
+    `<span style="color:#ff6b6b">${t("status.compute_failed", escapeHtml(msg))}</span>`;
 }
 window.addEventListener("unhandledrejection", (e) => handleWedgedCompute(e.reason));
 window.addEventListener("error", (e) => handleWedgedCompute(e.error || e.message));
@@ -1199,7 +1264,7 @@ demFile.addEventListener("change", async (e) => {
     await loadDemFromArrayBuffer(buf, file.name);
   } catch (err) {
     console.error(err);
-    status.innerHTML = `<span style="color:#ff6b6b">Error: ${escapeHtml(err.message)}</span>`;
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.error_generic", escapeHtml(err.message))}</span>`;
   }
 });
 
@@ -1214,7 +1279,7 @@ const DEM_EXAMPLES = [
 ];
 
 async function loadDemFromUrl(url, label) {
-  status.textContent = `Fetching ${label}…`;
+  status.textContent = t("status.fetching", label);
   try {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${url}`);
@@ -1223,7 +1288,7 @@ async function loadDemFromUrl(url, label) {
     await loadDemFromArrayBuffer(buf, label);
   } catch (err) {
     console.error(err);
-    status.innerHTML = `<span style="color:#ff6b6b">Error: ${escapeHtml(err.message)}</span>`;
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.error_generic", escapeHtml(err.message))}</span>`;
   }
 }
 
@@ -1288,7 +1353,7 @@ function centerOnUserLocation() {
 
 async function loadFabdemForView() {
   if (!map) {
-    status.innerHTML = '<span style="color:#ff6b6b">Map not ready.</span>';
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.map_not_ready")}</span>`;
     return;
   }
   const bounds = map.getBounds();
@@ -1297,7 +1362,7 @@ async function loadFabdemForView() {
   const west  = bounds.getWest();
   const east  = bounds.getEast();
   if (!Number.isFinite(south) || north <= south || east <= west) {
-    status.innerHTML = '<span style="color:#ff6b6b">Couldn\'t read map bounds.</span>';
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.map_bounds_failed")}</span>`;
     return;
   }
 
@@ -1469,7 +1534,7 @@ async function loadFabdemForView() {
     await loadDemFromArrayBuffer(buf, `FABDEM ${outW}×${outH} (${opened.length} tile${opened.length === 1 ? "" : "s"})`);
   } catch (err) {
     console.error(err);
-    status.innerHTML = `<span style="color:#ff6b6b">FABDEM load failed: ${escapeHtml(err.message)}</span>`;
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.fabdem_failed", escapeHtml(err.message))}</span>`;
   } finally {
     progress.classList.remove("active");
   }
@@ -1479,7 +1544,7 @@ async function loadDemFromArrayBuffer(buf, label) {
   // A compute still running against the previous DEM would render arrays
   // sized to the old H×W onto the new grid — kill it before anything else.
   cancelActiveCompute();
-  status.textContent = `Loading ${label}…`;
+  status.textContent = t("status.loading_label", label);
   const tiff = await GeoTIFF.fromArrayBuffer(buf);
   const image = await tiff.getImage();
   const W = image.getWidth();
@@ -1527,7 +1592,7 @@ async function loadDemFromArrayBuffer(buf, label) {
       : modelType === 1 ? false
       : (Math.abs(originX) < 360 && Math.abs(originY) < 90 && dx < 0.01);
   if (isProbablyGeographic) {
-    status.innerHTML = '<span style="opacity:0.7">DEM is in lon/lat — distances approximated from latitude (good to ~0.3% under ~50 km extent).</span>';
+    status.innerHTML = `<span style="opacity:0.7">${t("status.dem_lonlat")}</span>`;
   }
 
   // Convert degrees → metres for geographic DEMs using a flat-earth
@@ -1643,15 +1708,12 @@ async function loadDemFromArrayBuffer(buf, label) {
     ${coverLabel}
   `;
   if (state.dem.isGeographic) {
-    status.textContent = `${label} loaded. Click on the map to set source point.`;
+    status.textContent = t("status.dem_loaded", label);
   } else {
     // Projected/unknown CRS: Leaflet is EPSG:4326-only, so the DEM can't be
     // placed on the map — overlays, click-to-pick and relief are all
     // unavailable (don't claim "click to set source"). Tell the user plainly.
-    status.innerHTML =
-      `<span style="color:#ff9d3d">${escapeHtml(label)} loaded, but its CRS is projected/unknown — ` +
-      `the map is lon/lat (EPSG:4326) only, so click-to-pick and overlays are unavailable. ` +
-      `Reproject the DEM to EPSG:4326 to interact on the map.</span>`;
+    status.innerHTML = `<span style="color:#ff9d3d">${t("status.dem_projected", escapeHtml(label))}</span>`;
   }
   updateRunButtonState();
   syncLoadedHighlights(); // light up group 1A (and 1B was just cleared above)
@@ -1704,8 +1766,7 @@ async function loadDemFromArrayBuffer(buf, label) {
       applyMetadataToUI(pb.md, pb.bin);
     } else {
       status.innerHTML =
-        `<span style="color:#ff9d3d">DEM loaded (${W}×${H}) doesn't match the ` +
-        `pending bundle (${bW}×${bH}) — load the matching DEM to restore it.</span>`;
+        `<span style="color:#ff9d3d">${t("status.bundle_dem_mismatch_pending", W, H, bW, bH)}</span>`;
     }
   }
 }
@@ -1879,13 +1940,13 @@ async function loadVectorNetwork(file) {
   // init 40–50 %, rasterise 50–100 %.
   progress.classList.add("active");
   progressBar.style.width = "0%";
-  setVecStatus(`Reading ${file.name} (${(file.size / 1024 / 1024).toFixed(0)} MB)…`);
+  setVecStatus(t("status.vec_reading", escapeHtml(file.name), (file.size / 1024 / 1024).toFixed(0)));
   const buf = await readFileWithProgress(file, (frac) => {
     progressBar.style.width = `${(frac * 40).toFixed(1)}%`;
   });
   progressBar.style.width = "40%";
 
-  setVecStatus("Initializing sql.js…");
+  setVecStatus(t("status.vec_init_sql"));
   const SQL = await getSQL();
   const db = new SQL.Database(new Uint8Array(buf));
   progressBar.style.width = "50%";
@@ -2020,8 +2081,8 @@ async function loadVectorNetwork(file) {
         const frac = totalFeatures > 0 ? scanned / totalFeatures : 0;
         progressBar.style.width = `${(50 + frac * 50).toFixed(1)}%`;
         setVecStatus(totalFeatures > 0
-          ? `Rasterising… <span class="v">${scanned}</span>/${totalFeatures} (${rasterised} drawn)`
-          : `Rasterising… <span class="v">${scanned}</span> scanned, ${rasterised} drawn`);
+          ? t("status.vec_rasterising_of", scanned, totalFeatures, rasterised)
+          : t("status.vec_rasterising_scan", scanned, rasterised));
         await new Promise((r) => setTimeout(r, 0));
       }
     }
@@ -2037,11 +2098,8 @@ async function loadVectorNetwork(file) {
       // with the DEM would make every click un-snappable and Compute
       // unusable. Say so loudly instead.
       document.getElementById("vec-meta").innerHTML =
-        `EPSG:${srsId} · scanned <span class="v">${scanned}</span> features, ` +
-        `drew ${rasterised} — <span style="color:#ff6b6b">0 cells on this DEM</span>`;
-      status.innerHTML =
-        '<span style="color:#ff6b6b">Network rasterised to 0 cells on this DEM — not applied. ' +
-        'Check the .gpkg CRS and that it contains LineString geometry overlapping the DEM extent.</span>';
+        t("status.net_meta_zero", srsId, scanned, rasterised);
+      status.innerHTML = `<span style="color:#ff6b6b">${t("status.net_zero_cells")}</span>`;
       return;
     }
 
@@ -2049,8 +2107,7 @@ async function loadVectorNetwork(file) {
     state.networkSrsId = srsId;
     state.networkFeatureCount = rasterised;
     document.getElementById("vec-meta").innerHTML =
-      `EPSG:${srsId} · <span class="v">${rasterised}</span> lines drawn<br/>` +
-      `<span class="v">${networkCells.toLocaleString()}</span> network cells (${(100 * networkCells / (W * H)).toFixed(1)}% of grid)`;
+      `EPSG:${srsId} · ` + t("status.net_meta_drawn", rasterised, networkCells.toLocaleString(), (100 * networkCells / (W * H)).toFixed(1));
     status.textContent = t("status.network_loaded");
     state.lastResult = null; // previous compute used the un-constrained mask
     cancelActiveCompute();   // …and so would an in-flight one
@@ -2093,7 +2150,7 @@ function installNetworkFromLines(lines, srsId, sourceLabel) {
   for (let i = 0; i < networkMask.length; i++) if (networkMask[i]) networkCells++;
   if (networkCells === 0) {
     status.innerHTML =
-      `<span style="color:#ff6b6b">${sourceLabel}: rasterised to 0 cells on this DEM — not applied.</span>`;
+      `<span style="color:#ff6b6b">${t("status.net_zero_cells_src", escapeHtml(sourceLabel))}</span>`;
     return false;
   }
 
@@ -2101,8 +2158,7 @@ function installNetworkFromLines(lines, srsId, sourceLabel) {
   state.networkSrsId = srsId;
   state.networkFeatureCount = rasterised;
   document.getElementById("vec-meta").innerHTML =
-    `${escapeHtml(sourceLabel)} · <span class="v">${rasterised}</span> lines drawn<br/>` +
-    `<span class="v">${networkCells.toLocaleString()}</span> network cells (${(100 * networkCells / (W * H)).toFixed(1)}% of grid)`;
+    `${escapeHtml(sourceLabel)} · ` + t("status.net_meta_drawn", rasterised, networkCells.toLocaleString(), (100 * networkCells / (W * H)).toFixed(1));
   status.textContent = t("status.network_loaded");
   state.lastResult = null;
   cancelActiveCompute();
@@ -2137,14 +2193,14 @@ async function loadOsmNetwork() {
   const west  = Math.max(b.getWest(),  originX);
   const east  = Math.min(b.getEast(),  originX + W * dx);
   if (!(south < north && west < east)) {
-    status.innerHTML = '<span style="color:#ff6b6b">The current map view doesn\'t intersect the DEM — pan to the DEM first.</span>';
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.osm_no_intersect")}</span>`;
     return;
   }
   const osmBtn = document.getElementById("vec-osm");
   if (osmBtn) osmBtn.disabled = true;
   progress.classList.add("active");
   progressBar.style.width = "20%";
-  status.textContent = "Querying OSM (Overpass) for highway=* …";
+  status.textContent = t("status.osm_querying");
   try {
     // `out geom` inlines each way's coordinates — no separate node lookups.
     const query =
@@ -2156,7 +2212,7 @@ async function loadOsmNetwork() {
     });
     if (!resp.ok) throw new Error(`Overpass HTTP ${resp.status} (busy? try again in a minute)`);
     progressBar.style.width = "60%";
-    status.textContent = "Parsing OSM response…";
+    status.textContent = t("status.osm_parsing");
     const json = await resp.json();
     const lines = [];
     for (const el of json.elements || []) {
@@ -2166,13 +2222,13 @@ async function loadOsmNetwork() {
     }
     if (!lines.length) throw new Error("Overpass returned no highway=* ways in this extent.");
     progressBar.style.width = "80%";
-    status.textContent = `Rasterising ${lines.length.toLocaleString()} OSM ways…`;
+    status.textContent = t("status.osm_rasterising", lines.length.toLocaleString());
     // Let the status paint before the synchronous rasterise.
     await new Promise((r) => setTimeout(r, 0));
     installNetworkFromLines(lines, 4326, "OSM highway=*");
   } catch (err) {
     console.error("[osm]", err);
-    status.innerHTML = `<span style="color:#ff6b6b">OSM network pull failed: ${escapeHtml(err.message)}</span>`;
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.osm_failed", escapeHtml(err.message))}</span>`;
   } finally {
     progress.classList.remove("active");
     if (osmBtn) osmBtn.disabled = false;
@@ -2339,7 +2395,7 @@ function applyNetworkLinesOverlay() {
   if (!state.networkLines || !state.networkLines.length) {
     if (state.networkMask) {
       // Mask exists but geometry wasn't kept (over the vertex cap).
-      status.textContent = "Network too large for vector rendering (raster mask still active).";
+      status.textContent = t("status.net_too_large");
     }
     return;
   }
@@ -2660,7 +2716,7 @@ map.on("click", (e) => {
   }
   const rawPx = latLngToPixel(e.latlng);
   if (!rawPx) {
-    status.innerHTML = '<span style="color:#ff6b6b">Click is outside the DEM, or DEM is in a non-geographic CRS (this prototype supports EPSG:4326 DEMs only — see notes).</span>';
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.click_outside")}</span>`;
     return;
   }
   // When a vector network is loaded, click points are snapped to the
@@ -2669,7 +2725,7 @@ map.on("click", (e) => {
   const [r, c] = px;
   const clickIdx = r * state.dem.W + c;
   if (!state.dem.mask[clickIdx]) {
-    status.textContent = "Clicked cell is nodata.";
+    status.textContent = t("status.click_nodata");
     return;
   }
   if (!effectivePassableAt(clickIdx)) {
@@ -2681,7 +2737,7 @@ map.on("click", (e) => {
   if (networkConstraintActive() && !state.networkMask[r * state.dem.W + c]) {
     // Snap searches the whole grid now, so this only fires when the network
     // rasterised to zero usable cells (CRS/geometry mismatch with the DEM).
-    status.innerHTML = '<span style="color:#ff6b6b">The loaded network has no usable cells on this DEM (check its CRS/geometry) — clicks can\'t be snapped. Untick "Constrain compute to network" or clear the network to continue.</span>';
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.net_no_snap_click")}</span>`;
     return;
   }
   // Density mode: clicks add reference points ("click" placement) or do
@@ -2695,7 +2751,7 @@ map.on("click", (e) => {
     if (densityClick) {
       addRefPoint([r, c]);
     } else {
-      status.textContent = 'Ref placement is set to "random" — use "Place random" or switch placement to clicks.';
+      status.textContent = t("status.ref_random_mode");
     }
     return;
   }
@@ -3056,7 +3112,7 @@ runBtn.addEventListener("click", async () => {
       if (offNet(snapped)) {
         // Snap is grid-wide now — this means the network has no usable
         // cells at all on this DEM.
-        status.innerHTML = `<span style="color:#ff6b6b">${label} can't be snapped — the loaded network has no usable cells on this DEM (check its CRS/geometry), or untick "Constrain compute to network".</span>`;
+        status.innerHTML = `<span style="color:#ff6b6b">${t("status.snap_failed_label", escapeHtml(label))}</span>`;
         return null;
       }
       // Move the marker so the user sees where compute actually started.
@@ -3094,7 +3150,7 @@ runBtn.addEventListener("click", async () => {
         if (!offNet(rc)) continue;
         const snapped = snapToNetwork(rc);
         if (offNet(snapped)) {
-          status.innerHTML = '<span style="color:#ff6b6b">Reference points can\'t be snapped — the loaded network has no usable cells on this DEM, or untick "Constrain compute to network".</span>';
+          status.innerHTML = `<span style="color:#ff6b6b">${t("status.refs_no_snap")}</span>`;
           return;
         }
         state.refPoints[i] = snapped;
@@ -3140,7 +3196,7 @@ runBtn.addEventListener("click", async () => {
   const computeFailed = (message) => {
     if (gen !== state.computeGen) return;
     cancelActiveCompute();
-    status.innerHTML = `<span style="color:#ff6b6b">Worker error: ${escapeHtml(message)}</span>`;
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.worker_error", escapeHtml(message))}</span>`;
   };
 
   const computeDone = (m) => {
@@ -3180,11 +3236,11 @@ runBtn.addEventListener("click", async () => {
       let label;
       if (state.computeRefTotal > 0) {
         const cur = Math.max(1, Math.min(state.computeRefTotal, Math.ceil(frac * state.computeRefTotal)));
-        label = `Computing density: ref ${cur}/${state.computeRefTotal} (${pct.toFixed(0)}%)`;
+        label = t("status.density_progress", cur, state.computeRefTotal, pct.toFixed(0));
       } else {
-        label = `Computing… ${pct.toFixed(0)}%`;
+        label = t("status.computing_pct", pct.toFixed(0));
       }
-      status.textContent = `${label} — ${formatDuration(remaining)} left`;
+      status.textContent = t("status.time_left", label, formatDuration(remaining));
     }
   };
 
@@ -3244,7 +3300,7 @@ runBtn.addEventListener("click", async () => {
   // filled field; failures go through computeFailed (promise stays pending,
   // the generation bump kills the chain).
   const runInterp = (energy) => new Promise((resolve) => {
-    status.textContent = "Interpolating across the network…";
+    status.textContent = t("status.interpolating_net");
     progressBar.style.width = "0%";
     const interpPayload = () => ({
       // Effective mask (impassable blocked, corridors open) so IDW energy never
@@ -3450,11 +3506,11 @@ runBtn.addEventListener("click", async () => {
     // Liveness ticker: large runs take a while server-side and fetch gives
     // no progress events — an elapsed counter shows the app isn't hung.
     const t0 = performance.now();
-    status.textContent = "Computing on native backend…";
+    status.textContent = t("status.backend_computing");
     const ticker = setInterval(() => {
       if (gen !== state.computeGen) { clearInterval(ticker); return; }
       status.textContent =
-        `Computing on native backend… ${formatDuration(performance.now() - t0)} elapsed`;
+        t("status.backend_computing_elapsed", formatDuration(performance.now() - t0));
     }, 1000);
     try {
       const params = {
@@ -3525,7 +3581,7 @@ runBtn.addEventListener("click", async () => {
       } catch (err) {
         if (gen !== state.computeGen) return new Promise(() => {});
         console.warn("[backend] falling back to in-browser workers:", err);
-        status.textContent = "Native backend unavailable — using browser workers…";
+        status.textContent = t("status.backend_fallback");
         // This run is now executing on the browser pool, not the backend.
         // Re-tag it so computeDone's online correction trains corrBrowser
         // (actual/predicted vs the browser model), not corrBackend — otherwise
@@ -3662,13 +3718,13 @@ runBtn.addEventListener("click", async () => {
       if (state.networkGraph) { state.networkGraph.nNodes = graph.nNodes; state.networkGraph.nEdges = graph.nEdges; }
       updateEstimateCorrection(result.elapsedMs, 0);
       estimateRunTime();
-      const routeNote = result.routes ? ` · ${result.routes.length} route(s)` : "";
-      const doneMsg = `Done in ${result.elapsedMs.toFixed(0)} ms (graph: ${graph.nNodes} nodes, ${graph.nEdges} edges)${routeNote}.`;
+      const routeNote = result.routes ? t("status.graph_route_note", result.routes.length) : "";
+      const doneMsg = t("status.graph_done", result.elapsedMs.toFixed(0), graph.nNodes, graph.nEdges, routeNote);
       // Energy field: rasterise the graph energy onto the grid, then (when the
       // interp option is on) IDW-fill off-network — the smooth field grid shows.
       const eGrid = rasterizeGraphEnergy(graph, result);
       if (eGrid && wantNetworkInterp) {
-        status.textContent = "Interpolating energy field…";
+        status.textContent = t("status.interpolating_energy");
         const seedMask = new Uint8Array(eGrid.length);
         for (let i = 0; i < eGrid.length; i++) seedMask[i] = Number.isFinite(eGrid[i]) ? 1 : 0;
         const mask = buildComputeGrid({ maskOnly: true }).mask; // don't fill across water
@@ -3717,7 +3773,7 @@ runBtn.addEventListener("click", async () => {
       w.postMessage({ kind: "graphRun", graph, params, gen });
     };
     if (state.networkGraph && state.networkGraphToken === token) { runOnGraph(state.networkGraph); return; }
-    status.textContent = "Building network graph…";
+    status.textContent = t("status.building_graph");
     const wb = spawnWorker((m) => {
       if (m.kind === "graph-built") {
         if (gen !== state.computeGen) return;
@@ -5896,14 +5952,14 @@ const WGS84_WKT =
 async function exportRenderedImages() {
   try {
     if (!state.dem || !state.lastResult) {
-      status.textContent = "Nothing rendered yet — run a compute first.";
+      status.textContent = t("status.nothing_rendered");
       return;
     }
     const items = [];
     if (state.energyDataUrl) items.push(["energy_rendered", state.energyDataUrl]);
     if (state.passesDataUrl) items.push(["passes_rendered", state.passesDataUrl]);
     if (!items.length) {
-      status.textContent = "No rendered layers to export.";
+      status.textContent = t("status.no_layers_export");
       return;
     }
     if (typeof JSZip === "undefined") throw new Error("JSZip didn't load");
@@ -5935,28 +5991,28 @@ async function exportRenderedImages() {
     a.click();
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
     status.textContent =
-      `Exported ${items.length} rendered layer${items.length === 1 ? "" : "s"} (${(blob.size / 1024 / 1024).toFixed(1)} MB).`;
+      t("status.exported_layers", items.length, (blob.size / 1024 / 1024).toFixed(1));
   } catch (err) {
     console.error("[export-rendered] failed:", err);
-    status.innerHTML = `<span style="color:#ff6b6b">Export failed: ${escapeHtml(err.message)}</span>`;
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.export_failed", escapeHtml(err.message))}</span>`;
   }
 }
 
 async function downloadBundle() {
   console.info("[bundle] download click — lastResult?", !!state.lastResult, "dem?", !!state.dem, "JSZip?", typeof JSZip);
   if (!state.dem) {
-    status.innerHTML = '<span style="color:#ff6b6b">Load a DEM first, then run Compute, then download.</span>';
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.download_need_dem")}</span>`;
     return;
   }
   if (!state.lastResult && !state.lastGraphResult) {
-    status.innerHTML = '<span style="color:#ff6b6b">Nothing to download yet — click Compute first.</span>';
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.download_need_compute")}</span>`;
     return;
   }
   if (typeof JSZip === "undefined") {
-    status.innerHTML = '<span style="color:#ff6b6b">JSZip didn\'t load — check the network/console.</span>';
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.jszip_failed")}</span>`;
     return;
   }
-  status.textContent = "Building bundle…";
+  status.textContent = t("status.building_bundle");
   try {
     const graphMode = !!state.lastGraphResult;
     const r = state.lastResult || {}; // graph-only bundles carry no grid result
@@ -6014,10 +6070,10 @@ async function downloadBundle() {
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
-    status.textContent = `Saved bundle (${(blob.size / 1024 / 1024).toFixed(1)} MB).`;
+    status.textContent = t("status.bundle_saved", (blob.size / 1024 / 1024).toFixed(1));
   } catch (err) {
     console.error("[bundle] download failed:", err);
-    status.innerHTML = `<span style="color:#ff6b6b">Download failed: ${escapeHtml(err.message)}</span>`;
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.download_failed", escapeHtml(err.message))}</span>`;
   }
 }
 
@@ -6074,7 +6130,7 @@ async function loadBundleFile(file) {
     applyMetadataToUI(md, bin);
   } catch (err) {
     console.error(err);
-    status.innerHTML = `<span style="color:#ff6b6b">Reload failed: ${escapeHtml(err.message)}</span>`;
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.reload_failed", escapeHtml(err.message))}</span>`;
   }
 }
 
@@ -6325,18 +6381,16 @@ function applyMetadataToUI(md, bin = {}) {
 
   updateRunButtonState();
   if (restored) {
-    status.textContent = "Bundle restored from cache — all saved layers re-rendered. No recompute needed.";
+    status.textContent = t("status.bundle_restored");
   } else if (state.dem && demDimsMatch === false) {
     status.innerHTML =
-      `<span style="color:#ff9d3d">DEM size mismatch — bundle was for ` +
-      `${bundleW}×${bundleH}, loaded DEM is ${state.dem.W}×${state.dem.H}. ` +
-      `Parameters applied; binary outputs skipped. Load the matching DEM to restore overlays.</span>`;
+      `<span style="color:#ff9d3d">${t("status.bundle_dem_mismatch", bundleW, bundleH, state.dem.W, state.dem.H)}</span>`;
   } else if (state.dem && (state.src || (p.wantDensity && state.refPoints?.length))) {
-    status.textContent = "Bundle parameters loaded. Click Compute to reproduce.";
+    status.textContent = t("status.bundle_params_loaded");
   } else if (!state.dem) {
     const hint = md.dem?.sourceUrl ? ` (try ${escapeHtml(md.dem.sourceUrl)})` : "";
-    status.innerHTML = `<span style="opacity:0.85">Bundle loaded. Now load the matching DEM${hint} and click Compute.</span>`;
+    status.innerHTML = `<span style="opacity:0.85">${t("status.bundle_need_dem", hint)}</span>`;
   } else {
-    status.textContent = "Bundle loaded. Click on the map to set source point.";
+    status.textContent = t("status.bundle_loaded");
   }
 }
