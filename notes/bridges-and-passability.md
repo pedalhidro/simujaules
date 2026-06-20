@@ -179,12 +179,20 @@ flat) must *stay* flat. They cross at one cell.
   changes. Plus all prior invariants.
 - `cd backend && cargo build --release && node test-backend.mjs` — bit-for-bit
   JS↔Rust parity *with* portals (max|Δ|=0) across from/to/round × eMax.
-- **Still pending (needs a DEM + browser):** the real-world e2e on Av Dr Arnaldo
-  — load a São Paulo DEM (~−23.551, −46.677), pull bridges, confirm A→B
-  (−23.550484,−46.678140 → −23.551438,−46.676810) routes flat while the
-  orthogonal ground line C→D (−23.550228,−46.677153 → −23.551718,−46.677920)
-  stays flat and is *unchanged* by the bridge — the visual proof both levels
-  coexist.
+- **Headless real-data verification (done, `sampa_centro.tif`).** Drove
+  energy-worker.js on the actual DEM at the Av Dr Arnaldo coordinates (converted
+  the tif to raw f32 via gdal, mapped lon/lat → cells, ran from-A with/without an
+  A↔B portal). Results: the abutments sit at ~814 m but the bare-earth DEM dips
+  to **788.7 m** between them (the saddle gap under the deck — matches the user's
+  description); **E[B] drops 25.18 → 1.33 (≈ α·173 m, 18.9×)** with the portal
+  (flat deck); and the orthogonal **ground line C→D is byte-identical (Δ=0)**
+  with and without the bridge — the multi-level coexistence proof on real terrain.
+  (≈44% of the field changes because the bridge is a real shortcut opening cheap
+  access to a downstream region — expected; the load-bearing fact is C→D Δ=0.)
+- **Still worth a browser pass (optional):** the full app flow (Overpass pull →
+  `llToCell` → `buildPortals` → compute + the deck overlay) — the engine + the
+  pull/model logic are unit-tested and the engine is verified on real data, but
+  the end-to-end UI wiring hasn't been exercised in a browser.
 
 ## Future work (parked)
 
