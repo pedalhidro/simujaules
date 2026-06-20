@@ -175,6 +175,8 @@ const STRINGS = {
   // ---- Group: Bridges & tunnels ----------------------------------------
   "group.bridges":       { pt: "1d. Pontes e túneis opcionais (OSM)", en: "1d. Optional bridges & tunnels (OSM)" },
   "bridge.osm":          { pt: "Puxar pontes e túneis do OSM", en: "Pull bridges & tunnels from OSM" },
+  "bridge.from_network": { pt: "Extrair da rede carregada", en: "Extract from loaded network" },
+  "bridge.no_candidates":{ pt: "A rede carregada não tem pontes/túneis marcados (tags bridge/tunnel).", en: "The loaded network has no bridge/tunnel tags." },
   "bridge.tunnels":      { pt: "Incluir túneis (tunnel=yes)", en: "Include tunnels (tunnel=yes)" },
   "bridge.clear":        { pt: "Limpar pontes", en: "Clear bridges" },
   "bridge.show":         { pt: "Mostrar tabuleiros no mapa", en: "Show decks on map" },
@@ -184,7 +186,7 @@ const STRINGS = {
   "bridge.meta.skipped": { pt: "{0} ignorados (fora do DEM ou apoio sem dado)", en: "{0} skipped (off-DEM or nodata abutment)" },
   "aria.opacity_bridge": { pt: "opacidade dos tabuleiros de ponte", en: "bridge deck opacity" },
   "help.h.bridges":      { pt: "1d · Pontes e túneis", en: "1d · Bridges & tunnels" },
-  "help.p.bridges":      { pt: "Puxa pontes (bridge=*) e, opcionalmente, túneis (tunnel=yes) do OpenStreetMap sobre a extensão do DEM. Cada estrutura é modelada como um tabuleiro plano entre seus dois apoios no solo: no cálculo em raster ela vira uma \"aresta-portal\" entre as células das pontas, com o custo do tabuleiro plano, sem alterar as células por baixo — então tanto a rota POR CIMA da ponte quanto a rota POR BAIXO ficam corretas. Pressupõe um DEM de terreno nu (sem o tabuleiro). No modo \"seguir os vetores\" (grafo), as pontes/túneis da própria rede (puxada do OSM) são achatadas e os cruzamentos em níveis diferentes não se conectam.", en: "Pulls bridges (bridge=*) and, optionally, tunnels (tunnel=yes) from OpenStreetMap over the DEM extent. Each structure is modelled as a level deck between its two ground abutments: in the raster compute it becomes a \"portal edge\" between the end cells at the flat-deck cost, without altering the cells underneath — so both the route OVER the bridge and the route UNDER it stay correct. Assumes a bare-earth DEM (deck not in the terrain). In \"follow the vectors\" (graph) mode, the network's own bridges/tunnels (pulled from OSM) are flattened and crossings at different layers don't connect." },
+  "help.p.bridges":      { pt: "Puxa pontes (bridge=*) e, opcionalmente, túneis (tunnel=yes) do OpenStreetMap sobre a extensão do DEM, ou extrai-os da rede vetorial já carregada (1b) que tenha tags bridge/tunnel (coluna ou other_tags). Cada estrutura é modelada como um tabuleiro plano entre seus dois apoios no solo: no cálculo em raster ela vira uma \"aresta-portal\" entre as células das pontas, com o custo do tabuleiro plano, sem alterar as células por baixo — então tanto a rota POR CIMA da ponte quanto a rota POR BAIXO ficam corretas. Pressupõe um DEM de terreno nu (sem o tabuleiro). No modo \"seguir os vetores\" (grafo), as pontes/túneis da própria rede (puxada do OSM) são achatadas e os cruzamentos em níveis diferentes não se conectam.", en: "Pulls bridges (bridge=*) and, optionally, tunnels (tunnel=yes) from OpenStreetMap over the DEM extent, or extracts them from the already-loaded vector network (1b) when it carries bridge/tunnel tags (a column or other_tags). Each structure is modelled as a level deck between its two ground abutments: in the raster compute it becomes a \"portal edge\" between the end cells at the flat-deck cost, without altering the cells underneath — so both the route OVER the bridge and the route UNDER it stay correct. Assumes a bare-earth DEM (deck not in the terrain). In \"follow the vectors\" (graph) mode, the network's own bridges/tunnels (pulled from OSM) are flattened and crossings at different layers don't connect." },
   "help.p.impassable":   { pt: "Suba um GeoTIFF binário (1=intransponível, p.ex. corpos d'água). É reamostrado para a grade do DEM por maioria de área (≥50% intransponível ⇒ célula barrada); fora da extensão da máscara assume-se passável. Pode estar em extensão/resolução/CRS diferentes do DEM. Opcionalmente, a rede vetorial (1b) abre corredores passáveis (pontes) sobre a máscara, com um deslocamento suave de elevação que sobe linearmente das margens até o centro da ponte.", en: "Upload a binary GeoTIFF (1=impassable, e.g. water bodies). It is resampled onto the DEM grid by area-coverage majority (≥50% impassable ⇒ blocked cell); outside the mask extent cells are assumed passable. It may have a different extent/resolution/CRS than the DEM. Optionally the vector network (1b) carves passable corridors (bridges) across the mask, with a smooth elevation offset that ramps linearly from the shores up to the bridge centre." },
 
   // ---- Group: Pick points ----------------------------------------------
@@ -923,6 +925,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- Bridges & tunnels (group 1d) ---
   document.getElementById("bridge-osm")?.addEventListener("click", loadOsmBridges);
+  document.getElementById("bridge-from-network")?.addEventListener("click", () => {
+    const c = state.networkBridgeCandidates;
+    if (!c || !c.length) { status.innerHTML = `<span style="color:#ff6b6b">${t("bridge.no_candidates")}</span>`; return; }
+    const withTunnels = !!document.getElementById("bridge-tunnels")?.checked;
+    const ways = withTunnels ? c : c.filter((w) => w.kind !== "tunnel");
+    installBridgesFromWays(ways, "network");
+  });
   document.getElementById("bridge-clear")?.addEventListener("click", clearBridges);
   document.getElementById("bridge-show")?.addEventListener("change", (ev) => {
     const row = document.getElementById("bridge-opacity-row");
@@ -1178,6 +1187,10 @@ const state = {
   // from the OSM streets pull, for graph-mode bridge/tunnel handling (Phase C:
   // layer-aware junctions + deck flattening). null for .gpkg networks (no tags).
   networkLinesMeta: null,
+  // Bridge/tunnel ways extracted from the loaded network (gpkg tags or OSM
+  // tags) as [{ latlngs, kind, layer, name }] — fed to the 1d "extract bridges
+  // from the loaded network" button (installBridgesFromWays). null if none.
+  networkBridgeCandidates: null,
   networkLinesLayer: null,
   // "Follow the vectors" graph mode: the routable graph built from
   // networkLines (cached, keyed by networkGraphToken so a network/junction-mode/
@@ -2010,6 +2023,18 @@ async function loadVectorNetwork(file) {
     const geomCol   = cont[0].values[0][1] || "geom";
     const srsId     = cont[0].values[0][2];
 
+    // Detect attribute columns we can flag bridges/tunnels with — OSM-export
+    // schemas vary: some have dedicated bridge/tunnel/layer columns, others
+    // pack them into an hstore `other_tags` string. We SELECT whichever exist
+    // alongside the geometry so loadVectorNetwork can capture bridge candidates
+    // for the 1d "extract from loaded network" feature, without a re-parse.
+    let allCols = [];
+    try {
+      const ti = db.exec(`PRAGMA table_info("${tableName}")`);
+      if (ti.length) allCols = ti[0].values.map((v) => String(v[1]));
+    } catch {}
+    const tagCols = ["bridge", "tunnel", "layer", "name", "other_tags"].filter((c) => allCols.includes(c));
+
     // Resolve source CRS for proj4. WGS84 is built in; everything else
     // uses the WKT/PROJ string from gpkg_spatial_ref_sys.
     const isSrcWgs = srsId === 4326 || srsId === 0 || srsId === -1;
@@ -2056,7 +2081,7 @@ async function loadVectorNetwork(file) {
       totalFeatures = cnt.get()[0] | 0;
       cnt.free();
       stmt = db.prepare(`
-        SELECT t."${geomCol}" FROM "${tableName}" t
+        SELECT t."${geomCol}"${tagCols.map((c) => `, t."${c}"`).join("")} FROM "${tableName}" t
         WHERE t.fid IN (
           SELECT id FROM "${rtree}"
           WHERE minx <= ? AND maxx >= ? AND miny <= ? AND maxy >= ?
@@ -2072,8 +2097,10 @@ async function loadVectorNetwork(file) {
         totalFeatures = cnt.get()[0] | 0;
         cnt.free();
       } catch {}
-      stmt = db.prepare(`SELECT "${geomCol}" FROM "${tableName}"`);
+      stmt = db.prepare(`SELECT "${geomCol}"${tagCols.map((c) => `, "${c}"`).join("")} FROM "${tableName}"`);
     }
+    // Geometry is row[0]; tag columns follow in tagCols order.
+    const tagIdx = {}; tagCols.forEach((c, i) => { tagIdx[c] = i + 1; });
 
     const lineWidth = Math.max(1, parseInt(document.getElementById("vec-width")?.value, 10) || 1);
     const halfWidth = (lineWidth - 1) >> 1;
@@ -2088,6 +2115,20 @@ async function loadVectorNetwork(file) {
     const VEC_RENDER_VERTEX_CAP = 2_000_000;
     let storedVertices = 0;
     let collected = [];
+    // Bridge/tunnel ways extracted for the 1d "from loaded network" feature.
+    const bridgeCandidates = [];
+    const extractWayTags = (row) => {
+      const get = (c) => (tagIdx[c] != null ? row[tagIdx[c]] : null);
+      const ot = get("other_tags");
+      const otv = (k) => { if (!ot) return null; const m = ot.match(new RegExp('"' + k + '"=>"([^"]*)"')); return m ? m[1] : null; };
+      const bridge = get("bridge") || otv("bridge");
+      const tunnel = get("tunnel") || otv("tunnel");
+      const isBridge = (bridge && bridge !== "no") || tunnel === "yes";
+      if (!isBridge) return { isBridge: false };
+      const kind = tunnel === "yes" ? "tunnel" : "bridge";
+      const layerRaw = get("layer") || otv("layer");
+      return { isBridge: true, kind, layer: parseInt(layerRaw, 10) || (kind === "tunnel" ? -1 : 1), name: get("name") || otv("name") || null };
+    };
     while (stmt.step()) {
       const row = stmt.get();
       const blob = row[0];
@@ -2097,13 +2138,17 @@ async function loadVectorNetwork(file) {
       let lines = null;
       try { lines = parseGpkgGeom(blob); } catch { lines = null; }
       if (!lines) continue;
+      const tg = tagCols.length ? extractWayTags(row) : { isBridge: false };
       for (const coords of lines) {
-        const lineLatLngs = collected !== null && storedVertices < VEC_RENDER_VERTEX_CAP
-          ? [] : null;
+        const keepRender = collected !== null && storedVertices < VEC_RENDER_VERTEX_CAP;
+        // Build latlngs when rendering OR when this is a bridge/tunnel (we always
+        // want a deck candidate's geometry, even past the render cap).
+        const lineLatLngs = (keepRender || tg.isBridge) ? [] : null;
         let prevR = null, prevC = null;
         for (const xy of coords) {
           const [lng, lat] = project(xy);
-          if (lineLatLngs) { lineLatLngs.push([lat, lng]); storedVertices++; }
+          if (lineLatLngs) lineLatLngs.push([lat, lng]);
+          if (keepRender) storedVertices++;
           const c = Math.floor((lng - originX) / dx);
           const r = Math.floor((originY - lat) / dy);
           if (prevR !== null) {
@@ -2119,7 +2164,10 @@ async function loadVectorNetwork(file) {
           }
           prevR = r; prevC = c;
         }
-        if (lineLatLngs && lineLatLngs.length > 1) collected.push(lineLatLngs);
+        if (lineLatLngs && lineLatLngs.length > 1) {
+          if (keepRender) collected.push(lineLatLngs);
+          if (tg.isBridge) bridgeCandidates.push({ latlngs: lineLatLngs, kind: tg.kind, layer: tg.layer, name: tg.name });
+        }
         if (storedVertices >= VEC_RENDER_VERTEX_CAP && collected !== null) {
           console.warn(`[network] geometry over ${VEC_RENDER_VERTEX_CAP} vertices — vector rendering disabled, raster mask unaffected.`);
           collected = null;
@@ -2161,7 +2209,8 @@ async function loadVectorNetwork(file) {
     state.lastResult = null; // previous compute used the un-constrained mask
     cancelActiveCompute();   // …and so would an in-flight one
     state.networkLines = collected;
-    state.networkLinesMeta = null; // .gpkg geometry carries no bridge/tunnel tags
+    state.networkLinesMeta = null; // .gpkg graph-mode bridge flattening not wired (tags live per-feature, not per-kept-line)
+    state.networkBridgeCandidates = bridgeCandidates.length ? bridgeCandidates : null;
     applyNetworkLinesOverlay();
     syncLoadedHighlights(); // light up group 1B
     onNetworkCorridorsChanged(); // a new network may carve corridors over the mask
@@ -2272,15 +2321,20 @@ async function loadOsmNetwork() {
     const json = await resp.json();
     const lines = [];
     const meta = []; // parallel { deck, layer } for graph-mode bridge handling
+    const bridgeCandidates = []; // bridge/tunnel ways for the 1d "from network" feature
     for (const el of json.elements || []) {
       if (el.type === "way" && Array.isArray(el.geometry) && el.geometry.length > 1) {
-        lines.push(el.geometry.map((g) => [g.lat, g.lon]));
+        const latlngs = el.geometry.map((g) => [g.lat, g.lon]);
+        lines.push(latlngs);
         const tg = el.tags || {};
         const deck = (tg.bridge && tg.bridge !== "no") || tg.tunnel === "yes";
-        meta.push(deck ? { deck: true, layer: parseInt(tg.layer, 10) || (tg.tunnel === "yes" ? -1 : 1) } : { deck: false, layer: 0 });
+        const layer = parseInt(tg.layer, 10) || (tg.tunnel === "yes" ? -1 : 1);
+        meta.push(deck ? { deck: true, layer } : { deck: false, layer: 0 });
+        if (deck) bridgeCandidates.push({ latlngs, kind: tg.tunnel === "yes" ? "tunnel" : "bridge", layer, name: tg["bridge:name"] || tg.name || null });
       }
     }
     if (!lines.length) throw new Error("Overpass returned no highway=* ways in this extent.");
+    state.networkBridgeCandidates = bridgeCandidates.length ? bridgeCandidates : null;
     progressBar.style.width = "80%";
     status.textContent = t("status.osm_rasterising", lines.length.toLocaleString());
     // Let the status paint before the synchronous rasterise.
@@ -2372,6 +2426,10 @@ async function loadOsmBridges() {
 // Turn raw bridge/tunnel ways into the deck model (state.bridges). OSM splits a
 // bridge way at its abutments, so the first/last vertex are the ground ends.
 function installBridgesFromWays(ways, sourceLabel) {
+  if (!state.dem.isGeographic) {
+    status.innerHTML = '<span style="color:#ff6b6b">Bridges need a geographic (lon/lat) DEM.</span>';
+    return false;
+  }
   const { H, W, dxM, dyM, mask } = state.dem;
   const inB = (rc) => rc[0] >= 0 && rc[0] < H && rc[1] >= 0 && rc[1] < W;
   const bridges = [];
@@ -2485,6 +2543,7 @@ function clearVectorNetwork() {
   state.networkFeatureCount = 0;
   state.networkLines = null;
   state.networkLinesMeta = null;
+  state.networkBridgeCandidates = null;
   if (state.networkLinesLayer) { state.networkLinesLayer.remove(); state.networkLinesLayer = null; }
   state.networkGraph = null; state.networkGraphToken = null;
   removeGraphLayers();
@@ -2598,9 +2657,17 @@ function updateCorridorAvailability() {
 // compute grid. Recompute them, refresh the toggle, and — when a mask is present
 // so the grid actually changed — fully invalidate (overlay + graph token +
 // recalibration + estimate) via markImpassableDirty, exactly like a mask change.
+// Enable the "extract bridges from loaded network" button only when the loaded
+// network actually carries bridge/tunnel-tagged ways.
+function updateBridgeNetworkButton() {
+  const btn = document.getElementById("bridge-from-network");
+  if (btn) btn.disabled = !(state.networkBridgeCandidates && state.networkBridgeCandidates.length);
+}
+
 function onNetworkCorridorsChanged() {
   recomputeCorridors();
   updateCorridorAvailability();
+  updateBridgeNetworkButton();
   if (state.impassable) {
     markImpassableDirty(true); // overlay + token bump + graph invalidation + reprobe + estimate
   } else {
