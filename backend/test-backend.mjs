@@ -48,26 +48,36 @@ for (let i = 0; ; i++) {
 const runWorker = loadWorker();
 let allOk = true;
 
-const cases = [];
-for (const dmode of ["from", "to", "round"]) {
-  for (const eMax of [0, 20000]) cases.push({ dmode, eMax, eMaxMode: "leg" });
-}
-cases.push({ dmode: "round", eMax: 20000, eMaxMode: "total" });
+// Bridge portal edges: deck shortcuts between far cells (endpoints off the
+// nodata cells). They genuinely change the field, so the +portals cases verify
+// the Rust portal port matches the JS worker bit-for-bit.
+const portalU    = new Int32Array([ 10 * W + 10,  50 * W + 200, 200 * W + 20 ]);
+const portalV    = new Int32Array([ 240 * W + 240, 60 * W + 60,  30 * W + 220 ]);
+const portalLenM = new Float64Array([ 1500, 800, 2000 ]);
 
-for (const { dmode, eMax, eMaxMode } of cases) {
+const cases = [];
+for (const portals of [false, true]) {
+  for (const dmode of ["from", "to", "round"]) {
+    for (const eMax of [0, 20000]) cases.push({ dmode, eMax, eMaxMode: "leg", portals });
+  }
+  cases.push({ dmode: "round", eMax: 20000, eMaxMode: "total", portals });
+}
+
+for (const { dmode, eMax, eMaxMode, portals } of cases) {
   {
+    const nPortals = portals ? portalU.length : 0;
     // backend
     const params = {
       h: H, w: W, dx: 30, dy: 30, alpha: 1, beta: 30, eta: 0.3, eMax, eMaxMode,
       densityMode: dmode, refPoints: refs, hasNetwork: false, maximize: false,
+      nPortals,
     };
     const json = new TextEncoder().encode(JSON.stringify(params));
     const head = new Uint8Array(4);
     new DataView(head.buffer).setUint32(0, json.length, true);
-    const resp = await fetch(`http://${ADDR}/density`, {
-      method: "POST",
-      body: new Blob([head, json, height, mask]),
-    });
+    const parts = [head, json, height, mask];
+    if (portals) parts.push(portalU, portalV, portalLenM);
+    const resp = await fetch(`http://${ADDR}/density`, { method: "POST", body: new Blob(parts) });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
     const buf = await resp.arrayBuffer();
     const jlen = new DataView(buf).getUint32(0, true);
@@ -81,6 +91,9 @@ for (const { dmode, eMax, eMaxMode } of cases) {
       seedR: -1, seedC: -1, goalR: -1, goalC: -1, mode: dmode,
       wantDensity: true, refPoints: refs, densityMode: dmode,
       height: new Float32Array(height), mask: new Uint8Array(mask),
+      portalU: portals ? portalU : null,
+      portalV: portals ? portalV : null,
+      portalLenM: portals ? portalLenM : null,
     });
 
     let maxD = 0, maxE = 0, bad = 0;
@@ -93,7 +106,7 @@ for (const { dmode, eMax, eMaxMode } of cases) {
     const ok = maxD < 1e-15 && maxE < 1e-3 && bad === 0;
     allOk = allOk && ok;
     console.log(
-      `mode=${dmode} eMax=${eMax}${eMaxMode === "total" ? " (total)" : ""}: ` +
+      `mode=${dmode} eMax=${eMax}${eMaxMode === "total" ? " (total)" : ""}${portals ? " +portals" : ""}: ` +
       `max|Δdensity|=${maxD.toExponential(2)}, ` +
       `max|Δenergy|=${maxE.toExponential(2)}, finite-mismatch=${bad} ${ok ? "✓" : "✗"}`,
     );

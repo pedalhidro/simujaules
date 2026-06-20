@@ -3325,6 +3325,7 @@ runBtn.addEventListener("click", async () => {
     return { height, mask, networkMask, transfer };
   };
 
+  const portals = buildPortals();
   const baseMsg = {
     kind: "run",
     H, W,
@@ -3344,6 +3345,13 @@ runBtn.addEventListener("click", async () => {
     interpSmoothing,
     maximize,
     maximizeLength,
+    // Bridge portal edges (hybrid raster overlay). Small arrays — spread into
+    // every worker message via baseMsg (structured-cloned, NOT transferred, so
+    // the shared arrays survive across the density pool's workers). The native
+    // backend path appends them to its Blob separately.
+    portalU: portals ? portals.u : null,
+    portalV: portals ? portals.v : null,
+    portalLenM: portals ? portals.lenM : null,
   };
 
   // Shared tail for the density paths (pool and native backend): optional
@@ -3579,16 +3587,20 @@ runBtn.addEventListener("click", async () => {
         refPoints: state.refPoints.map(([r, c]) => [r, c]),
         hasNetwork: useNetwork,
         maximize,
+        // Bridge portal edges appended after the (optional) network mask, in
+        // order: portalU (i32×P), portalV (i32×P), portalLenM (f64×P).
+        nPortals: portals ? portals.n : 0,
       };
       const json = new TextEncoder().encode(JSON.stringify(params));
       const head = new Uint8Array(4);
       new DataView(head.buffer).setUint32(0, json.length, true);
       // Compose the impassable mask + bridge corridors into the grid the native
-      // backend computes on (sent as raw bytes — no Rust change, parity kept).
+      // backend computes on (sent as raw bytes — parity kept).
       const { height: gridHeight, mask: gridMask } = buildComputeGrid();
       const body = new Blob([
         head, json, gridHeight, gridMask,
         ...(useNetwork ? [state.networkMask] : []),
+        ...(portals ? [portals.u, portals.v, portals.lenM] : []),
       ]);
       const resp = await fetch(`${baseUrl}/density`, { method: "POST", body });
       if (!resp.ok) throw new Error(`backend HTTP ${resp.status}`);
@@ -5666,6 +5678,20 @@ function buildComputeGrid(opts = {}) {
   return maskOnly
     ? { mask, transfer: [mask.buffer] }
     : { height, mask, transfer: [height.buffer, mask.buffer] };
+}
+
+// Pack the loaded OSM bridges into portal-edge arrays for the engine: end-cell
+// indices (u, v) and the deck length in metres. The worker/backend compute the
+// directed deck cost from these + the (composed) height array, so JS and Rust
+// derive identical costs (parity). Returns null when no bridges are loaded — in
+// which case the compute is byte-identical to before (no-op invariant).
+function buildPortals() {
+  const brs = state.bridges;
+  if (!brs || !brs.length) return null;
+  const n = brs.length;
+  const u = new Int32Array(n), v = new Int32Array(n), lenM = new Float64Array(n);
+  for (let i = 0; i < n; i++) { u[i] = brs[i].endA; v[i] = brs[i].endB; lenM[i] = brs[i].deckLenM; }
+  return { u, v, lenM, n };
 }
 
 // Vocab IRI deliberately points at the actual deployed file rather than an

@@ -35,6 +35,7 @@
 
 use rayon::prelude::*;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::time::Instant;
 use tiny_http::{Header, Method, Response, Server};
 
@@ -63,6 +64,10 @@ struct Params {
     has_network: bool,
     #[serde(default)]
     maximize: bool,
+    /// Number of bridge portal edges appended after the masks, in order:
+    /// portalU (i32×P), portalV (i32×P), portalLenM (f64×P).
+    #[serde(default)]
+    n_portals: usize,
 }
 
 struct Grid<'a> {
@@ -182,6 +187,42 @@ impl Scratch {
 /// identically); parents + settle order are kept for a subsequent
 /// subtree_passes() call (round mode needs both legs' energies before it
 /// knows which endpoints count, so the accumulation is a separate step).
+/// Bridge portal edges: cell → [(to, fwd_cost, bwd_cost)]. fwd is the real cost
+/// in this direction, bwd the reverse — a `reverse` search uses bwd, mirroring
+/// the grid dh sign flip. Built identically to the JS worker's buildPortalAdj
+/// so costs match bit-for-bit (parity). The cells under a deck are untouched.
+type PortalAdj = HashMap<u32, Vec<(u32, f64, f64)>>;
+
+fn portal_cost(len_m: f64, dh: f64, p: &Params) -> f64 {
+    if dh >= 0.0 {
+        p.alpha * len_m + p.beta * dh
+    } else {
+        (p.alpha * len_m - p.eta * p.beta * (-dh)).max(0.0)
+    }
+}
+
+fn build_portals(pu: &[i32], pv: &[i32], pl: &[f64], height: &[f32], mask: &[u8], p: &Params) -> PortalAdj {
+    let mut adj: PortalAdj = HashMap::new();
+    let n = mask.len() as i32;
+    for i in 0..pu.len() {
+        let (u, v, l) = (pu[i], pv[i], pl[i]);
+        if u < 0 || v < 0 || u >= n || v >= n || u == v {
+            continue;
+        }
+        let (uu, vv) = (u as usize, v as usize);
+        if mask[uu] == 0 || mask[vv] == 0 {
+            continue;
+        }
+        let hu = height[uu] as f64;
+        let hv = height[vv] as f64;
+        let cost_uv = portal_cost(l, hv - hu, p);
+        let cost_vu = portal_cost(l, hu - hv, p);
+        adj.entry(u as u32).or_default().push((v as u32, cost_uv, cost_vu));
+        adj.entry(v as u32).or_default().push((u as u32, cost_vu, cost_uv));
+    }
+    adj
+}
+
 fn dijkstra_tree(
     g: &Grid,
     seed_r: usize,
@@ -189,6 +230,7 @@ fn dijkstra_tree(
     p: &Params,
     reverse: bool,
     max_edge_cost: f64,
+    portals: &PortalAdj,
     s: &mut Scratch,
 ) {
     s.reset();
@@ -255,6 +297,31 @@ fn dijkstra_tree(
                 s.e[n_idx] = tentative as f32;
                 s.parents[n_idx] = idx as i32;
                 s.heap.push(tentative, n_idx as u32);
+            }
+        }
+
+        // Bridge portal edges (deck shortcuts) — relaxed exactly like grid
+        // edges. Monotone-safe (edge ≥ 0 ⇒ tentative ≥ gcost), so the radix
+        // heap invariant holds. Cells under the deck are never touched.
+        if let Some(plist) = portals.get(&(idx as u32)) {
+            for &(to, fwd, bwd) in plist {
+                let n_idx = to as usize;
+                if s.settled[n_idx] != 0 {
+                    continue;
+                }
+                let mut edge = if reverse { bwd } else { fwd };
+                if p.maximize {
+                    edge = (max_edge_cost - edge).max(0.0);
+                }
+                let tentative = gcost + edge;
+                if p.e_max > 0.0 && tentative > p.e_max {
+                    continue;
+                }
+                if tentative < s.e[n_idx] as f64 {
+                    s.e[n_idx] = tentative as f32;
+                    s.parents[n_idx] = idx as i32;
+                    s.heap.push(tentative, n_idx as u32);
+                }
             }
         }
     }
@@ -407,7 +474,7 @@ fn density_mem_budget_bytes() -> u64 {
     total.saturating_sub(3_000_000_000).max(2_000_000_000)
 }
 
-fn compute_density(g: &Grid, p: &Params) -> (Vec<f64>, Vec<f32>) {
+fn compute_density(g: &Grid, p: &Params, portals: &PortalAdj) -> (Vec<f64>, Vec<f32>) {
     let n = g.h * g.w;
 
     // Same MAX_EDGE_COST bound as the JS worker's maximize mode.
@@ -487,15 +554,15 @@ fn compute_density(g: &Grid, p: &Params) -> (Vec<f64>, Vec<f32>) {
                 let mut include = vec![0u8; n];
                 for &(r, c) in &refs[lo..hi] {
                     rayon::join(
-                        || dijkstra_tree(g, r, c, p, false, max_edge_cost, &mut s_f),
-                        || dijkstra_tree(g, r, c, p, true, max_edge_cost, &mut s_b),
+                        || dijkstra_tree(g, r, c, p, false, max_edge_cost, portals, &mut s_f),
+                        || dijkstra_tree(g, r, c, p, true, max_edge_cost, portals, &mut s_b),
                     );
                     acc.accumulate_round(&mut s_f, &mut s_b, &mut include, total_cap);
                 }
             } else {
                 let mut s = Scratch::new(n);
                 for &(r, c) in &refs[lo..hi] {
-                    dijkstra_tree(g, r, c, p, reverse, max_edge_cost, &mut s);
+                    dijkstra_tree(g, r, c, p, reverse, max_edge_cost, portals, &mut s);
                     subtree_passes(&mut s, None);
                     acc.accumulate(&s);
                 }
@@ -559,7 +626,9 @@ fn handle_density(mut req: tiny_http::Request) {
     };
     let n = params.h * params.w;
     let masks = if params.has_network { 2 } else { 1 };
-    let expected = 4 + json_len + 4 * n + masks * n;
+    // Bridge portals append portalU (i32×P) + portalV (i32×P) + portalLenM (f64×P).
+    let portal_bytes = params.n_portals * 16;
+    let expected = 4 + json_len + 4 * n + masks * n + portal_bytes;
     if body.len() != expected {
         return respond_json(
             req,
@@ -583,10 +652,28 @@ fn handle_density(mut req: tiny_http::Request) {
     // Effective mask = DEM mask AND network mask, like the JS worker.
     let eff_mask: Vec<u8> = if params.has_network {
         let net = &body[off..off + n];
+        off += n;
         (0..n).map(|i| (dem_mask[i] != 0 && net[i] != 0) as u8).collect()
     } else {
         dem_mask.to_vec()
     };
+    // Bridge portals (optional). Built on the effective mask + the height array,
+    // identically to the JS worker, so portal costs match bit-for-bit.
+    let pc = params.n_portals;
+    let portals: PortalAdj = if pc > 0 {
+        let mut pu = vec![0i32; pc];
+        bytemuck::cast_slice_mut::<i32, u8>(&mut pu).copy_from_slice(&body[off..off + 4 * pc]);
+        off += 4 * pc;
+        let mut pv = vec![0i32; pc];
+        bytemuck::cast_slice_mut::<i32, u8>(&mut pv).copy_from_slice(&body[off..off + 4 * pc]);
+        off += 4 * pc;
+        let mut pl = vec![0f64; pc];
+        bytemuck::cast_slice_mut::<f64, u8>(&mut pl).copy_from_slice(&body[off..off + 8 * pc]);
+        build_portals(&pu, &pv, &pl, &height, &eff_mask, &params)
+    } else {
+        HashMap::new()
+    };
+    let _ = off;
 
     let grid = Grid {
         height: &height,
@@ -596,7 +683,7 @@ fn handle_density(mut req: tiny_http::Request) {
         dx: params.dx,
         dy: params.dy,
     };
-    let (density, energy) = compute_density(&grid, &params);
+    let (density, energy) = compute_density(&grid, &params, &portals);
 
     let mut meta = format!(
         r#"{{"elapsed_ms":{:.1},"refs":{}}}"#,

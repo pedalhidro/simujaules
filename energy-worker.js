@@ -86,6 +86,41 @@ function heapRemoveTop(h) {
 //               feasibility, which a single run can't know).
 // Returns { E, parents, passes, order, orderLen }; parents/passes/order may
 // be null depending on the flags.
+// Build the bridge-portal adjacency (hybrid raster + sparse graph overlay).
+// Each bridge is a deck shortcut between its two ground abutment cells (u, v),
+// traversed at the flat-deck cost — the same asymmetric model as a grid edge,
+// with the deck length in metres and dh = h(v) − h(u). The cells UNDER the deck
+// keep their ground elevation, so the over-bridge route (this portal) and the
+// under-bridge ground route coexist on the 2.5-D grid. Returns a Map
+// cell → [{ to, fwd, bwd }] (fwd = real cost in this direction, bwd = the
+// reverse, so a `reverse` search uses bwd — mirroring the grid dh sign flip),
+// or null when there are no portals. `mask` is the EFFECTIVE mask (DEM ∧
+// network): a portal whose endpoint is masked out is dropped.
+function buildPortalAdj(portalU, portalV, portalLenM, height, mask, alpha, beta, eta) {
+  if (!portalU || !portalU.length) return null;
+  const cost = (lenM, dh) => {
+    if (dh >= 0) return alpha * lenM + beta * dh;
+    const e = alpha * lenM - eta * beta * (-dh);
+    return e < 0 ? 0 : e;
+  };
+  const adj = new Map();
+  const add = (a, b, fwd, bwd) => {
+    let arr = adj.get(a);
+    if (!arr) { arr = []; adj.set(a, arr); }
+    arr.push({ to: b, fwd, bwd });
+  };
+  for (let i = 0; i < portalU.length; i++) {
+    const u = portalU[i], v = portalV[i], L = portalLenM[i];
+    if (u < 0 || v < 0 || u === v) continue;
+    if (!mask[u] || !mask[v]) continue; // endpoint not traversable (e.g. network-constrained off the bridge)
+    const hu = height[u], hv = height[v];
+    const costUV = cost(L, hv - hu), costVU = cost(L, hu - hv);
+    add(u, v, costUV, costVU);
+    add(v, u, costVU, costUV);
+  }
+  return adj.size ? adj : null;
+}
+
 function dijkstra(opts) {
   const {
     height, mask, H, W,
@@ -107,6 +142,8 @@ function dijkstra(opts) {
     // cost" path among same-length paths.
     maximize = false,
     maxEdgeCost = 0,
+    // Bridge portal edges: Map cell → [{ to, fwd, bwd }] deck shortcuts.
+    portalAdj = null,
     // Per-cell progress messages get scaled into the range
     // [progressBase, progressBase + progressScale]. Default = full range,
     // i.e. one Dijkstra spans the whole bar. The density loop overrides
@@ -221,6 +258,29 @@ function dijkstra(opts) {
         heapPush(heap, tentative, nIdx);
       }
     }
+
+    // Bridge portal edges (deck shortcuts) — relaxed exactly like grid edges:
+    // settled guard, maximize inversion, eMax budget, parent/heap update. The
+    // cells under the deck are never touched, so under-bridge routes are intact.
+    if (portalAdj) {
+      const padj = portalAdj.get(idx);
+      if (padj) {
+        for (let pi = 0; pi < padj.length; pi++) {
+          const p = padj[pi];
+          const nIdx = p.to;
+          if (settled[nIdx]) continue;
+          let edge = reverse ? p.bwd : p.fwd;
+          if (maximize) { edge = maxEdgeCost - edge; if (edge < 0) edge = 0; }
+          const tentative = g + edge;
+          if (eMax > 0 && tentative > eMax) continue;
+          if (tentative < E[nIdx]) {
+            E[nIdx] = tentative;
+            if (parents) parents[nIdx] = idx;
+            heapPush(heap, tentative, nIdx);
+          }
+        }
+      }
+    }
   }
 
   const passes = (wantPasses && order)
@@ -275,6 +335,7 @@ function densityField(opts) {
     height, mask, H, W, refPoints, dmode,
     alpha, beta, eta, dx, dy,
     eMax = 0, maximize = false, maxEdgeCost = 0, eMaxTotalCap = 0,
+    portalAdj = null, // bridge portal edges: Map cell → [{ to, fwd, bwd }]
     onProgress = null,
     // Optional: invoked once per reference with (settleCount, budgetReached)
     // — the explored-cell count and the energy of the last-settled cell.
@@ -401,6 +462,21 @@ function densityField(opts) {
         const t = g + edge;
         if (eMax > 0 && t > eMax) continue;
         if (t < Ea[nIdx]) { Ea[nIdx] = t; parentsA[nIdx] = idx; rPush(t, nIdx); }
+      }
+      // Bridge portal edges (deck shortcuts). Portal-reached cells are settled
+      // and added to `order`, so the targeted reset + subtree-passes walk below
+      // already cover them.
+      if (portalAdj) {
+        const padj = portalAdj.get(idx);
+        if (padj) for (let pi = 0; pi < padj.length; pi++) {
+          const p = padj[pi]; const nIdx = p.to;
+          if (settledA[nIdx]) continue;
+          let edge = reverse ? p.bwd : p.fwd;
+          if (maximize) { edge = maxEdgeCost - edge; if (edge < 0) edge = 0; }
+          const t = g + edge;
+          if (eMax > 0 && t > eMax) continue;
+          if (t < Ea[nIdx]) { Ea[nIdx] = t; parentsA[nIdx] = idx; rPush(t, nIdx); }
+        }
       }
     }
     return orderLen;
@@ -1249,6 +1325,12 @@ self.onmessage = (ev) => {
     for (let i = 0; i < N; i++) effMask[i] = (mask[i] && networkMask[i]) ? 1 : 0;
   }
 
+  // Bridge portal edges (hybrid raster + sparse graph overlay). Cost uses the
+  // same asymmetric model + the effective mask, so it composes with the network
+  // constraint. Shared across all refs/legs. Top-N (A*) and the max-cost DP
+  // path don't use portals yet (A*'s admissible heuristic would break).
+  const portalAdj = buildPortalAdj(msg.portalU, msg.portalV, msg.portalLenM, height, effMask, alpha, beta, eta);
+
   let energy;
   let passes = null;
   let path = null;          // single best path (top-N supersedes this with `routes`)
@@ -1289,6 +1371,7 @@ self.onmessage = (ev) => {
         refPoints, dmode,
         alpha, beta, eta, dx, dy,
         eMax, maximize, maxEdgeCost, eMaxTotalCap,
+        portalAdj,
         onProgress: (frac) => postMessage({ kind: "progress", progress: frac }),
       });
 
@@ -1328,7 +1411,7 @@ self.onmessage = (ev) => {
         alpha, beta, eta, dx, dy,
         reverse: false, trackParents: wantPath,
         wantPasses, eMax,
-        maximize, maxEdgeCost,
+        maximize, maxEdgeCost, portalAdj,
       });
       energy = r.E;
       passes = r.passes;
@@ -1343,7 +1426,7 @@ self.onmessage = (ev) => {
         alpha, beta, eta, dx, dy,
         reverse: true, trackParents: wantPath,
         wantPasses, eMax,
-        maximize, maxEdgeCost,
+        maximize, maxEdgeCost, portalAdj,
       });
       energy = r.E;
       passes = r.passes;
@@ -1362,7 +1445,7 @@ self.onmessage = (ev) => {
         alpha, beta, eta, dx, dy,
         reverse: false, trackParents: wantPath,
         wantTree: wantPasses, eMax,
-        maximize, maxEdgeCost,
+        maximize, maxEdgeCost, portalAdj,
       });
       const b = dijkstra({
         height, mask: effMask, H, W,
@@ -1370,7 +1453,7 @@ self.onmessage = (ev) => {
         alpha, beta, eta, dx, dy,
         reverse: true, trackParents: false,
         wantTree: wantPasses, eMax,
-        maximize, maxEdgeCost,
+        maximize, maxEdgeCost, portalAdj,
       });
       energy = new Float32Array(N);
       for (let i = 0; i < N; i++) {

@@ -171,5 +171,62 @@ for (const dmode of ["from", "round"]) {
   assert(maxE < 1e-3, `merged energy matches (max|Δ| = ${maxE.toExponential(1)})`);
 }
 
+// ---- 3. bridge portal edges (hybrid raster + sparse graph overlay) ----
+{
+  console.log("bridge portals: deck shortcut lowers far-cell energy, locally");
+  const seedIdx = base.seedR * W + base.seedC;
+  const goalIdx = base.goalR * W + base.goalC;
+  const noPortal = run(msg({ mode: "from", goalR: -1, goalC: -1 }));
+  const withPortal = run(msg({
+    mode: "from", goalR: -1, goalC: -1,
+    portalU: new Int32Array([seedIdx]),
+    portalV: new Int32Array([goalIdx]),
+    portalLenM: new Float64Array([1]), // ~free deck straight to the goal
+  }));
+  assert(Number.isFinite(withPortal.energy[goalIdx]), "portal goal reachable");
+  assert(withPortal.energy[goalIdx] < noPortal.energy[goalIdx] - 1e-6,
+    `portal lowers E[goal] (${noPortal.energy[goalIdx].toFixed(0)} → ${withPortal.energy[goalIdx].toFixed(0)})`);
+  // A cell far from both endpoints must be untouched — the portal adds a path
+  // without overwriting the grid, so under-bridge / unrelated cells are intact.
+  const otherIdx = 10 * W + 10;
+  const sameOther = (!Number.isFinite(withPortal.energy[otherIdx]) && !Number.isFinite(noPortal.energy[otherIdx])) ||
+    Math.abs(withPortal.energy[otherIdx] - noPortal.energy[otherIdx]) < 1e-9;
+  assert(sameOther, "a cell off the portal path is unchanged (multi-level locality)");
+}
+{
+  const dmode = "from";
+  console.log("density + portals: pooled partials vs single run");
+  const portalU = new Int32Array([40 * W + 60, 180 * W + 30]);
+  const portalV = new Int32Array([220 * W + 230, 30 * W + 240]);
+  const portalLenM = new Float64Array([1200, 1800]);
+  const pmsg = (over) => msg({ portalU, portalV, portalLenM, ...over });
+  const single = run(pmsg({
+    wantDensity: true, refPoints: refs, densityMode: dmode, mode: dmode, goalR: -1, goalC: -1,
+  }));
+  const density = new Float64Array(N), energySum = new Float64Array(N), energyCount = new Int32Array(N);
+  for (let p = 0; p < 3; p++) {
+    const part = run(pmsg({
+      wantDensity: true, refPoints: refs.slice(p * 2, p * 2 + 2),
+      densityMode: dmode, mode: dmode, densityPartial: true, goalR: -1, goalC: -1,
+    }));
+    for (let i = 0; i < N; i++) { density[i] += part.density[i]; energySum[i] += part.energySum[i]; energyCount[i] += part.energyCount[i]; }
+  }
+  for (let i = 0; i < N; i++) density[i] /= N;
+  let maxD = 0, maxE = 0;
+  for (let i = 0; i < N; i++) {
+    maxD = Math.max(maxD, Math.abs(density[i] - single.passes[i]));
+    const e = energyCount[i] > 0 ? energySum[i] / energyCount[i] : Infinity;
+    if (Number.isFinite(e) !== Number.isFinite(single.energy[i])) maxE = Infinity;
+    else if (Number.isFinite(e)) maxE = Math.max(maxE, Math.abs(e - single.energy[i]));
+  }
+  assert(maxD === 0, `portals: merged density identical (max|Δ| = ${maxD.toExponential(1)})`);
+  assert(maxE < 1e-3, `portals: merged energy matches (max|Δ| = ${maxE.toExponential(1)})`);
+  // Sanity: the portals actually changed the field vs a no-portal run.
+  const noP = run(msg({ wantDensity: true, refPoints: refs, densityMode: dmode, mode: dmode, goalR: -1, goalC: -1 }));
+  let changed = 0;
+  for (let i = 0; i < N; i++) if (Math.abs(single.passes[i] - noP.passes[i]) > 1e-12) changed++;
+  assert(changed > 0, `portals change the density field (${changed} cells differ)`);
+}
+
 console.log(failures === 0 ? "\nALL TESTS PASSED" : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
