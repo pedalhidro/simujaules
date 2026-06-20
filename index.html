@@ -731,6 +731,27 @@
         <div class="meta" id="imp-meta" data-i18n="imp.none">No impassable mask loaded.</div>
       </div>
 
+      <div class="group" id="bridges-group">
+        <h2 data-i18n="group.bridges">1d. Optional bridges &amp; tunnels (OSM)</h2>
+        <button type="button" class="secondary" id="bridge-osm" data-i18n="bridge.osm">Pull bridges &amp; tunnels from OSM</button>
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
+          <input type="checkbox" id="bridge-tunnels" checked />
+          <span data-i18n="bridge.tunnels">Include tunnels (tunnel=yes)</span>
+        </label>
+        <button type="button" class="secondary" id="bridge-clear" data-i18n="bridge.clear" style="margin-top: 4px;">Clear bridges</button>
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
+          <input type="checkbox" id="bridge-show" checked />
+          <span data-i18n="bridge.show">Show decks on map</span>
+        </label>
+        <div class="row" id="bridge-opacity-row" style="margin-top: 3px;">
+          <div>
+            <label data-i18n="bridge.opacity">deck opacity</label>
+            <input type="range" id="bridge-opacity" min="0" max="1" step="0.05" value="0.9" data-i18n-aria="aria.opacity_bridge" />
+          </div>
+        </div>
+        <div class="meta" id="bridge-meta" data-i18n="bridge.none">No bridges loaded.</div>
+      </div>
+
       <div class="group" id="pick-points-group">
         <h2 data-i18n="group.pick_points">2. Pick points</h2>
         <!-- src/dst picking. Faded out in density mode (references replace the
@@ -1124,6 +1145,9 @@
 
           <h4 data-i18n="help.h.impassable">1c · Máscara de barreira</h4>
           <p data-i18n-html="help.p.impassable"></p>
+
+          <h4 data-i18n="help.h.bridges">1d · Pontes e túneis</h4>
+          <p data-i18n-html="help.p.bridges"></p>
 
           <h4 data-i18n="help.h.points">2 · Marcar pontos</h4>
           <p data-i18n-html="help.p.points"></p>

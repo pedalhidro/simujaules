@@ -87,6 +87,20 @@ const STRINGS = {
   "imp.cell_blocked":    { pt: "Célula intransponível (máscara de barreira) — escolha outra.", en: "Impassable cell (barrier mask) — pick another." },
   "aria.opacity_impassable": { pt: "opacidade da máscara de barreira", en: "impassable mask opacity" },
   "help.h.impassable":   { pt: "1c · Máscara de barreira", en: "1c · Impassable mask" },
+
+  // ---- Group: Bridges & tunnels ----------------------------------------
+  "group.bridges":       { pt: "1d. Pontes e túneis opcionais (OSM)", en: "1d. Optional bridges & tunnels (OSM)" },
+  "bridge.osm":          { pt: "Puxar pontes e túneis do OSM", en: "Pull bridges & tunnels from OSM" },
+  "bridge.tunnels":      { pt: "Incluir túneis (tunnel=yes)", en: "Include tunnels (tunnel=yes)" },
+  "bridge.clear":        { pt: "Limpar pontes", en: "Clear bridges" },
+  "bridge.show":         { pt: "Mostrar tabuleiros no mapa", en: "Show decks on map" },
+  "bridge.opacity":      { pt: "opacidade do tabuleiro", en: "deck opacity" },
+  "bridge.none":         { pt: "Nenhuma ponte carregada.", en: "No bridges loaded." },
+  "bridge.meta.count":   { pt: "{0} tabuleiros de ponte/túnel", en: "{0} bridge/tunnel decks" },
+  "bridge.meta.skipped": { pt: "{0} ignorados (fora do DEM ou apoio sem dado)", en: "{0} skipped (off-DEM or nodata abutment)" },
+  "aria.opacity_bridge": { pt: "opacidade dos tabuleiros de ponte", en: "bridge deck opacity" },
+  "help.h.bridges":      { pt: "1d · Pontes e túneis", en: "1d · Bridges & tunnels" },
+  "help.p.bridges":      { pt: "Puxa pontes (bridge=*) e, opcionalmente, túneis (tunnel=yes) do OpenStreetMap sobre a extensão do DEM. Cada estrutura é modelada como um tabuleiro plano entre seus dois apoios no solo: no cálculo em raster ela vira uma \"aresta-portal\" entre as células das pontas, com o custo do tabuleiro plano, sem alterar as células por baixo — então tanto a rota POR CIMA da ponte quanto a rota POR BAIXO ficam corretas. Pressupõe um DEM de terreno nu (sem o tabuleiro). Em viadutos sobre outras vias (multi-nível), o roteamento por baixo permanece no solo.", en: "Pulls bridges (bridge=*) and, optionally, tunnels (tunnel=yes) from OpenStreetMap over the DEM extent. Each structure is modelled as a level deck between its two ground abutments: in the raster compute it becomes a \"portal edge\" between the end cells at the flat-deck cost, without altering the cells underneath — so both the route OVER the bridge and the route UNDER it stay correct. Assumes a bare-earth DEM (deck not in the terrain). For viaducts over other roads (multi-level), the route underneath stays on the ground." },
   "help.p.impassable":   { pt: "Suba um GeoTIFF binário (1=intransponível, p.ex. corpos d'água). É reamostrado para a grade do DEM por maioria de área (≥50% intransponível ⇒ célula barrada); fora da extensão da máscara assume-se passável. Pode estar em extensão/resolução/CRS diferentes do DEM. Opcionalmente, a rede vetorial (1b) abre corredores passáveis (pontes) sobre a máscara, com um deslocamento suave de elevação que sobe linearmente das margens até o centro da ponte.", en: "Upload a binary GeoTIFF (1=impassable, e.g. water bodies). It is resampled onto the DEM grid by area-coverage majority (≥50% impassable ⇒ blocked cell); outside the mask extent cells are assumed passable. It may have a different extent/resolution/CRS than the DEM. Optionally the vector network (1b) carves passable corridors (bridges) across the mask, with a smooth elevation offset that ramps linearly from the shores up to the bridge centre." },
 
   // ---- Group: Pick points ----------------------------------------------
@@ -817,6 +831,12 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("imp-opacity")?.addEventListener("input", () => {
     if (state.impassableOverlay) state.impassableOverlay.setOpacity(impassableOverlayOpacity());
   });
+
+  // --- Bridges & tunnels (group 1d) ---
+  document.getElementById("bridge-osm")?.addEventListener("click", loadOsmBridges);
+  document.getElementById("bridge-clear")?.addEventListener("click", clearBridges);
+  document.getElementById("bridge-show")?.addEventListener("change", applyBridgeOverlay);
+  document.getElementById("bridge-opacity")?.addEventListener("input", applyBridgeOverlay);
   // Switching the displayed energy field (constrained / unconstrained /
   // difference) re-renders cached arrays — never recomputes.
   document.getElementById("energy-source")?.addEventListener("change", () => {
@@ -1090,6 +1110,17 @@ const state = {
   corridorSet: null, // Set of corridor cell indices, for O(1) click-validity lookup
   impassableToken: 0,
   impassableOverlay: null,
+  // Optional OSM bridges & tunnels modelled as level "decks". Each is a span
+  // between two ground abutment cells (endA/endB). In the raster compute they
+  // become PORTAL EDGES — a shortcut between the end cells at the flat-deck cost
+  // — so the route OVER the bridge and the ground route UNDER it both stay
+  // correct (the grid keeps ground elevation everywhere; nothing is overwritten).
+  // bridgesToken is bumped on any bridge change so the cached graph + estimate
+  // rebuild. See loadOsmBridges / buildPortals / buildComputeGrid.
+  bridges: null,       // [{ latlngs, endA, endB, deckLenM, kind, layer, name }]
+  bridgesMeta: null,   // { source, count, skipped }
+  bridgesToken: 0,
+  bridgesLayer: null,  // Leaflet polyline group overlay
   // Multi-reference density: list of [r, c] pixel coords plus their map markers.
   refPoints: [],
   refMarkers: [],
@@ -1566,6 +1597,11 @@ async function loadDemFromArrayBuffer(buf, label) {
   clearVectorNetwork();
   updateImpassableMeta();
   updateCorridorAvailability();
+  // Bridges too — endA/endB are cell indices sized to the previous DEM's grid.
+  state.bridges = null;
+  state.bridgesMeta = null;
+  if (state.bridgesLayer) { state.bridgesLayer.remove(); state.bridgesLayer = null; }
+  updateBridgeMeta();
   syncRefDisplay();
   document.getElementById("src-display").textContent = "— click map —";
   document.getElementById("dst-display").textContent = "— optional —";
@@ -2088,6 +2124,180 @@ async function loadOsmNetwork() {
   }
 }
 
+// ---- OSM bridges & tunnels (level decks → portal edges) -------------------
+// Pull bridge/tunnel ways from OSM and model each as a level deck spanning its
+// two ground abutments. A bare-earth DEM omits the deck, so routing over a
+// viaduct otherwise dives into the valley below; the deck is the flat truth.
+// In the raster compute each deck becomes a PORTAL EDGE between its end cells at
+// the flat-deck cost, leaving the cells underneath untouched — so both the
+// over-bridge and the under-bridge route stay correct (2.5-D safe).
+
+function llToCell(lat, lng) {
+  const { originX, originY, dx, dy } = state.dem;
+  return [Math.floor((originY - lat) / dy), Math.floor((lng - originX) / dx)];
+}
+
+async function loadOsmBridges() {
+  if (!state.dem) { status.innerHTML = '<span style="color:#ff6b6b">Load a DEM first.</span>'; return; }
+  const { originX, originY, H, W, dx, dy } = state.dem;
+  const b = map.getBounds();
+  const south = Math.max(b.getSouth(), originY - H * dy);
+  const north = Math.min(b.getNorth(), originY);
+  const west  = Math.max(b.getWest(),  originX);
+  const east  = Math.min(b.getEast(),  originX + W * dx);
+  if (!(south < north && west < east)) {
+    status.innerHTML = '<span style="color:#ff6b6b">The current map view doesn\'t intersect the DEM — pan to the DEM first.</span>';
+    return;
+  }
+  const withTunnels = !!document.getElementById("bridge-tunnels")?.checked;
+  const btn = document.getElementById("bridge-osm");
+  if (btn) btn.disabled = true;
+  progress.classList.add("active");
+  progressBar.style.width = "20%";
+  status.textContent = "Querying OSM (Overpass) for bridges…";
+  try {
+    const bbox = `${south.toFixed(6)},${west.toFixed(6)},${north.toFixed(6)},${east.toFixed(6)}`;
+    const parts = [`way["bridge"]["bridge"!="no"]["highway"](${bbox});`];
+    if (withTunnels) parts.push(`way["tunnel"="yes"]["highway"](${bbox});`);
+    const query = `[out:json][timeout:90];(${parts.join("")});out geom;`;
+    const resp = await fetch(OVERPASS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "data=" + encodeURIComponent(query),
+    });
+    if (!resp.ok) throw new Error(`Overpass HTTP ${resp.status} (busy? try again in a minute)`);
+    progressBar.style.width = "60%";
+    status.textContent = "Parsing OSM response…";
+    const json = await resp.json();
+    const ways = [];
+    for (const el of json.elements || []) {
+      if (el.type !== "way" || !Array.isArray(el.geometry) || el.geometry.length < 2) continue;
+      const tg = el.tags || {};
+      ways.push({
+        latlngs: el.geometry.map((g) => [g.lat, g.lon]),
+        kind: tg.tunnel === "yes" ? "tunnel" : "bridge",
+        layer: parseInt(tg.layer, 10) || 0,
+        name: tg["bridge:name"] || tg.name || null,
+      });
+    }
+    if (!ways.length) throw new Error("Overpass returned no bridges/tunnels in this extent.");
+    installBridgesFromWays(ways, "OSM");
+  } catch (err) {
+    console.error("[osm-bridges]", err);
+    status.innerHTML = `<span style="color:#ff6b6b">OSM bridge pull failed: ${escapeHtml(err.message)}</span>`;
+  } finally {
+    progress.classList.remove("active");
+    if (btn) btn.disabled = false;
+  }
+}
+
+// Turn raw bridge/tunnel ways into the deck model (state.bridges). OSM splits a
+// bridge way at its abutments, so the first/last vertex are the ground ends.
+function installBridgesFromWays(ways, sourceLabel) {
+  const { H, W, dxM, dyM, mask } = state.dem;
+  const inB = (rc) => rc[0] >= 0 && rc[0] < H && rc[1] >= 0 && rc[1] < W;
+  const bridges = [];
+  let skipped = 0;
+  for (const w of ways) {
+    const pts = w.latlngs;
+    const a = llToCell(pts[0][0], pts[0][1]);
+    const z = llToCell(pts[pts.length - 1][0], pts[pts.length - 1][1]);
+    if (!inB(a) || !inB(z)) { skipped++; continue; }
+    const endA = a[0] * W + a[1], endB = z[0] * W + z[1];
+    // Need two distinct abutments with valid ground elevation to span a deck.
+    if (endA === endB || !mask[endA] || !mask[endB]) { skipped++; continue; }
+    let deckLenM = 0, prev = a;
+    for (let i = 1; i < pts.length; i++) {
+      const cur = llToCell(pts[i][0], pts[i][1]);
+      deckLenM += Math.hypot((cur[0] - prev[0]) * dyM, (cur[1] - prev[1]) * dxM);
+      prev = cur;
+    }
+    if (!(deckLenM > 0)) { skipped++; continue; }
+    bridges.push({ latlngs: pts, endA, endB, deckLenM, kind: w.kind, layer: w.layer, name: w.name });
+  }
+  if (!bridges.length) {
+    status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(sourceLabel)}: no usable bridges/tunnels on this DEM.</span>`;
+    return false;
+  }
+  state.bridges = bridges;
+  state.bridgesMeta = { source: sourceLabel, count: bridges.length, skipped };
+  updateBridgeMeta();
+  applyBridgeOverlay();
+  markBridgesDirty(true);
+  status.textContent = `${bridges.length} bridge/tunnel deck(s) loaded.`;
+  return true;
+}
+
+function clearBridges() {
+  state.bridges = null;
+  state.bridgesMeta = null;
+  if (state.bridgesLayer) { state.bridgesLayer.remove(); state.bridgesLayer = null; }
+  updateBridgeMeta();
+  markBridgesDirty(true);
+}
+
+function updateBridgeMeta() {
+  const meta = document.getElementById("bridge-meta");
+  if (!meta) return;
+  if (!state.bridges) { meta.textContent = t("bridge.none"); return; }
+  const m = state.bridgesMeta || {};
+  let html = t("bridge.meta.count", String(state.bridges.length));
+  if (m.skipped) html += `<br/>${t("bridge.meta.skipped", String(m.skipped))}`;
+  meta.innerHTML = html;
+}
+
+// Bridges change routing (portal edges), so invalidate compute, graph cache and
+// (on geometry change) the calibration probe — mirror markImpassableDirty.
+function markBridgesDirty(reprobe = false) {
+  cancelActiveCompute();
+  state.lastResult = null;
+  state.bridgesToken++;
+  state.networkGraph = null; state.networkGraphToken = null;
+  applyBridgeOverlay();
+  if (reprobe && state.dem) {
+    state.calibration = null;
+    state.calibrationGen++;
+    if (state.probeWorker) { state.probeWorker.terminate(); state.probeWorker = null; }
+    startCalibrationProbe();
+  }
+  estimateRunTime();
+}
+
+function bridgeOverlayOpacity() {
+  const v = parseFloat(document.getElementById("bridge-opacity")?.value);
+  return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.9;
+}
+
+// Draw the decks as polylines (bridges orange, tunnels purple) on the network
+// pane. Gated on the #bridge-show toggle + a geographic DEM.
+function applyBridgeOverlay() {
+  if (state.bridgesLayer) { state.bridgesLayer.remove(); state.bridgesLayer = null; }
+  const show = !!document.getElementById("bridge-show")?.checked;
+  if (!show || !state.dem || !state.dem.isGeographic || !state.bridges) return;
+  const op = bridgeOverlayOpacity();
+  const group = L.layerGroup();
+  for (const br of state.bridges) {
+    L.polyline(br.latlngs, {
+      color: br.kind === "tunnel" ? "#a26bff" : "#ff7f0e",
+      weight: 3, opacity: op, pane: "networkPane", interactive: false,
+    }).addTo(group);
+  }
+  group.addTo(map);
+  state.bridgesLayer = group;
+}
+
+// Bridges → GeoJSON FeatureCollection (LineStrings, [lon,lat]) for the bundle.
+function bridgesToFC(bridges) {
+  return {
+    type: "FeatureCollection",
+    features: bridges.map((br) => ({
+      type: "Feature",
+      properties: { kind: br.kind, layer: br.layer, name: br.name || null },
+      geometry: { type: "LineString", coordinates: br.latlngs.map(([lat, lng]) => [lng, lat]) },
+    })),
+  };
+}
+
 function clearVectorNetwork() {
   cancelActiveCompute(); // in-flight runs are constrained to the old network
   state.networkMask = null;
@@ -2397,7 +2607,7 @@ function graphModeActive() {
 }
 // Identity of everything the cached graph depends on — a change rebuilds it.
 function computeNetworkGraphToken() {
-  return `${state.networkFeatureCount}|${graphJunctionMode()}|${state.dem ? state.dem.W + "x" + state.dem.H : "0"}|imp${state.impassableToken}`;
+  return `${state.networkFeatureCount}|${graphJunctionMode()}|${state.dem ? state.dem.W + "x" + state.dem.H : "0"}|imp${state.impassableToken}|br${state.bridgesToken}`;
 }
 
 // Draw a path/route (sequence of node ids) as a polyline over the edges.
@@ -5655,6 +5865,15 @@ function buildMetadata(result, withOutputs = true) {
     srs:              state.impassableMeta?.srs || null,
     cells:            state.impassableMeta?.cellsImpassable || 0,
   };
+  // OSM bridges & tunnels (geometry saved separately as bridges.geojson).
+  const bridges = {
+    enabled:  !!(state.bridges && state.bridges.length),
+    count:    state.bridges ? state.bridges.length : 0,
+    source:   state.bridgesMeta?.source || null,
+    tunnels:  !!document.getElementById("bridge-tunnels")?.checked,
+    show:     !!document.getElementById("bridge-show")?.checked,
+    opacity:  bridgeOverlayOpacity(),
+  };
 
   const md = {
     "@context":           SIMU_CONTEXT,
@@ -5686,6 +5905,7 @@ function buildMetadata(result, withOutputs = true) {
     viz,
     network,
     impassable,
+    bridges,
     stats: {
       maxE:        state.lastAutoMax ?? null,
       maxPasses:   state.lastPassesAutoMax ?? null,
@@ -5723,6 +5943,10 @@ function buildMetadata(result, withOutputs = true) {
         type:   "Uint8",
         shape:  [dem.H, dem.W],
         file:   "impassable.tif",
+      } : null,
+      bridges: (state.bridges && state.bridges.length) ? {
+        format: "GeoJSON",
+        file:   "bridges.geojson",
       } : null,
       routes: result.routes && result.routes.length ? {
         format: "GeoJSON",
@@ -5848,6 +6072,10 @@ async function downloadBundle() {
     if (state.impassable) {
       zip.file("impassable.tif", new Uint8Array(writeRasterAsGeoTIFF(state.impassable, dem, "uint8")));
     }
+    // OSM bridges/tunnels as GeoJSON — re-derived into decks on reload.
+    if (state.bridges && state.bridges.length) {
+      zip.file("bridges.geojson", JSON.stringify(bridgesToFC(state.bridges), null, 2));
+    }
     if (r.routes && r.routes.length && !graphMode) {
       zip.file("routes.geojson", JSON.stringify(routesFCFromList(r.routes, dem), null, 2));
     }
@@ -5917,6 +6145,8 @@ async function loadBundleFile(file) {
       }
       const iTif = zip.file("impassable.tif");
       if (iTif) bin.impassable = await readRasterFromGeoTIFF(await iTif.async("arraybuffer"), "uint8");
+      const brGeo = zip.file("bridges.geojson");
+      if (brGeo) { try { bin.bridgesFC = JSON.parse(await brGeo.async("string")); } catch {} }
       // Route/path vector geometry. These ride alongside the rasters and get
       // re-rendered (converted back to cell indices) once a matching DEM is
       // present — no recompute needed. Held in `bin` so the pending-bundle
@@ -6043,6 +6273,12 @@ function applyMetadataToUI(md, bin = {}) {
   { const r = document.getElementById("imp-opacity-row");
     if (r) r.style.display = document.getElementById("imp-show")?.checked ? "" : "none"; }
 
+  // ---- Bridge/tunnel params (geometry restore happens further down) -------
+  const br = md.bridges || {};
+  check("bridge-tunnels", br.tunnels);
+  check("bridge-show", br.show);
+  set("bridge-opacity", Number.isFinite(br.opacity) ? br.opacity : 0.9);
+
   // (Engine preference is no longer user-selectable — JS only.
   // md.enginePreference from older bundles is read but ignored.)
 
@@ -6144,6 +6380,22 @@ function applyMetadataToUI(md, bin = {}) {
     } else {
       console.warn(`[bundle] impassable.tif size mismatch: ${bin.impassable.length} vs H*W=${N}. Discarded.`);
     }
+  }
+
+  // ---- Bridges/tunnels restore -------------------------------------------
+  // Re-derive decks from the saved GeoJSON (endA/endB depend on the grid, so
+  // only under a dimension match). installBridgesFromWays handles overlay +
+  // invalidation, mirroring a fresh OSM pull.
+  if (bin.bridgesFC && state.dem && demDimsMatch === true) {
+    const ways = (bin.bridgesFC.features || [])
+      .filter((f) => f.geometry?.type === "LineString" && Array.isArray(f.geometry.coordinates))
+      .map((f) => ({
+        latlngs: f.geometry.coordinates.map(([lon, lat]) => [lat, lon]),
+        kind: f.properties?.kind || "bridge",
+        layer: f.properties?.layer || 0,
+        name: f.properties?.name || null,
+      }));
+    if (ways.length) installBridgesFromWays(ways, "bundle");
   }
 
   applyLayerControls();
