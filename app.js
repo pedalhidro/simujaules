@@ -159,6 +159,7 @@ const STRINGS = {
 
   // ---- Group: Impassable mask ------------------------------------------
   "group.impassable":    { pt: "1c. Máscara de barreira opcional (água, GeoTIFF)", en: "1c. Optional impassable mask (water, GeoTIFF)" },
+  "imp.enabled":         { pt: "Aplicar ao cálculo", en: "Apply to compute" },
   "imp.invert":          { pt: "Inverter (raster marca células passáveis)", en: "Invert (raster marks passable cells)" },
   "imp.clear":           { pt: "Limpar máscara", en: "Clear mask" },
   "imp.corridor":        { pt: "Rede abre corredores passáveis sobre a máscara", en: "Network carves passable corridors across the mask" },
@@ -174,6 +175,7 @@ const STRINGS = {
 
   // ---- Group: Bridges & tunnels ----------------------------------------
   "group.bridges":       { pt: "1d. Pontes e túneis opcionais (OSM)", en: "1d. Optional bridges & tunnels (OSM)" },
+  "bridge.enabled":      { pt: "Aplicar ao cálculo", en: "Apply to compute" },
   "bridge.osm":          { pt: "Puxar pontes e túneis do OSM", en: "Pull bridges & tunnels from OSM" },
   "bridge.from_network": { pt: "Extrair da rede carregada", en: "Extract from loaded network" },
   "bridge.no_candidates":{ pt: "A rede carregada não tem pontes/túneis marcados (tags bridge/tunnel).", en: "The loaded network has no bridge/tunnel tags." },
@@ -898,6 +900,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
   document.getElementById("impassable-clear")?.addEventListener("click", clearImpassableMask);
+  document.getElementById("imp-enabled")?.addEventListener("change", () => markImpassableDirty(true));
   document.getElementById("impassable-invert")?.addEventListener("change", () => {
     // Re-resample the cached source with the flipped convention (no re-upload).
     if (state.impassableRaster) applyImpassableRaster(state.impassableRaster, state.impassableMeta?.name);
@@ -933,6 +936,7 @@ document.addEventListener("DOMContentLoaded", () => {
     installBridgesFromWays(ways, "network");
   });
   document.getElementById("bridge-clear")?.addEventListener("click", clearBridges);
+  document.getElementById("bridge-enabled")?.addEventListener("change", () => markBridgesDirty(true));
   document.getElementById("bridge-show")?.addEventListener("change", (ev) => {
     const row = document.getElementById("bridge-opacity-row");
     if (row) row.style.display = ev.target.checked ? "" : "none";
@@ -5936,12 +5940,18 @@ function recomputeCorridors() {
   state.corridorSet = new Set(outCells);
 }
 
+// Per-feature "apply to compute" master toggles (1c/1d). When off, the data
+// stays loaded (and its overlay can still be shown) but it does NOT affect the
+// compute. Default true when the control is absent.
+function impassableEnabled() { return document.getElementById("imp-enabled")?.checked ?? true; }
+function bridgesEnabled() { return document.getElementById("bridge-enabled")?.checked ?? true; }
+
 // True if a cell is traversable in the EFFECTIVE compute grid (raw DEM mask AND
 // not impassable-unless-reopened-as-a-corridor). Used to validate point picks so
 // clicks/refs can't land on blocked water that the compute would silently drop.
 function effectivePassableAt(idx) {
   if (!state.dem || !state.dem.mask[idx]) return false;
-  if (state.impassable && state.impassable[idx]) {
+  if (state.impassable && impassableEnabled() && state.impassable[idx]) {
     return !!(state.corridorSet && state.corridorSet.has(idx));
   }
   return true;
@@ -5960,7 +5970,7 @@ function buildComputeGrid(opts = {}) {
   const dem = state.dem;
   const height = maskOnly ? null : new Float32Array(dem.height);
   const mask = new Uint8Array(dem.mask);
-  const imp = state.impassable;
+  const imp = impassableEnabled() ? state.impassable : null; // 1c master toggle
   if (imp) {
     const N = mask.length;
     for (let i = 0; i < N; i++) if (imp[i] && mask[i]) mask[i] = 0; // block water on valid land
@@ -5987,7 +5997,7 @@ function buildComputeGrid(opts = {}) {
 // which case the compute is byte-identical to before (no-op invariant).
 function buildPortals() {
   const brs = state.bridges;
-  if (!brs || !brs.length) return null;
+  if (!brs || !brs.length || !bridgesEnabled()) return null; // 1d master toggle
   const n = brs.length;
   const u = new Int32Array(n), v = new Int32Array(n), lenM = new Float64Array(n);
   for (let i = 0; i < n; i++) { u[i] = brs[i].endA; v[i] = brs[i].endB; lenM[i] = brs[i].deckLenM; }
@@ -6024,7 +6034,7 @@ function bridgeDeckCells(br) {
 // with heavier ground traffic underneath isn't lowered. Raster modes only —
 // graph mode already routes the (flattened) deck edges, so they carry passes.
 function stampBridgeDeckPasses(passes) {
-  if (!passes || !state.bridges || !state.dem) return;
+  if (!passes || !state.bridges || !state.dem || !bridgesEnabled()) return;
   for (const br of state.bridges) {
     const a = passes[br.endA], b = passes[br.endB];
     if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
@@ -6220,6 +6230,7 @@ function buildMetadata(result, withOutputs = true) {
   // saved separately as impassable.tif — see downloadBundle).
   const impassable = {
     enabled:          !!state.impassable,
+    apply:            impassableEnabled(),
     corridorOverride: !!document.getElementById("imp-corridor")?.checked,
     elevationOffset:  corridorOffsetMetres(),
     invert:           !!document.getElementById("impassable-invert")?.checked,
@@ -6234,6 +6245,7 @@ function buildMetadata(result, withOutputs = true) {
   // OSM bridges & tunnels (geometry saved separately as bridges.geojson).
   const bridges = {
     enabled:  !!(state.bridges && state.bridges.length),
+    apply:    bridgesEnabled(),
     count:    state.bridges ? state.bridges.length : 0,
     source:   state.bridgesMeta?.source || null,
     tunnels:  !!document.getElementById("bridge-tunnels")?.checked,
@@ -6627,6 +6639,7 @@ function applyMetadataToUI(md, bin = {}) {
 
   // ---- Impassable mask params (mask restore happens further down) --------
   const imp = md.impassable || {};
+  check("imp-enabled", imp.apply);
   check("impassable-invert", imp.invert);
   set("imp-offset", Number.isFinite(imp.elevationOffset) ? imp.elevationOffset : 0);
   set("imp-opacity", Number.isFinite(imp.opacity) ? imp.opacity : 0.5);
@@ -6641,6 +6654,7 @@ function applyMetadataToUI(md, bin = {}) {
 
   // ---- Bridge/tunnel params (geometry restore happens further down) -------
   const br = md.bridges || {};
+  check("bridge-enabled", br.apply);
   check("bridge-tunnels", br.tunnels);
   check("bridge-show", br.show);
   set("bridge-opacity", Number.isFinite(br.opacity) ? br.opacity : 0.9);

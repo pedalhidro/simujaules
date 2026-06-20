@@ -174,7 +174,9 @@
 //              (impassable mask, bridges) light up when their data is loaded.
 //              (3) New 1d source: extract bridges/tunnels from the already-
 //              loaded vector network (gpkg tags / OSM other_tags) — offline, no
-//              Overpass. Bumped so the updated app.js installs.
+//              Overpass. (4) 1c/1d each get an "apply to compute" toggle to
+//              enable/disable their effect without clearing the data. Bumped so
+//              the updated app.js installs.
 const VERSION  = "v20";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;

@@ -28,6 +28,9 @@ history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
   dedicated `bridge`/`tunnel`/`layer` columns when present, else parsed from an
   OSM-export `other_tags` hstore; reprojection is reused from the network load
   (no re-parse).
+- **Toggle 1c/1d on/off.** The impassable-mask (1c) and bridges (1d) groups each
+  get an "Apply to compute" checkbox to enable/disable their effect on the
+  compute without clearing the loaded data (and it round-trips in bundles).
 
 ## v19 — 2026-06-19
 

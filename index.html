@@ -702,6 +702,10 @@
 
       <div class="group" id="impassable-group">
         <h2 data-i18n="group.impassable">1c. Optional impassable mask (water, GeoTIFF)</h2>
+        <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 11px; color: var(--text);">
+          <input type="checkbox" id="imp-enabled" checked />
+          <span data-i18n="imp.enabled">Apply to compute</span>
+        </label>
         <input type="file" id="impassable-file" accept=".tif,.tiff" />
         <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
           <input type="checkbox" id="impassable-invert" />
@@ -733,6 +737,10 @@
 
       <div class="group" id="bridges-group">
         <h2 data-i18n="group.bridges">1d. Optional bridges &amp; tunnels (OSM)</h2>
+        <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 11px; color: var(--text);">
+          <input type="checkbox" id="bridge-enabled" checked />
+          <span data-i18n="bridge.enabled">Apply to compute</span>
+        </label>
         <button type="button" class="secondary" id="bridge-osm" data-i18n="bridge.osm">Pull bridges &amp; tunnels from OSM</button>
         <button type="button" class="secondary" id="bridge-from-network" data-i18n="bridge.from_network" style="margin-top: 4px;" disabled>Extract from loaded network</button>
         <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
@@ -1243,7 +1251,9 @@
               carried heavy traffic — they're now painted with the crossing flow. Groups 1c
               (impassable mask) and 1d (bridges) light up when their data is loaded. And a new 1d
               "Extract from loaded network" button derives bridge/tunnel decks from the network
-              already loaded in 1b (gpkg tags / OSM other_tags) — offline, no Overpass.</p>
+              already loaded in 1b (gpkg tags / OSM other_tags) — offline, no Overpass. Both 1c and
+              1d now have an "Apply to compute" toggle to enable/disable their effect without
+              clearing the data.</p>
               <p><strong>v19</strong> — 2026-06-19<br/>
               Optional OSM bridges &amp; tunnels (group 1d). A dedicated "Pull bridges &amp; tunnels from
               OSM" control queries Overpass for bridge (and optionally tunnel) ways over the DEM
