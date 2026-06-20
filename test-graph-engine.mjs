@@ -149,5 +149,46 @@ const alpha = 0.008, beta = 1.0, eta = 0.1;
   ok("passes stop at the DEM extent (3 in-bounds edges)", reached === 3, `reached=${reached}`);
 }
 
+// ---- 9. Phase C: bridge/tunnel deck flattening (lineMeta) -------------------
+{
+  const dxM = 10;
+  // A 5-cell line over a valley: ends at 10 m, middle dips to 0 (the DEM shows
+  // the gap under the deck). The deck should read flat at 10 m end-to-end.
+  const dem = { height: new Float32Array([10, 0, 0, 0, 10]), mask: new Uint8Array(5).fill(1), H: 1, W: 5, dxM, dyM: 10 };
+  const chain = [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4]];
+  const mkRes = (lineMeta) => {
+    const g = GraphEngine.buildGraph([chain], dem, { junctionMode: "shared", lineMeta });
+    const src = GraphEngine.nearestNode(g, 0, 0), dst = GraphEngine.nearestNode(g, 0, 4);
+    return GraphEngine.computeGraph(g, { mode: "from", alpha, beta, eta, eMax: 0, srcNode: src, dstNode: dst, wantPath: true });
+  };
+  const plain = mkRes(null);
+  const deck = mkRes([{ deck: true, layer: 1 }]);
+  const flat = 4 * alpha * dxM; // 4 edges, each a flat 10 m step (no climb)
+  ok("deck flattens to the flat-deck cost", approx(deck.path.energy, flat), `got ${deck.path.energy} want ${flat}`);
+  ok("deck is cheaper than following the valley", deck.path.energy < plain.path.energy - 1e-6, `deck ${deck.path.energy} vs plain ${plain.path.energy}`);
+}
+
+// ---- 10. Phase C: layer-aware junction suppression (overpass) ---------------
+{
+  const dem = flatDem(5, 5, 0);
+  const lines = [[[0, 0], [4, 4]], [[0, 4], [4, 0]]]; // cross at (2,2), no shared vtx
+  const comps = (g) => {
+    const seen = new Uint8Array(g.nNodes); let c = 0;
+    for (let s = 0; s < g.nNodes; s++) {
+      if (seen[s]) continue; c++; const stack = [s]; seen[s] = 1;
+      while (stack.length) { const u = stack.pop(); for (let he = g.csrHead[u]; he < g.csrHead[u + 1]; he++) { const v = g.csrTarget[he]; if (!seen[v]) { seen[v] = 1; stack.push(v); } } }
+    }
+    return c;
+  };
+  // A deck (layer 1) crossing a ground road (layer 0): no junction → 2 components.
+  const over = GraphEngine.buildGraph(lines, dem, { junctionMode: "crossings", lineMeta: [{ deck: true, layer: 1 }, { deck: false, layer: 0 }] });
+  ok("overpass: crossing suppressed (no center node)", over.nNodes === 4, `nNodes=${over.nNodes}`);
+  ok("overpass: lines stay unsplit (2 edges)", over.nEdges === 2, `nEdges=${over.nEdges}`);
+  ok("overpass: deck & road stay disconnected", comps(over) === 2, `comps=${comps(over)}`);
+  // Two ways at the SAME layer still cross at-grade (1 component).
+  const same = GraphEngine.buildGraph(lines, dem, { junctionMode: "crossings", lineMeta: [{ deck: true, layer: 1 }, { deck: true, layer: 1 }] });
+  ok("same-layer crossing still connects", comps(same) === 1, `comps=${comps(same)}`);
+}
+
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

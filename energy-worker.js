@@ -1329,7 +1329,11 @@ self.onmessage = (ev) => {
   // same asymmetric model + the effective mask, so it composes with the network
   // constraint. Shared across all refs/legs. Top-N (A*) and the max-cost DP
   // path don't use portals yet (A*'s admissible heuristic would break).
-  const portalAdj = buildPortalAdj(msg.portalU, msg.portalV, msg.portalLenM, height, effMask, alpha, beta, eta);
+  // Portals are EXCLUDED from maximize mode: maxEdgeCost bounds only a single
+  // grid edge, so a long deck cost would invert to a clamped-0 "free" max-cost
+  // shortcut (degenerate). Mirror the backend (handle_density) and the A*/DP
+  // exclusion. Bridges + "maximize energy" isn't a meaningful combination anyway.
+  const portalAdj = maximize ? null : buildPortalAdj(msg.portalU, msg.portalV, msg.portalLenM, height, effMask, alpha, beta, eta);
 
   let energy;
   let passes = null;

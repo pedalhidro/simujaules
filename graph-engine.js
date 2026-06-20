@@ -143,17 +143,44 @@
     const eps = opts.eps != null ? opts.eps : 1e-9;
     const { height, mask, H, W, dxM, dyM } = dem;
 
-    // Flatten polylines into segments [rA,cA,zA, rB,cB,zB, lineId].
+    // Phase C — per-line bridge/tunnel metadata: lineMeta[li] = { deck, layer }.
+    // For each DECK (bridge/tunnel) line, precompute its two ground-endpoint
+    // elevations + total cell-length so its edges can be flattened to a straight
+    // deck, and use `layer` to suppress false junctions where a deck crosses a
+    // way at a different level.
+    const lineMeta = opts.lineMeta || null;
+    const deckOf = []; // li -> { h0, h1, total } for deck lines, else undefined
+    if (lineMeta) {
+      for (let li = 0; li < lines.length; li++) {
+        const m = lineMeta[li];
+        if (!m || !m.deck) continue;
+        const ln = lines[li];
+        if (ln.length < 2) continue;
+        const h0 = sampleHeight(height, mask, H, W, ln[0][0], ln[0][1]);
+        const h1 = sampleHeight(height, mask, H, W, ln[ln.length - 1][0], ln[ln.length - 1][1]);
+        let total = 0;
+        for (let k = 0; k + 1 < ln.length; k++) total += Math.hypot(ln[k + 1][0] - ln[k][0], ln[k + 1][1] - ln[k][1]);
+        deckOf[li] = { h0, h1, total: total > 0 ? total : 1 };
+      }
+    }
+
+    // Flatten polylines into segments [rA,cA,zA, rB,cB,zB, lineId]; segArc0[s]
+    // is the arc-length (cells) at the segment's start along its line (for deck
+    // flattening — a globally-linear deck is linear on any sub-segment).
     const segs = [];
+    const segArc0 = [];
     let anyZ = false;
     for (let li = 0; li < lines.length; li++) {
       const ln = lines[li];
+      let arc = 0;
       for (let k = 0; k + 1 < ln.length; k++) {
         const a = ln[k], b = ln[k + 1];
-        const za = a.length > 2 ? a[2] : NaN, zb = b.length > 2 ? b[2] : NaN;
         if (a[0] === b[0] && a[1] === b[1]) continue; // zero-length
+        const za = a.length > 2 ? a[2] : NaN, zb = b.length > 2 ? b[2] : NaN;
         if (!Number.isNaN(za) || !Number.isNaN(zb)) anyZ = true;
         segs.push([a[0], a[1], za, b[0], b[1], zb, li]);
+        segArc0.push(arc);
+        arc += Math.hypot(b[0] - a[0], b[1] - a[1]);
       }
     }
 
@@ -184,6 +211,12 @@
           const A = segs[a], B = segs[b];
           const hit = segIntersect(A[0], A[1], A[3], A[4], B[0], B[1], B[3], B[4], eps);
           if (!hit) continue;
+          // Phase C: a deck (bridge/tunnel) crossing a way at a DIFFERENT layer
+          // is a vertical separation (overpass), not a junction — don't connect.
+          if (lineMeta) {
+            const mA = lineMeta[A[6]], mB = lineMeta[B[6]];
+            if ((mA?.deck || mB?.deck) && ((mA?.layer || 0) !== (mB?.layer || 0))) continue;
+          }
           if (anyZ) {
             const zA = A[2] + (A[5] - A[2]) * hit.t, zB = B[2] + (B[5] - B[2]) * hit.u;
             if (Number.isFinite(zA) && Number.isFinite(zB) && Math.abs(zA - zB) > zTol) continue;
@@ -213,8 +246,15 @@
       if (e === undefined) { e = edgeA.length; edgeA.push(na); edgeB.push(nb); edgeMap.set(key, e); }
       return e;
     };
+    // Phase C: deck flattening bookkeeping — nodeDeck holds the deck elevation
+    // at each node on a bridge/tunnel line; deckEdges lists those edges so their
+    // DEM-sampled profile can be overridden with a straight deck below.
+    const nodeDeck = new Map();
+    const deckEdges = [];
     for (let s = 0; s < segs.length; s++) {
       const [r1, c1, , r2, c2] = segs[s];
+      const deck = deckOf[segs[s][6]];
+      const segLenCells = deck ? Math.hypot(r2 - r1, c2 - c1) : 0;
       const ts = splits[s];
       let cuts;
       if (ts.length === 0) cuts = [0, 1];
@@ -224,7 +264,13 @@
         if (tb - ta < eps) continue;
         const na = nodeOf(r1 + (r2 - r1) * ta, c1 + (c2 - c1) * ta);
         const nb = nodeOf(r1 + (r2 - r1) * tb, c1 + (c2 - c1) * tb);
-        pushEdge(na, nb);
+        const e = pushEdge(na, nb);
+        if (deck && e >= 0) {
+          const arcA = segArc0[s] + ta * segLenCells, arcB = segArc0[s] + tb * segLenCells;
+          nodeDeck.set(na, deck.h0 + (deck.h1 - deck.h0) * (arcA / deck.total));
+          nodeDeck.set(nb, deck.h0 + (deck.h1 - deck.h0) * (arcB / deck.total));
+          deckEdges.push(e);
+        }
       }
     }
 
@@ -266,6 +312,16 @@
     profOff[nEdges] = totalSamples;
     const profH = new Float32Array(totalSamples);
     for (let e = 0; e < nEdges; e++) profH.set(tmpProf[e], profOff[e]);
+    // Phase C: override deck (bridge/tunnel) edges with a straight profile
+    // between their endpoint deck elevations, so the deck reads ~flat instead of
+    // following the valley/hill the DEM shows beneath it.
+    for (let di = 0; di < deckEdges.length; di++) {
+      const e = deckEdges[di];
+      const dA = nodeDeck.get(EA[e]), dB = nodeDeck.get(EB[e]);
+      if (dA === undefined || dB === undefined) continue;
+      const off = profOff[e], n = profOff[e + 1] - off - 1;
+      for (let i = 0; i <= n; i++) profH[off + i] = dA + (dB - dA) * (i / n);
+    }
 
     // CSR adjacency over directed half-edges (both directions of each edge).
     const csrHead = new Int32Array(nNodes + 1);

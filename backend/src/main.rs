@@ -669,7 +669,14 @@ fn handle_density(mut req: tiny_http::Request) {
         off += 4 * pc;
         let mut pl = vec![0f64; pc];
         bytemuck::cast_slice_mut::<f64, u8>(&mut pl).copy_from_slice(&body[off..off + 8 * pc]);
-        build_portals(&pu, &pv, &pl, &height, &eff_mask, &params)
+        // Excluded from maximize mode (mirrors energy-worker.js): a long deck
+        // cost would invert against the single-grid-edge maxEdgeCost to a
+        // clamped-0 free max-cost shortcut. Still read the bytes to advance off.
+        if params.maximize {
+            HashMap::new()
+        } else {
+            build_portals(&pu, &pv, &pl, &height, &eff_mask, &params)
+        }
     } else {
         HashMap::new()
     };
