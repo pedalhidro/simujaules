@@ -233,6 +233,15 @@ self.addEventListener("fetch", (event) => {
 // immediately if there is one, and refreshes the cache in the background
 // from the network. On cache miss, fetch from network and stash a copy.
 //
+// NOTE on scope: the background refresh writes to RUNTIME, and caches.match()
+// returns a PRECACHE hit first. So stale-while-revalidate is effective for
+// RUNTIME entries (cross-origin CDN libs + tiles) but INERT for the precached
+// same-origin shell (app.js, workers, index.html) — by design. The shell is
+// versioned: it updates atomically when VERSION bumps (install re-runs
+// addAll, activate purges the old cache), never piecemeal here. That
+// atomicity is what keeps app.js and energy-worker.js on the same version;
+// revalidating individual precached files into PRECACHE would break it.
+//
 // Two subtleties:
 //   - res.clone() must happen synchronously, BEFORE the response is
 //     handed to the page. Cloning inside caches.open(...).then(...) races

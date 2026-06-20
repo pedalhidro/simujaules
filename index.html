@@ -1102,6 +1102,20 @@
        through silently. -->
   <script>
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+      // When a freshly-deployed SW (new VERSION) activates and claims this
+      // tab, reload once so the new app.js loads together with the new
+      // energy-worker.js / graph-engine.js — otherwise the still-running old
+      // page can spawn the new worker and hit a compute-protocol mismatch
+      // (the probe/graph/density message shapes are versioned). Skip the
+      // reload on the very first install (no prior controller), and guard
+      // against reload loops.
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController || reloading) return;
+        reloading = true;
+        window.location.reload();
+      });
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js', { scope: './' })
           .catch((err) => console.warn('[sw] registration failed:', err));

@@ -326,7 +326,10 @@
     const parentHE = new Int32Array(nN).fill(-1);
     const order = new Int32Array(nN); let ol = 0;
     const heap = makeRadixHeap();
-    for (let i = 0; i < seeds.length; i++) { const s = seeds[i]; if (s >= 0 && s < nN && g.nodeValid[s] && E[s] !== 0) { E[s] = 0; heap.push(0, s); } }
+    // E is freshly Infinity-filled, so the old `E[s] !== 0` clause was always
+    // true (dead); a duplicate seed in `seeds` is already absorbed by the
+    // settled check in the pop loop, so no extra dedupe guard is needed.
+    for (let i = 0; i < seeds.length; i++) { const s = seeds[i]; if (s >= 0 && s < nN && g.nodeValid[s]) { E[s] = 0; heap.push(0, s); } }
     while (heap.pop()) {
       const g0 = heap.pri, u = heap.val;
       if (settled[u]) continue;

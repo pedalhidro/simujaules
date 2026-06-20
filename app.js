@@ -1135,6 +1135,23 @@ function cancelActiveCompute() {
   }
 }
 
+// Last-resort safety net for the async compute dispatch. A SYNCHRONOUS throw
+// inside the dispatch bodies (e.g. an OOM allocating buildComputeGrid()/the
+// DEM payload on a 135 M-cell grid) escapes as an unhandled rejection that
+// would otherwise leave the progress bar spinning, the Run button disabled,
+// and "Computing…" stuck — forcing a manual reload. Only act when a compute
+// is actually in flight, so unrelated errors don't clobber the UI.
+function handleWedgedCompute(detail) {
+  if (!state.computeStartedAt) return;
+  console.error("[compute] unhandled failure while running:", detail);
+  cancelActiveCompute();
+  const msg = (detail && detail.message) || String(detail || "unknown error");
+  status.innerHTML =
+    `<span style="color:#ff6b6b">Compute failed unexpectedly — ${escapeHtml(msg)}. Try again (a smaller DEM or budget if it was memory).</span>`;
+}
+window.addEventListener("unhandledrejection", (e) => handleWedgedCompute(e.reason));
+window.addEventListener("error", (e) => handleWedgedCompute(e.error || e.message));
+
 // ------- DEM loading -------
 const demFile = document.getElementById("dem-file");
 const demMeta = document.getElementById("dem-meta");
@@ -1341,6 +1358,7 @@ async function loadFabdemForView() {
     // Read each tile's intersection with the viewport. readRasters({bbox})
     // fetches only the relevant strips/tiles within the COG over HTTP
     // Range requests — that's where the bandwidth saving comes from.
+    let placed = 0; // tiles successfully read into the mosaic
     for (let i = 0; i < opened.length; i++) {
       const t = opened[i];
       const tileSouth = t.lat;
@@ -1356,6 +1374,9 @@ async function loadFabdemForView() {
       const interNorth = Math.min(outNorth, tileNorth);
       if (interEast <= interWest || interNorth <= interSouth) continue;
 
+      // A single tile's range-read can fail (transient network / partial COG);
+      // skip just that tile instead of letting the whole mosaic abort.
+      try {
       // Per-tile nodata sentinel — FABDEM uses GDAL_NODATA, varies by tile.
       const nodataRaw = t.image.fileDirectory.getValue("GDAL_NODATA");
       const nodata = nodataRaw ? parseFloat(nodataRaw) : null;
@@ -1399,8 +1420,17 @@ async function loadFabdemForView() {
           }
         }
       }
+      placed++;
+      } catch (err) {
+        console.warn(`[fabdem] tile ${fabdemTileName(t.lat, t.lon)} read failed — skipping:`, err);
+      }
       progressBar.style.width = `${(30 + (i + 1) / opened.length * 70).toFixed(1)}%`;
       status.textContent = `Mosaico: tile ${i + 1}/${opened.length}…`;
+    }
+    if (placed === 0) {
+      progress.classList.remove("active");
+      status.innerHTML = '<span style="color:#ff6b6b">FABDEM: todos os tiles falharam na leitura (rede?). Tente novamente.</span>';
+      return;
     }
 
     // Wrap the mosaic as a GeoTIFF in memory so loadDemFromArrayBuffer
@@ -1463,12 +1493,22 @@ async function loadDemFromArrayBuffer(buf, label) {
     mask[i] = (Number.isFinite(v) && (nodata === null || v !== nodata)) ? 1 : 0;
   }
 
-  // Detect CRS — for this prototype we assume the DEM is in a projected
-  // metric CRS where x = easting, y = northing increasing northward.
-  // Geographic (lon/lat) DEMs need reprojection that we skip here for clarity.
-  // Most real-world cycling DEMs are UTM, which works.
+  // Pull the source TIFF's GeoKeys up front: they declare the real CRS (so a
+  // COARSE geographic DEM with dx ≥ 0.01° isn't mis-read as projected by the
+  // magnitude heuristic), and they're also stamped onto exported GeoTIFFs.
+  let geoKeys = null;
+  try {
+    geoKeys = image.getGeoKeys ? image.getGeoKeys() : null;
+  } catch { /* getGeoKeys throws on some malformed tiffs — fine to skip */ }
+
+  // The map, overlays and click-to-pick are EPSG:4326-only. Prefer the TIFF's
+  // declared model type (GTModelTypeGeoKey: 1=projected, 2=geographic); fall
+  // back to a coordinate-magnitude heuristic only when GeoKeys are absent.
+  const modelType = geoKeys && geoKeys.GTModelTypeGeoKey;
   const isProbablyGeographic =
-    Math.abs(originX) < 360 && Math.abs(originY) < 90 && dx < 0.01;
+    modelType === 2 ? true
+      : modelType === 1 ? false
+      : (Math.abs(originX) < 360 && Math.abs(originY) < 90 && dx < 0.01);
   if (isProbablyGeographic) {
     status.innerHTML = '<span style="opacity:0.7">DEM is in lon/lat — distances approximated from latitude (good to ~0.3% under ~50 km extent).</span>';
   }
@@ -1482,14 +1522,9 @@ async function loadDemFromArrayBuffer(buf, label) {
     : dx;
   const dyM = isProbablyGeographic ? dy * 110574 : dy;
 
-  // Pull GeoKeys from the source TIFF so we can stamp the same CRS onto
-  // any GeoTIFFs we write later (energy.tif / passes.tif / network.tif
-  // in the bundle export). Without this, projected DEMs would round-trip
-  // as bare 4326 — wrong for everything outside lon/lat space.
-  let geoKeys = null;
-  try {
-    geoKeys = image.getGeoKeys ? image.getGeoKeys() : null;
-  } catch { /* getGeoKeys throws on some malformed tiffs — fine to skip */ }
+  // (geoKeys was read above, before CRS classification. It's stamped onto any
+  // GeoTIFFs we export later — energy.tif / passes.tif / network.tif — so
+  // projected DEMs round-trip with their real CRS, not a bare 4326.)
 
   // A new DEM invalidates the cached network graph (elevations changed).
   state.networkGraph = null; state.networkGraphToken = null;
@@ -1590,7 +1625,17 @@ async function loadDemFromArrayBuffer(buf, label) {
     origin <span class="v">${originLabel}</span><br/>
     ${coverLabel}
   `;
-  status.textContent = `${label} loaded. Click on the map to set source point.`;
+  if (state.dem.isGeographic) {
+    status.textContent = `${label} loaded. Click on the map to set source point.`;
+  } else {
+    // Projected/unknown CRS: Leaflet is EPSG:4326-only, so the DEM can't be
+    // placed on the map — overlays, click-to-pick and relief are all
+    // unavailable (don't claim "click to set source"). Tell the user plainly.
+    status.innerHTML =
+      `<span style="color:#ff9d3d">${escapeHtml(label)} loaded, but its CRS is projected/unknown — ` +
+      `the map is lon/lat (EPSG:4326) only, so click-to-pick and overlays are unavailable. ` +
+      `Reproject the DEM to EPSG:4326 to interact on the map.</span>`;
+  }
   updateRunButtonState();
   syncLoadedHighlights(); // light up group 1A (and 1B was just cleared above)
   estimateRunTime();
@@ -1658,11 +1703,15 @@ let _sqlPromise = null;
 function getSQL() {
   if (!_sqlPromise) {
     if (typeof initSqlJs !== "function") {
-      return Promise.reject(new Error("sql.js didn't load (CDN blocked?)"));
+      return Promise.reject(new Error("sql.js didn't load (CDN blocked, or offline before it was ever fetched?)"));
     }
+    // sql.js fetches sql-wasm.wasm from this CDN ON FIRST GeoPackage open. Like
+    // the other CDN libs it is runtime-cached (sw.js), NOT precached — so
+    // offline GeoPackage import requires opening a .gpkg at least once while
+    // online (same caveat as DEMs). initSqlJs rejects below if it's missing.
     _sqlPromise = initSqlJs({
       locateFile: (f) => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}`,
-    });
+    }).catch((err) => { _sqlPromise = null; throw err; }); // let a later retry re-fetch
   }
   return _sqlPromise;
 }
@@ -1700,7 +1749,13 @@ function wkbTypeInfo(t) {
   return { base, stride: 16 + (hasZ ? 8 : 0) + (hasM ? 8 : 0) };
 }
 
+// Every read is bounds-guarded against view.byteLength: a corrupt/truncated
+// blob — or a header mis-aligned by an unrecognised GeoPackage envelope type
+// — must return null (the caller skips that one feature) rather than throw a
+// RangeError out of getFloat64/getUint32 that aborts the entire .gpkg load.
 function parseWKB(view, off) {
+  const len = view.byteLength;
+  if (off + 5 > len) return null;
   const le = view.getUint8(off) === 1;
   off += 1;
   const t = view.getUint32(off, le);
@@ -1709,7 +1764,9 @@ function parseWKB(view, off) {
 
   if (baseType === 2) {
     // LineString
+    if (off + 4 > len) return null;
     const n = view.getUint32(off, le); off += 4;
+    if (off + n * stride > len) return null; // truncated / absurd vertex count
     const out = new Array(n);
     for (let i = 0; i < n; i++) {
       out[i] = [view.getFloat64(off, le), view.getFloat64(off + 8, le)];
@@ -1719,14 +1776,18 @@ function parseWKB(view, off) {
   }
   if (baseType === 5) {
     // MultiLineString — skip outer header per child too
+    if (off + 4 > len) return null;
     const k = view.getUint32(off, le); off += 4;
     const lines = [];
     for (let j = 0; j < k; j++) {
+      if (off + 5 > len) return null;
       const subLE = view.getUint8(off) === 1; off += 1;
       const subT = view.getUint32(off, subLE); off += 4;
       const { base: subBase, stride: subStride } = wkbTypeInfo(subT);
       if (subBase !== 2) return null;
+      if (off + 4 > len) return null;
       const n = view.getUint32(off, subLE); off += 4;
+      if (off + n * subStride > len) return null; // truncated / absurd
       const ln = new Array(n);
       for (let i = 0; i < n; i++) {
         ln[i] = [view.getFloat64(off, subLE), view.getFloat64(off + 8, subLE)];
@@ -1748,7 +1809,14 @@ function rasterLine(r0, c0, r1, c1, mask, W, H, halfWidth) {
   const sc = c0 < c1 ? 1 : -1;
   let err = dc - dr;
   let r = r0, c = c0;
-  while (true) {
+  // Hard iteration cap. A line clipped to the grid plots at most ~(W+H) cells.
+  // A wrong-CRS .gpkg can yield endpoints MILLIONS of cells apart (one far NW,
+  // one far SE) that slip past the off-grid cull at the call sites; without a
+  // cap this Bresenham walk runs for millions of steps on the main thread and
+  // freezes the tab. Such a network rasterises to ~0 in-grid cells and is
+  // rejected downstream, so bailing early only affects the pathological case.
+  let guard = 2 * (W + H) + 4 * halfWidth + 16;
+  while (guard-- > 0) {
     for (let pdr = -halfWidth; pdr <= halfWidth; pdr++) {
       const rr = r + pdr;
       if (rr < 0 || rr >= H) continue;
@@ -1897,7 +1965,10 @@ async function loadVectorNetwork(file) {
       const row = stmt.get();
       const blob = row[0];
       scanned++;
-      const lines = parseGpkgGeom(blob);
+      // parseGpkgGeom is bounds-guarded, but wrap defensively so any single
+      // malformed geometry is skipped rather than aborting the whole load.
+      let lines = null;
+      try { lines = parseGpkgGeom(blob); } catch { lines = null; }
       if (!lines) continue;
       for (const coords of lines) {
         const lineLatLngs = collected !== null && storedVertices < VEC_RENDER_VERTEX_CAP
@@ -3939,10 +4010,9 @@ function boxBlur2D(field, W, H, win) {
 }
 
 // Render a 2D scalar field to a base64 dataURL.
-// Range: vmin/vmax in real units. When both blank → auto. Auto-bounds use
-// `opts.percentiles` (default [10, 90]) when `usePercentileBounds` is
-// set, else min/max. Stretch: linear when bounds are pinned or
-// percentile-based; sqrt for the raw min/max auto path (long-tail).
+// Range: vmin/vmax in real units. When both blank → auto, from the percentile
+// clip (`opts.percentiles`, default [10, 90]; all callers set
+// usePercentileBounds:true). Mapping is linear lo→hi.
 // Returns { url, lo, hi } so the caller can record the resolved bounds
 // for the legend / placeholder display.
 // `useGreyscale: true` paints a black→white ramp instead of the active
@@ -3994,24 +4064,16 @@ function renderFieldToDataURL(field, W, H, opts) {
       autoLo = at(pLo);
       autoHi = at(pHi);
     }
-  } else {
-    for (let i = 0; i < N; i++) {
-      const v = work[i];
-      if (Number.isFinite(v) && (!opts.treatZeroAsTransparent || v > 0)) {
-        if (v < autoLo) autoLo = v;
-        if (v > autoHi) autoHi = v;
-      }
-    }
   }
   if (opts.autoMin != null) autoLo = opts.autoMin;
   if (opts.autoMax != null) autoHi = opts.autoMax;
 
-  const userPinned = opts.userMin != null || opts.userMax != null;
+  // Every caller passes usePercentileBounds:true, so bounds come from the
+  // percentile clip above and the value→colour mapping is always linear
+  // (lo→hi). The old raw-min/max auto path + sqrt-stretch branch had no caller
+  // and was removed; pin either bound (userMin/userMax) for manual clamping.
   let lo = opts.userMin != null ? opts.userMin : autoLo;
   let hi = opts.userMax != null ? opts.userMax : autoHi;
-  // Sqrt stretch only on the raw min/max auto path. Percentile-clipped or
-  // user-pinned bounds get a plain linear mapping.
-  const useSqrt = !userPinned && !opts.usePercentileBounds;
   if (!Number.isFinite(lo)) lo = 0;
   if (!Number.isFinite(hi) || hi <= lo) hi = lo + 1;
   const span = hi - lo;
@@ -4051,18 +4113,16 @@ function renderFieldToDataURL(field, W, H, opts) {
       const i = srcR * W + oc * stride;
       const o = or * outW + oc;
       const v = work[i];
+      // v <= 0 matches the percentile sampler's exclusion above (the two
+      // predicates used to disagree: sampler v<=0, paint v===0, so negatives
+      // were dropped from the bounds yet still painted).
       const unsettled =
-        !Number.isFinite(v) || (opts.treatZeroAsTransparent && v === 0);
+        !Number.isFinite(v) || (opts.treatZeroAsTransparent && v <= 0);
       if (unsettled) {
         img.data[4 * o + 3] = 0;
         continue;
       }
-      let t;
-      if (useSqrt) {
-        t = Math.sqrt(Math.max(0, v / hi));
-      } else {
-        t = (v - lo) / span;
-      }
+      let t = (v - lo) / span;
       if (t < 0) t = 0;
       else if (t > 1) t = 1;
       // Gamma adjustment: t' = t^γ. γ=1 leaves the mapping unchanged.
@@ -4817,7 +4877,9 @@ function predictInterpMs(opts) {
   const poolN = opts.graph ? 1 : interpPoolSize(opts.N);
   const fill = INTERP_MS_PER_CELL * opts.N * Math.max(1, opts.interpMaxDist || 50);
   const smooth = INTERP_SMOOTH_MS_PER_CELL * opts.N * (opts.smoothIters || 0);
-  return (fill + smooth) / poolN;
+  // The IDW fill is banded across the pool; smoothing is a single post-merge
+  // worker pass, so it is NOT divided by poolN (poolN=1 in graph mode → same).
+  return fill / poolN + smooth;
 }
 
 function exploredCells(cal, N, eMax, alpha) {

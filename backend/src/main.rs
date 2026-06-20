@@ -35,6 +35,7 @@
 
 use rayon::prelude::*;
 use serde::Deserialize;
+use std::io::Read; // Take/read_to_end on the request body reader
 use std::time::Instant;
 use tiny_http::{Header, Method, Response, Server};
 
@@ -544,8 +545,20 @@ fn respond_json(req: tiny_http::Request, status: u16, body: &str) {
 
 fn handle_density(mut req: tiny_http::Request) {
     let t0 = Instant::now();
-    let mut body = Vec::with_capacity(req.body_length().unwrap_or(0));
-    if req.as_reader().read_to_end(&mut body).is_err() {
+    // Ceiling on the request body (covers the largest supported DEMs:
+    // ~6 bytes/cell × ~135 M cells ≈ 0.8 GB, so 2 GiB is generous). Without
+    // it, a bogus Content-Length pre-allocs an enormous Vec (abort on alloc
+    // failure) and read_to_end would stream unbounded data — a trivial DoS.
+    const MAX_BODY: u64 = 2 * 1024 * 1024 * 1024;
+    let declared = req.body_length().unwrap_or(0) as u64;
+    if declared > MAX_BODY {
+        return respond_json(req, 413, r#"{"error":"body too large"}"#);
+    }
+    let mut body = Vec::with_capacity(declared.min(MAX_BODY) as usize);
+    // Hard-cap the read so a client streaming more than it declared can't grow
+    // the body unbounded. An over-long body truncates at MAX_BODY and then
+    // fails the exact-length check below (→ 400).
+    if req.as_reader().take(MAX_BODY).read_to_end(&mut body).is_err() {
         return respond_json(req, 400, r#"{"error":"body read failed"}"#);
     }
     if body.len() < 4 {

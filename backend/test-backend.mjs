@@ -53,13 +53,17 @@ for (const dmode of ["from", "to", "round"]) {
   for (const eMax of [0, 20000]) cases.push({ dmode, eMax, eMaxMode: "leg" });
 }
 cases.push({ dmode: "round", eMax: 20000, eMaxMode: "total" });
+// Reverse-optimisation (maximize) density: the edge-inversion path +
+// max_edge_cost derivation are identical in both engines but were never
+// parity-checked, so a future divergence would slip past the suite.
+cases.push({ dmode: "from", eMax: 0, eMaxMode: "leg", maximize: true });
 
-for (const { dmode, eMax, eMaxMode } of cases) {
+for (const { dmode, eMax, eMaxMode, maximize = false } of cases) {
   {
     // backend
     const params = {
       h: H, w: W, dx: 30, dy: 30, alpha: 1, beta: 30, eta: 0.3, eMax, eMaxMode,
-      densityMode: dmode, refPoints: refs, hasNetwork: false, maximize: false,
+      densityMode: dmode, refPoints: refs, hasNetwork: false, maximize,
     };
     const json = new TextEncoder().encode(JSON.stringify(params));
     const head = new Uint8Array(4);
@@ -79,7 +83,7 @@ for (const { dmode, eMax, eMaxMode } of cases) {
     const ref = runWorker({
       kind: "run", H, W, dx: 30, dy: 30, alpha: 1, beta: 30, eta: 0.3, eMax, eMaxMode,
       seedR: -1, seedC: -1, goalR: -1, goalC: -1, mode: dmode,
-      wantDensity: true, refPoints: refs, densityMode: dmode,
+      wantDensity: true, refPoints: refs, densityMode: dmode, maximize,
       height: new Float32Array(height), mask: new Uint8Array(mask),
     });
 
@@ -93,7 +97,7 @@ for (const { dmode, eMax, eMaxMode } of cases) {
     const ok = maxD < 1e-15 && maxE < 1e-3 && bad === 0;
     allOk = allOk && ok;
     console.log(
-      `mode=${dmode} eMax=${eMax}${eMaxMode === "total" ? " (total)" : ""}: ` +
+      `mode=${dmode} eMax=${eMax}${eMaxMode === "total" ? " (total)" : ""}${maximize ? " (maximize)" : ""}: ` +
       `max|Δdensity|=${maxD.toExponential(2)}, ` +
       `max|Δenergy|=${maxE.toExponential(2)}, finite-mismatch=${bad} ${ok ? "✓" : "✗"}`,
     );
