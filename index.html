@@ -1237,6 +1237,13 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v20</strong> — 2026-06-20<br/>
+              Bridge follow-ups. Deck passes/density now show up: a bridge portal jumps
+              abutment→abutment, so deck cells previously rendered no passes even when the bridge
+              carried heavy traffic — they're now painted with the crossing flow. Groups 1c
+              (impassable mask) and 1d (bridges) light up when their data is loaded. And a new 1d
+              "Extract from loaded network" button derives bridge/tunnel decks from the network
+              already loaded in 1b (gpkg tags / OSM other_tags) — offline, no Overpass.</p>
               <p><strong>v19</strong> — 2026-06-19<br/>
               Optional OSM bridges &amp; tunnels (group 1d). A dedicated "Pull bridges &amp; tunnels from
               OSM" control queries Overpass for bridge (and optionally tunnel) ways over the DEM

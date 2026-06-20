@@ -167,7 +167,15 @@
 //              suppresses different-layer crossing junctions + flattens deck
 //              edges. Bundles gain bridges.geojson. Bumped so the updated
 //              worker/backend/app install.
-const VERSION  = "v19";
+//   v19 → v20: Bridge follow-ups. (1) Deck passes/density: a portal jumps
+//              abutment→abutment, so deck cells showed no passes even when the
+//              bridge carried heavy traffic — now painted with the crossing
+//              flow (min of the two abutments' passes). (2) Groups 1c/1d
+//              (impassable mask, bridges) light up when their data is loaded.
+//              (3) New 1d source: extract bridges/tunnels from the already-
+//              loaded vector network (gpkg tags / OSM other_tags) — offline, no
+//              Overpass. Bumped so the updated app.js installs.
+const VERSION  = "v20";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

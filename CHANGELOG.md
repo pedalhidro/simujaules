@@ -9,6 +9,26 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v20 — 2026-06-20
+
+### Fixes & improvements
+
+- **Bridge deck passes/density now show up.** A bridge portal jumps
+  abutment→abutment, so the deck's interior cells weren't in the path tree and
+  rendered no passes/density even when the bridge carried heavy traffic. Deck
+  cells are now painted with the flow crossing the bridge
+  (`min(passes[endA], passes[endB])` — the portal's tree-edge flow), so a deck
+  reads commensurate with its ends.
+- **Groups 1c/1d highlight when loaded.** The impassable-mask (1c) and bridges
+  (1d) groups now light up (accent border) once their data is loaded, matching
+  1a/1b.
+- **Extract bridges from the loaded vector network (1d).** A new
+  "Extract from loaded network" button derives bridge/tunnel decks from the
+  network already loaded in 1b — offline, no Overpass. Bridge tags are read from
+  dedicated `bridge`/`tunnel`/`layer` columns when present, else parsed from an
+  OSM-export `other_tags` hstore; reprojection is reused from the network load
+  (no re-parse).
+
 ## v19 — 2026-06-19
 
 ### New features
