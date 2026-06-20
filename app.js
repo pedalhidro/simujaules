@@ -577,7 +577,10 @@ document.addEventListener("DOMContentLoaded", () => {
       routesSel.appendChild(og);
     }
     routesSel.value = "CET_R2"; // perceptually uniform rainbow — good for ranks
-    routesSel.addEventListener("change", rerenderCachedResult);
+    // Recolour only the route polylines — no full raster re-render of the
+    // energy/passes canvases (which the field-colormap inputs defer behind
+    // the Refresh-style button anyway).
+    routesSel.addEventListener("change", recolorRouteLines);
   }
   // Top-N toggle reveals N + penalty + repulsion inputs
   const topnCheck = document.getElementById("want-topn");
@@ -2907,8 +2910,13 @@ runBtn.addEventListener("click", async () => {
   window.__simuDrawer?.close();
 
   const mode = document.getElementById("mode").value;
-  const alpha = parseFloat(document.getElementById("alpha").value);
-  const beta = parseFloat(document.getElementById("beta").value);
+  // Clamp α/β to ≥0: a negative cost coefficient makes negative edge weights,
+  // which break Dijkstra (and a negative α NaN-poisons the time estimate). The
+  // min="0" input attribute only guards the spinner, not typed/pasted values.
+  const alphaRaw = parseFloat(document.getElementById("alpha").value);
+  const alpha = Number.isFinite(alphaRaw) ? Math.max(0, alphaRaw) : 0.008;
+  const betaRaw = parseFloat(document.getElementById("beta").value);
+  const beta = Number.isFinite(betaRaw) ? Math.max(0, betaRaw) : 1.0;
   const eta = parseFloat(document.getElementById("eta").value);
   const eMaxRaw = parseFloat(document.getElementById("e-max")?.value);
   const eMax = Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0;
@@ -3430,6 +3438,12 @@ runBtn.addEventListener("click", async () => {
         if (gen !== state.computeGen) return new Promise(() => {});
         console.warn("[backend] falling back to in-browser workers:", err);
         status.textContent = "Native backend unavailable — using browser workers…";
+        // This run is now executing on the browser pool, not the backend.
+        // Re-tag it so computeDone's online correction trains corrBrowser
+        // (actual/predicted vs the browser model), not corrBackend — otherwise
+        // every fallback run corrupts the native-slice correction with
+        // browser timings and leaves corrBrowser untrained.
+        if (state.lastRun) state.lastRun.backend = false;
       }
     }
     return computeDensityField(opts);
@@ -4003,11 +4017,14 @@ function renderFieldToDataURL(field, W, H, opts) {
   const span = hi - lo;
   const gammaExp = Math.max(0.01, opts.gamma ?? 1);
 
+  // Stride-downsample the canvas on huge DEMs so createImageData can't OOM
+  // the tab (stride=1 → byte-identical to full-res for DEMs under the cap).
+  const { stride, outW, outH } = overlayCanvasDims(W, H);
   const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
+  canvas.width = outW;
+  canvas.height = outH;
   const ctx = canvas.getContext("2d");
-  const img = ctx.createImageData(W, H);
+  const img = ctx.createImageData(outW, outH);
 
   // Optional second field driving the COLOUR while the primary field
   // drives the ALPHA ("energy color" passes blend): hue from
@@ -4026,53 +4043,60 @@ function renderFieldToDataURL(field, W, H, opts) {
     if (!Number.isFinite(cfSpan) || cfSpan <= 0) cfSpan = 1;
   }
 
-  for (let i = 0; i < N; i++) {
-    const v = work[i];
-    const unsettled =
-      !Number.isFinite(v) || (opts.treatZeroAsTransparent && v === 0);
-    if (unsettled) {
-      img.data[4 * i + 3] = 0;
-      continue;
+  // Iterate output pixels; sample the source field at the chosen stride.
+  // `i` indexes the full-res field (and colorField), `o` the output canvas.
+  for (let or = 0; or < outH; or++) {
+    const srcR = or * stride;
+    for (let oc = 0; oc < outW; oc++) {
+      const i = srcR * W + oc * stride;
+      const o = or * outW + oc;
+      const v = work[i];
+      const unsettled =
+        !Number.isFinite(v) || (opts.treatZeroAsTransparent && v === 0);
+      if (unsettled) {
+        img.data[4 * o + 3] = 0;
+        continue;
+      }
+      let t;
+      if (useSqrt) {
+        t = Math.sqrt(Math.max(0, v / hi));
+      } else {
+        t = (v - lo) / span;
+      }
+      if (t < 0) t = 0;
+      else if (t > 1) t = 1;
+      // Gamma adjustment: t' = t^γ. γ=1 leaves the mapping unchanged.
+      if (gammaExp !== 1) t = Math.pow(t, gammaExp);
+      let r2, g2, b2, a2;
+      if (cfField) {
+        const cv = cfField[i];
+        let tc = Number.isFinite(cv) ? (cv - cfLo) / cfSpan : 1;
+        if (tc < 0) tc = 0;
+        else if (tc > 1) tc = 1;
+        [r2, g2, b2] = colormap(tc);
+        a2 = Math.round(t * 255);
+      } else if (opts.useGreyscale) {
+        const g = Math.round(t * 255);
+        r2 = g2 = b2 = g;
+        // For additive-style blends (plus-lighter, screen, multiply, etc.)
+        // alpha=brightness makes black cells contribute nothing while bright
+        // cells fully add. For "normal" blend that trick reads wrong (dark
+        // cells become transparent and the energy field bleeds through), so
+        // we use full alpha and let the slider do the dimming. The flag is
+        // set by the renderer based on the active blend mode.
+        a2 = opts.solidAlpha ? 255 : g;
+      } else {
+        [r2, g2, b2] = colormap(t);
+        // Fully opaque on the canvas; user-facing dimming comes from the
+        // L.imageOverlay opacity slider so that 100% on the slider really
+        // means 100% opaque.
+        a2 = 255;
+      }
+      img.data[4 * o + 0] = r2;
+      img.data[4 * o + 1] = g2;
+      img.data[4 * o + 2] = b2;
+      img.data[4 * o + 3] = a2;
     }
-    let t;
-    if (useSqrt) {
-      t = Math.sqrt(Math.max(0, v / hi));
-    } else {
-      t = (v - lo) / span;
-    }
-    if (t < 0) t = 0;
-    else if (t > 1) t = 1;
-    // Gamma adjustment: t' = t^γ. γ=1 leaves the mapping unchanged.
-    if (gammaExp !== 1) t = Math.pow(t, gammaExp);
-    let r2, g2, b2, a2;
-    if (cfField) {
-      const cv = cfField[i];
-      let tc = Number.isFinite(cv) ? (cv - cfLo) / cfSpan : 1;
-      if (tc < 0) tc = 0;
-      else if (tc > 1) tc = 1;
-      [r2, g2, b2] = colormap(tc);
-      a2 = Math.round(t * 255);
-    } else if (opts.useGreyscale) {
-      const g = Math.round(t * 255);
-      r2 = g2 = b2 = g;
-      // For additive-style blends (plus-lighter, screen, multiply, etc.)
-      // alpha=brightness makes black cells contribute nothing while bright
-      // cells fully add. For "normal" blend that trick reads wrong (dark
-      // cells become transparent and the energy field bleeds through), so
-      // we use full alpha and let the slider do the dimming. The flag is
-      // set by the renderer based on the active blend mode.
-      a2 = opts.solidAlpha ? 255 : g;
-    } else {
-      [r2, g2, b2] = colormap(t);
-      // Fully opaque on the canvas; user-facing dimming comes from the
-      // L.imageOverlay opacity slider so that 100% on the slider really
-      // means 100% opaque.
-      a2 = 255;
-    }
-    img.data[4 * i + 0] = r2;
-    img.data[4 * i + 1] = g2;
-    img.data[4 * i + 2] = b2;
-    img.data[4 * i + 3] = a2;
   }
   ctx.putImageData(img, 0, 0);
   return { url: canvas.toDataURL(), lo, hi };
@@ -4141,28 +4165,35 @@ function renderDualPassesToDataURL(constrained, unconstrained, W, H, opts) {
   const RA = 255, GA = 105, BA = 70;
   const RB = 95,  GB = 225, BB = 80;
 
+  // Stride-downsample on huge DEMs (stride=1 → byte-identical under the cap).
+  const { stride, outW, outH } = overlayCanvasDims(W, H);
   const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
+  canvas.width = outW;
+  canvas.height = outH;
   const ctx = canvas.getContext("2d");
-  const img = ctx.createImageData(W, H);
-  for (let i = 0; i < N; i++) {
-    let tA = (a[i] - lo) / span;
-    let tB = (b[i] - loB) / spanB;
-    // Full clamp on BOTH ends: a value below the channel's min must floor
-    // at 0, not go negative — a negative channel would subtract from the
-    // additive sum and could erase the other channel entirely.
-    if (!Number.isFinite(tA) || a[i] <= 0 || tA < 0) tA = 0;
-    else if (tA > 1) tA = 1;
-    if (!Number.isFinite(tB) || b[i] <= 0 || tB < 0) tB = 0;
-    else if (tB > 1) tB = 1;
-    if (tA <= 0 && tB <= 0) { img.data[4 * i + 3] = 0; continue; }
-    if (gammaExp !== 1 && tA > 0) tA = Math.pow(tA, gammaExp);
-    if (gammaExpB !== 1 && tB > 0) tB = Math.pow(tB, gammaExpB);
-    img.data[4 * i + 0] = Math.min(255, Math.round(RA * tA + RB * tB));
-    img.data[4 * i + 1] = Math.min(255, Math.round(GA * tA + GB * tB));
-    img.data[4 * i + 2] = Math.min(255, Math.round(BA * tA + BB * tB));
-    img.data[4 * i + 3] = Math.min(255, Math.round((tA + tB) * 255));
+  const img = ctx.createImageData(outW, outH);
+  for (let or = 0; or < outH; or++) {
+    const srcR = or * stride;
+    for (let oc = 0; oc < outW; oc++) {
+      const i = srcR * W + oc * stride;
+      const o = or * outW + oc;
+      let tA = (a[i] - lo) / span;
+      let tB = (b[i] - loB) / spanB;
+      // Full clamp on BOTH ends: a value below the channel's min must floor
+      // at 0, not go negative — a negative channel would subtract from the
+      // additive sum and could erase the other channel entirely.
+      if (!Number.isFinite(tA) || a[i] <= 0 || tA < 0) tA = 0;
+      else if (tA > 1) tA = 1;
+      if (!Number.isFinite(tB) || b[i] <= 0 || tB < 0) tB = 0;
+      else if (tB > 1) tB = 1;
+      if (tA <= 0 && tB <= 0) { img.data[4 * o + 3] = 0; continue; }
+      if (gammaExp !== 1 && tA > 0) tA = Math.pow(tA, gammaExp);
+      if (gammaExpB !== 1 && tB > 0) tB = Math.pow(tB, gammaExpB);
+      img.data[4 * o + 0] = Math.min(255, Math.round(RA * tA + RB * tB));
+      img.data[4 * o + 1] = Math.min(255, Math.round(GA * tA + GB * tB));
+      img.data[4 * o + 2] = Math.min(255, Math.round(BA * tA + BB * tB));
+      img.data[4 * o + 3] = Math.min(255, Math.round((tA + tB) * 255));
+    }
   }
   ctx.putImageData(img, 0, 0);
   return { url: canvas.toDataURL(), lo, hi };
@@ -4232,6 +4263,20 @@ const RELIEF_PERCENTILE_SAMPLES = 100_000;
 // imageOverlay scale the result up to the DEM extent — Leaflet uses
 // CSS image-rendering, so the texture maps cleanly across the bounds.
 const RELIEF_MAX_CANVAS_PX = 10 * 1024 * 1024;
+
+// Shared canvas cap for the field overlays (energy / passes / impassable),
+// mirroring the relief renderer. Above RELIEF_MAX_CANVAS_PX cells we render the
+// canvas at an integer-strided lower resolution and let Leaflet's imageOverlay
+// scale the texture across the same DEM bounds. Without this, createImageData
+// at the full W*H OOMs the tab on huge DEMs (the documented 135 M-cell case
+// allocates ~540 MB before toDataURL even runs). Returns stride=1 (byte-
+// identical to the old full-res path) for any DEM under the cap.
+function overlayCanvasDims(W, H) {
+  const N = W * H;
+  let stride = 1;
+  if (N > RELIEF_MAX_CANVAS_PX) stride = Math.ceil(Math.sqrt(N / RELIEF_MAX_CANVAS_PX));
+  return { stride, outW: Math.max(1, Math.floor(W / stride)), outH: Math.max(1, Math.floor(H / stride)) };
+}
 
 function renderReliefToDataURL(dem, slope) {
   const { H, W, height, mask } = dem;
@@ -4365,17 +4410,23 @@ function renderImpassableDataURL() {
   if (!state.dem || !state.impassable) return null;
   const { H, W } = state.dem;
   const imp = state.impassable;
+  // Stride-downsample on huge DEMs (stride=1 → identical under the cap). These
+  // are SPARSE features, so we SCATTER each blocked/corridor cell into its
+  // downsampled output pixel (point-sampling the strided grid would skip most
+  // of them and the overlay would look empty).
+  const { stride, outW, outH } = overlayCanvasDims(W, H);
   const canvas = document.createElement("canvas");
-  canvas.width = W; canvas.height = H;
+  canvas.width = outW; canvas.height = outH;
   const ctx = canvas.getContext("2d");
-  const img = ctx.createImageData(W, H);
+  const img = ctx.createImageData(outW, outH);
   const d = img.data;
+  const outIdx = (i) => { const r = (i / W) | 0, c = i - r * W; return (((r / stride) | 0) * outW + ((c / stride) | 0)) << 2; };
   for (let i = 0; i < imp.length; i++) {
-    if (imp[i]) { const o = i << 2; d[o] = 220; d[o + 1] = 48; d[o + 2] = 48; d[o + 3] = 255; } // blocked
+    if (imp[i]) { const o = outIdx(i); d[o] = 220; d[o + 1] = 48; d[o + 2] = 48; d[o + 3] = 255; } // blocked
   }
   const cells = state.corridorCells;
   if (cells) for (let k = 0; k < cells.length; k++) {
-    const o = cells[k] << 2; d[o] = 40; d[o + 1] = 200; d[o + 2] = 90; d[o + 3] = 255; // corridor
+    const o = outIdx(cells[k]); d[o] = 40; d[o + 1] = 200; d[o + 2] = 90; d[o + 3] = 255; // corridor
   }
   ctx.putImageData(img, 0, 0);
   return canvas.toDataURL("image/png");
@@ -5052,6 +5103,17 @@ function routeColour(i, n) {
   const g = Math.round(a[1] + (b[1] - a[1]) * frac);
   const bl = Math.round(a[2] + (b[2] - a[2]) * frac);
   return `rgb(${r},${g},${bl})`;
+}
+
+// Recolour the existing top-N route polylines in place from the current
+// routes-colormap. Cheap setStyle on the already-drawn lines — no recompute
+// and no energy/passes raster re-render (the maximize path is a fixed colour,
+// unaffected). Used by the routes-colormap selector, which previously called
+// the full rerenderCachedResult() and re-rasterised both W×H field canvases.
+function recolorRouteLines() {
+  if (!state.routeLines || !state.routeLines.length) return;
+  const n = state.routeLines.length;
+  for (let i = 0; i < n; i++) state.routeLines[i].setStyle({ color: routeColour(i, n) });
 }
 
 function colormap(t) {
@@ -6112,9 +6174,11 @@ function applyMetadataToUI(md, bin = {}) {
       state.networkFeatureCount = net.featureCount || 0;
       const meta = document.getElementById("vec-meta");
       if (meta) {
+        // srsId / featureCount come from the bundle's metadata.jsonld, which a
+        // shared/crafted bundle controls — escape before innerHTML (stored XSS).
         meta.innerHTML =
-          `Restored from bundle: <span class="v">${state.networkFeatureCount}</span> ` +
-          `features (SRS ${state.networkSrsId || "?"}).`;
+          `Restored from bundle: <span class="v">${escapeHtml(String(state.networkFeatureCount))}</span> ` +
+          `features (SRS ${escapeHtml(String(state.networkSrsId ?? "?"))}).`;
       }
     } else {
       console.warn(

@@ -149,5 +149,50 @@ const alpha = 0.008, beta = 1.0, eta = 0.1;
   ok("passes stop at the DEM extent (3 in-bounds edges)", reached === 3, `reached=${reached}`);
 }
 
+// ---- 9. crossings mode finds NON-axis-aligned intersections (fuzz) ----------
+// Regression for the bucket-rasterisation miss: the old length-stepped DDA
+// inserted one floor cell per Euclidean step and could skip cells, so two
+// genuinely-crossing segments shared no bucket and stayed in separate
+// components. We fuzz random segment pairs that PROPERLY cross (interior to
+// both) and assert crossings mode merges them into one connected component.
+{
+  const comps = (g) => {
+    const seen = new Uint8Array(g.nNodes); let c = 0;
+    for (let s = 0; s < g.nNodes; s++) {
+      if (seen[s]) continue; c++; const stack = [s]; seen[s] = 1;
+      while (stack.length) { const u = stack.pop(); for (let he = g.csrHead[u]; he < g.csrHead[u + 1]; he++) { const v = g.csrTarget[he]; if (!seen[v]) { seen[v] = 1; stack.push(v); } } }
+    }
+    return c;
+  };
+  // Orientation sign of (p,q,r); 0 = collinear. Points are [r,c] → (x=c,y=r).
+  const orient = (p, q, r) => Math.sign((q[1] - p[1]) * (r[0] - p[0]) - (q[0] - p[0]) * (r[1] - p[1]));
+  // Proper interior crossing (no shared endpoint, no collinearity).
+  const properCross = (a, b, c, d) => {
+    const o1 = orient(a, b, c), o2 = orient(a, b, d), o3 = orient(c, d, a), o4 = orient(c, d, b);
+    return o1 !== 0 && o2 !== 0 && o3 !== 0 && o4 !== 0 && o1 !== o2 && o3 !== o4;
+  };
+  // Deterministic PRNG (mulberry32) so the test never flakes.
+  let seed = 0x1234abcd;
+  const rnd = () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const G = 24, dem = flatDem(G, G, 0);
+  const pt = () => [1 + rnd() * (G - 3), 1 + rnd() * (G - 3)]; // [r,c], interior to extent
+  let crossingsTested = 0, missed = 0, trials = 0;
+  while (crossingsTested < 400 && trials < 40000) {
+    trials++;
+    const a = pt(), b = pt(), c0 = pt(), d = pt();
+    if (!properCross(a, b, c0, d)) continue;
+    crossingsTested++;
+    const g = GraphEngine.buildGraph([[a, b], [c0, d]], dem, { junctionMode: "crossings" });
+    if (comps(g) !== 1) missed++;
+  }
+  ok("crossings: fuzz finds every proper intersection", missed === 0,
+     `tested ${crossingsTested} crossings, ${missed} missed`);
+  // Explicit shallow (non-45°) diagonal X — the kind the old DDA dropped.
+  {
+    const g = GraphEngine.buildGraph([[[1, 1], [3, 21]], [[3, 1], [1, 21]]], flatDem(24, 24, 0), { junctionMode: "crossings" });
+    ok("crossings: shallow-diagonal X is one component", comps(g) === 1, `comps=${comps(g)}`);
+  }
+}
+
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

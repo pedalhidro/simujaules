@@ -166,12 +166,28 @@
       const addBucket = (key, idx) => { let a = buckets.get(key); if (!a) { a = []; buckets.set(key, a); } a.push(idx); };
       for (let s = 0; s < segs.length; s++) {
         const [r1, c1, , r2, c2] = segs[s];
-        // Insert into every integer cell the segment passes through (DDA).
-        const steps = Math.max(1, Math.ceil(Math.hypot(r2 - r1, c2 - c1)));
+        // Conservative bucketing. The candidate-pair scan only compares
+        // segments that SHARE a bucket cell, so the rasterisation must
+        // guarantee that two segments which truly intersect both insert the
+        // cell holding the intersection point. We step finely enough that
+        // consecutive samples are ≤1 cell apart on each axis (axis-summed
+        // step count), and insert each sample's 3×3 neighbourhood — so the
+        // intersection cell (within Chebyshev distance 1 of some sample on
+        // each segment) is inserted by both. The old length-stepped DDA
+        // inserted only a single floor cell per Euclidean step and skipped
+        // cells on near-diagonal segments, silently dropping ~3–10% of real
+        // crossings (they then stayed in separate connected components).
+        const steps = Math.max(1, Math.ceil(Math.abs(r2 - r1)) + Math.ceil(Math.abs(c2 - c1)));
+        const seen = new Set(); // de-dupe this segment's own inserts
         for (let i = 0; i <= steps; i++) {
           const rr = Math.floor(r1 + (r2 - r1) * (i / steps));
           const cc = Math.floor(c1 + (c2 - c1) * (i / steps));
-          addBucket(rr + "|" + cc, s);
+          for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+            const key = (rr + dr) + "|" + (cc + dc);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            addBucket(key, s);
+          }
         }
       }
       const tested = new Set();
@@ -208,7 +224,7 @@
     const edgeMap = new Map(); const edgeA = [], edgeB = [];
     const pushEdge = (na, nb) => {
       if (na === nb) return -1;
-      const key = na < nb ? na * 1 + "_" + nb : nb + "_" + na;
+      const key = na < nb ? na + "_" + nb : nb + "_" + na;
       let e = edgeMap.get(key);
       if (e === undefined) { e = edgeA.length; edgeA.push(na); edgeB.push(nb); edgeMap.set(key, e); }
       return e;

@@ -457,7 +457,9 @@ fn compute_density(g: &Grid, p: &Params) -> (Vec<f64>, Vec<f32>) {
     let n64 = n as u64;
     let scratch_bytes = 17 * n64;
     let acc_bytes = 20 * n64;
-    let per_slice = if round { 2 * scratch_bytes + acc_bytes + n64 } else { scratch_bytes + acc_bytes };
+    // .max(1) guards the divisor: handle_density already rejects n==0, but a
+    // zero per_slice here would panic the request loop (defensive belt).
+    let per_slice = (if round { 2 * scratch_bytes + acc_bytes + n64 } else { scratch_bytes + acc_bytes }).max(1);
     let mem_cap = (density_mem_budget_bytes() / per_slice).max(1) as usize;
     let n_slices = refs.len()
         .min(rayon::current_num_threads())
@@ -558,6 +560,12 @@ fn handle_density(mut req: tiny_http::Request) {
         Err(e) => return respond_json(req, 400, &format!(r#"{{"error":"bad params: {}"}}"#, e)),
     };
     let n = params.h * params.w;
+    // An empty grid (h or w == 0) is meaningless and would make per_slice == 0
+    // in compute_density → a divide-by-zero panic that, on this single-threaded
+    // request loop, takes down the whole server. Reject it up front.
+    if n == 0 {
+        return respond_json(req, 400, r#"{"error":"empty grid (h or w is 0)"}"#);
+    }
     let masks = if params.has_network { 2 } else { 1 };
     let expected = 4 + json_len + 4 * n + masks * n;
     if body.len() != expected {
