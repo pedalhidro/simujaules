@@ -183,7 +183,18 @@
 //              i18n migration added a t("status.fabdem_mosaic") call inside that
 //              loop — so it invoked the tile object. Renamed the loop var to
 //              `tile` (both tile loops). App-only patch; engine/backend unchanged.
-const VERSION  = "v21";
+//   v21 → v22: New 1c source — "Pull water from OSM". Queries Overpass over the
+//              DEM extent and rasterises an impassable mask onto the DEM grid:
+//              water AREAS (natural=water / waterway=riverbank / landuse=reservoir,
+//              ways + multipolygon relations) via even-odd fill; the open SEA
+//              (natural=coastline, land-left/water-right) via a horizontal+vertical
+//              orientation sweep (gap-tolerant, no flood-leak); and NON-tunnelled
+//              waterway=river LINES via supercover (with a "Rivers (lines)
+//              impassable" toggle). Streams + tunnelled waterways stay passable.
+//              Reuses the uploaded-mask pipeline (Invert, corridors, overlay,
+//              bundle). App-only; engine/backend unchanged. New test:
+//              test-water-raster.mjs. Bumped so the updated app.js installs.
+const VERSION  = "v22";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

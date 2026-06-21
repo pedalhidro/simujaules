@@ -707,6 +707,11 @@
           <span data-i18n="imp.enabled">Apply to compute</span>
         </label>
         <input type="file" id="impassable-file" accept=".tif,.tiff" />
+        <button type="button" class="secondary" id="impassable-osm" data-i18n="imp.osm" style="margin-top: 4px;">Pull water from OSM</button>
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
+          <input type="checkbox" id="imp-rivers" checked />
+          <span data-i18n="imp.rivers">Rivers (lines) impassable</span>
+        </label>
         <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
           <input type="checkbox" id="impassable-invert" />
           <span data-i18n="imp.invert">Invert (raster marks passable cells)</span>
@@ -1245,6 +1250,13 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v22</strong> — 2026-06-21<br/>
+              New 1c source: "Pull water from OSM" builds the impassable mask straight from
+              Overpass — water areas (natural=water / riverbank / reservoir, incl. multipolygon
+              relations), the open sea/ocean (from natural=coastline, with land-left/water-right
+              orientation), and non-tunnelled waterway=river lines (with a "Rivers (lines)
+              impassable" toggle). Streams and tunnelled waterways stay passable. It reuses the
+              uploaded-mask pipeline (Invert, corridors, overlay, bundle). Needs a geographic DEM.</p>
               <p><strong>v21</strong> — 2026-06-21<br/>
               Fix: "Load FABDEM for current viewport" crashed with "TypeError: t is not a
               function" — the tile-mosaic loop variable shadowed the i18n t() function after

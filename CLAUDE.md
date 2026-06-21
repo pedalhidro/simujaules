@@ -154,9 +154,19 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 
 ```sh
 node test-worker-pool.mjs                  # worker regression suite
+node test-water-raster.mjs                 # OSM water-mask rasterisation (areas/sea/rivers)
 cd backend && cargo build --release && node test-backend.mjs
 ```
 
-There is no CI; run both before committing engine changes. Style knob
+`test-water-raster.mjs` holds PURE MIRRORS of `app.js`'s OSM water-mask helpers
+(`fillRingsEvenOdd`, `rasterPolylineSupercover`, `assembleRings`,
+`fillSeaFromCoastlines`) — `app.js` is a browser module and can't be imported in
+node, so the copies must be kept in sync (like `backend/main.rs` mirrors
+`energy-worker.js`). The SEA fill is the load-bearing case: OSM gives only
+`natural=coastline` lines (land-left/water-right), filled by a horizontal+vertical
+orientation SWEEP (sea/land set per span, never flood-filled — coastline gaps
+would otherwise leak the sea into all land).
+
+There is no CI; run them before committing engine changes. Style knob
 changes (colormap, ranges, gamma, blend) re-render cached arrays and must
 never trigger a recompute.

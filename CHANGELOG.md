@@ -9,6 +9,29 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v22 — 2026-06-21
+
+### Features
+
+- **Pull water from OSM (group 1c).** A new button queries Overpass over the DEM
+  extent and builds the impassable mask directly — no GeoTIFF upload needed.
+  Impassable =
+  - water **areas** (`natural=water` / `waterway=riverbank` / `landuse=reservoir`,
+    ways **and** multipolygon relations) — even-odd polygon-filled, islands become
+    holes;
+  - the open **sea/ocean** (from `natural=coastline`, which OSM stores as a
+    directed line with land-left/water-right) — filled by a horizontal **and**
+    vertical orientation sweep that sets each span's side locally, so coastline
+    gaps/open-ends never cascade into a leak (and islands/bays resolve correctly);
+  - **non-tunnelled** `waterway=river` **lines** — supercover-rasterised so an
+    8-connected route can't slip across; a **"Rivers (lines) impassable"** toggle
+    turns this layer off without re-querying.
+
+  Streams and tunnelled/culverted waterways stay passable. The result feeds the
+  existing uploaded-mask pipeline, so Invert, bridge corridors, the overlay, the
+  "Apply to compute" toggle, and bundle export all work unchanged. Geographic
+  (lon/lat) DEM only.
+
 ## v21 — 2026-06-21
 
 ### Fixes

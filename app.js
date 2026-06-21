@@ -68,6 +68,14 @@ const STRINGS = {
   "status.osm_parsing":      { pt: "Lendo resposta do OSM…",                         en: "Parsing OSM response…" },
   "status.osm_rasterising":  { pt: "Rasterizando {0} vias do OSM…",                  en: "Rasterising {0} OSM ways…" },
   "status.osm_failed":       { pt: "Falha ao puxar a rede do OSM: {0}",              en: "OSM network pull failed: {0}" },
+  "status.water_geographic": { pt: "Puxar água do OSM precisa de um DEM geográfico (lon/lat).", en: "OSM water pull needs a geographic (lon/lat) DEM." },
+  "status.water_querying":   { pt: "Consultando OSM (Overpass) por água…",          en: "Querying OSM (Overpass) for water…" },
+  "status.water_parsing":    { pt: "Lendo água do OSM…",                            en: "Parsing OSM water…" },
+  "status.water_rasterising":{ pt: "Rasterizando {0} feições de água…",             en: "Rasterising {0} water features…" },
+  "status.water_none":       { pt: "Nenhuma água encontrada na extensão do DEM.",   en: "No water found in the DEM extent." },
+  "status.water_done":       { pt: "Água do OSM: {0} células barradas.",            en: "OSM water: {0} impassable cells." },
+  "status.water_failed":     { pt: "Falha ao puxar água do OSM: {0}",               en: "OSM water pull failed: {0}" },
+  "status.overpass_http":    { pt: "Overpass HTTP {0} (ocupado? tente de novo em um minuto)", en: "Overpass HTTP {0} (busy? try again in a minute)" },
   "status.vec_reading":      { pt: "Lendo {0} ({1} MB)…",                            en: "Reading {0} ({1} MB)…" },
   "status.vec_init_sql":     { pt: "Inicializando sql.js…",                          en: "Initializing sql.js…" },
   "status.vec_rasterising_of":   { pt: "Rasterizando… <span class=\"v\">{0}</span>/{1} ({2} desenhadas)", en: "Rasterising… <span class=\"v\">{0}</span>/{1} ({2} drawn)" },
@@ -162,6 +170,8 @@ const STRINGS = {
   "imp.enabled":         { pt: "Aplicar ao cálculo", en: "Apply to compute" },
   "imp.invert":          { pt: "Inverter (raster marca células passáveis)", en: "Invert (raster marks passable cells)" },
   "imp.clear":           { pt: "Limpar máscara", en: "Clear mask" },
+  "imp.osm":             { pt: "Puxar água do OSM", en: "Pull water from OSM" },
+  "imp.rivers":          { pt: "Rios (linhas) intransponíveis", en: "Rivers (lines) impassable" },
   "imp.corridor":        { pt: "Rede abre corredores passáveis sobre a máscara", en: "Network carves passable corridors across the mask" },
   "imp.offset":          { pt: "deslocamento no centro da ponte (m, −5…+15)", en: "bridge centre offset (m, −5…+15)" },
   "imp.show":            { pt: "Mostrar máscara + corredores no mapa", en: "Show mask + corridors on map" },
@@ -900,6 +910,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
   document.getElementById("impassable-clear")?.addEventListener("click", clearImpassableMask);
+  document.getElementById("impassable-osm")?.addEventListener("click", loadOsmWater);
+  document.getElementById("imp-rivers")?.addEventListener("change", rebuildOsmWaterMask);
   document.getElementById("imp-enabled")?.addEventListener("change", () => markImpassableDirty(true));
   document.getElementById("impassable-invert")?.addEventListener("change", () => {
     // Re-resample the cached source with the flipped convention (no re-upload).
@@ -1225,6 +1237,7 @@ const state = {
   corridorBase: null,
   corridorRamp: null,
   corridorSet: null, // Set of corridor cell indices, for O(1) click-validity lookup
+  osmWaterGeom: null, // cached parsed OSM water geometry (grid coords) for re-rasterising on the #imp-rivers toggle
   impassableToken: 0,
   impassableOverlay: null,
   // Optional OSM bridges & tunnels modelled as level "decks". Each is a span
@@ -1741,6 +1754,7 @@ async function loadDemFromArrayBuffer(buf, label) {
   state.impassableMeta = null;
   state.corridorCells = null; state.corridorBase = null; state.corridorRamp = null;
   state.corridorSet = null;
+  state.osmWaterGeom = null; // grid-bound geometry is stale for a new DEM
   if (state.impassableOverlay) { state.impassableOverlay.remove(); state.impassableOverlay = null; }
   const impInputReset = document.getElementById("impassable-file");
   if (impInputReset) impInputReset.value = "";
@@ -2585,6 +2599,262 @@ function markImpassableDirty(reprobe = false) {
   estimateRunTime();
 }
 
+// ---- OSM water → impassable mask (group 1c) ------------------------------
+// Pull water from OSM and rasterise it onto the DEM grid as an impassable mask,
+// reusing the uploaded-mask pipeline (applyImpassableRaster → Invert, corridors,
+// overlay, bundle — the synthetic raster matches the DEM grid so resampling is
+// identity). Impassable = water AREAS (natural=water / waterway=riverbank /
+// landuse=reservoir, ways + multipolygon relations) and NON-tunnelled
+// waterway=river LINES. Streams (never queried) and tunnelled/culverted rivers
+// (filtered client-side) stay passable. OSM coords are lon/lat → geographic DEM
+// only (mirrors the OSM bridge/network guards).
+
+// Fractional grid coords [gx, gy] for a lat/lng (cell centres at integer+0.5,
+// matching resampleMaskToDem's identity sampling on a grid-matched raster).
+function llToGridFrac(lat, lng) {
+  const { originX, originY, dx, dy } = state.dem;
+  return [(lng - originX) / dx, (originY - lat) / dy];
+}
+
+// Even-odd scanline fill of a BODY's rings (each [[gx,gy],…]) into `out`
+// (1=impassable). All rings of one body fill together, so inner rings (islands)
+// cut holes by crossing parity. Clamped to the body's row span; edges/vertices
+// outside the grid still contribute correct crossings (only the marks clip).
+function fillRingsEvenOdd(rings, out, W, H) {
+  let yMin = Infinity, yMax = -Infinity;
+  for (const r of rings) for (const p of r) { if (p[1] < yMin) yMin = p[1]; if (p[1] > yMax) yMax = p[1]; }
+  if (!Number.isFinite(yMin)) return;
+  const r0 = Math.max(0, Math.floor(yMin)), r1 = Math.min(H - 1, Math.floor(yMax));
+  const xs = [];
+  for (let ry = r0; ry <= r1; ry++) {
+    const yc = ry + 0.5;
+    xs.length = 0;
+    for (const ring of rings) {
+      const n = ring.length;
+      if (n < 3) continue;
+      for (let i = 0, j = n - 1; i < n; j = i++) {
+        const yi = ring[i][1], yj = ring[j][1];
+        if ((yi > yc) !== (yj > yc)) xs.push(ring[i][0] + (yc - yi) / (yj - yi) * (ring[j][0] - ring[i][0]));
+      }
+    }
+    if (xs.length < 2) continue;
+    xs.sort((a, b) => a - b);
+    const base = ry * W;
+    for (let k = 0; k + 1 < xs.length; k += 2) {
+      const cA = Math.max(0, Math.ceil(xs[k] - 0.5));
+      const cB = Math.min(W - 1, Math.floor(xs[k + 1] - 0.5));
+      for (let c = cA; c <= cB; c++) out[base + c] = 1;
+    }
+  }
+}
+
+// Supercover (4-connected) rasterisation of a polyline — every cell the line
+// crosses (Amanatides–Woo), so an 8-connected route can't slip across it.
+function rasterPolylineSupercover(pts, out, W, H) {
+  const mark = (cx, cy) => { if (cx >= 0 && cx < W && cy >= 0 && cy < H) out[cy * W + cx] = 1; };
+  for (let s = 0; s + 1 < pts.length; s++) {
+    const x0 = pts[s][0], y0 = pts[s][1], x1 = pts[s + 1][0], y1 = pts[s + 1][1];
+    const dX = x1 - x0, dY = y1 - y0;
+    let ix = Math.floor(x0), iy = Math.floor(y0);
+    const ixe = Math.floor(x1), iye = Math.floor(y1);
+    const stepX = dX > 0 ? 1 : (dX < 0 ? -1 : 0);
+    const stepY = dY > 0 ? 1 : (dY < 0 ? -1 : 0);
+    const tdX = dX !== 0 ? Math.abs(1 / dX) : Infinity;
+    const tdY = dY !== 0 ? Math.abs(1 / dY) : Infinity;
+    let tmX = dX !== 0 ? ((stepX > 0 ? ix + 1 : ix) - x0) / dX : Infinity;
+    let tmY = dY !== 0 ? ((stepY > 0 ? iy + 1 : iy) - y0) / dY : Infinity;
+    mark(ix, iy);
+    let guard = Math.abs(ixe - ix) + Math.abs(iye - iy) + 4;
+    while ((ix !== ixe || iy !== iye) && guard-- > 0) {
+      if (tmX < tmY) { tmX += tdX; ix += stepX; } else { tmY += tdY; iy += stepY; }
+      mark(ix, iy);
+    }
+  }
+}
+
+// Stitch open polyline segments (relation members) into closed rings by matching
+// endpoints. Already-closed members pass through; even-odd fill wraps the rest.
+function assembleRings(segments) {
+  const tol = 1e-7;
+  const near = (a, b) => Math.abs(a[0] - b[0]) < tol && Math.abs(a[1] - b[1]) < tol;
+  const rings = [], open = [];
+  for (const s of segments) {
+    if (s.length >= 3 && near(s[0], s[s.length - 1])) rings.push(s);
+    else if (s.length >= 2) open.push(s.slice());
+  }
+  while (open.length) {
+    let chain = open.pop();
+    let grew = true;
+    while (grew && !near(chain[0], chain[chain.length - 1])) {
+      grew = false;
+      for (let i = 0; i < open.length; i++) {
+        const s = open[i], head = chain[0], tail = chain[chain.length - 1];
+        if (near(tail, s[0]))               chain = chain.concat(s.slice(1));
+        else if (near(tail, s[s.length - 1])) chain = chain.concat(s.slice().reverse().slice(1));
+        else if (near(head, s[s.length - 1])) chain = s.slice(0, -1).concat(chain);
+        else if (near(head, s[0]))          chain = s.slice().reverse().slice(0, -1).concat(chain);
+        else continue;
+        open.splice(i, 1); grew = true; break;
+      }
+    }
+    // Only emit a CLOSED ring — an unclosed leftover (broken/truncated relation,
+    // or a member without geometry) is not a valid area boundary; filling it
+    // would fabricate a phantom closing edge and over-mark cells.
+    if (chain.length >= 3 && near(chain[0], chain[chain.length - 1])) rings.push(chain);
+  }
+  return rings;
+}
+
+// The open sea/ocean is NOT a fillable polygon in OSM — it's implied by
+// natural=coastline ways (directed so LAND is on the LEFT, WATER on the RIGHT).
+// Real coastline data has open ends and gaps (river mouths, bbox edges), so a
+// flood-fill leaks catastrophically. Instead, fill the sea with orientation
+// SWEEPS: each crossing SETS the sea/land state on one side from the crossing's
+// travel direction. State is SET locally per span (not toggled), so a missing/
+// extra crossing corrupts at most one span instead of cascading. A single sweep
+// is blind to coast PARALLEL to it (a N–S scanline can't see an E–W beach), so
+// we run BOTH a horizontal and a vertical sweep and UNION them — each resolves
+// the coast perpendicular to it (H → bays, V → open ocean). The shore is stamped
+// impassable too. Pure over grid coords (unit-tested).
+function fillSeaFromCoastlines(coastlines, data, W, H) {
+  if (!coastlines || !coastlines.length) return 0;
+  for (const line of coastlines) rasterPolylineSupercover(line, data, W, H); // shore = impassable edge
+  const xs = []; // crossings of the current scan: { p = position along scan, sea = state past it }
+  // Horizontal sweep: per ROW, a crossing sets the state to its EAST
+  // (north-going coast, grid y decreasing → sea to the east).
+  for (let ry = 0; ry < H; ry++) {
+    const yc = ry + 0.5;
+    xs.length = 0;
+    for (const line of coastlines) for (let i = 0; i + 1 < line.length; i++) {
+      const y0 = line[i][1], y1 = line[i + 1][1];
+      if ((y0 > yc) !== (y1 > yc)) { const x0 = line[i][0], x1 = line[i + 1][0];
+        xs.push({ p: x0 + (yc - y0) / (y1 - y0) * (x1 - x0), sea: y1 < y0 }); }
+    }
+    if (!xs.length) continue;
+    xs.sort((a, b) => a.p - b.p);
+    const base = ry * W;
+    let k = -1;
+    for (let c = 0; c < W; c++) {
+      const cx = c + 0.5;
+      while (k + 1 < xs.length && xs[k + 1].p <= cx) k++;
+      if (k >= 0 ? xs[k].sea : !xs[0].sea) data[base + c] = 1;
+    }
+  }
+  // Vertical sweep: per COLUMN, a crossing sets the state to its SOUTH
+  // (east-going coast, x increasing → sea to the south).
+  for (let cx = 0; cx < W; cx++) {
+    const xc = cx + 0.5;
+    xs.length = 0;
+    for (const line of coastlines) for (let i = 0; i + 1 < line.length; i++) {
+      const x0 = line[i][0], x1 = line[i + 1][0];
+      if ((x0 > xc) !== (x1 > xc)) { const y0 = line[i][1], y1 = line[i + 1][1];
+        xs.push({ p: y0 + (xc - x0) / (x1 - x0) * (y1 - y0), sea: x1 > x0 }); }
+    }
+    if (!xs.length) continue;
+    xs.sort((a, b) => a.p - b.p);
+    let k = -1;
+    for (let r = 0; r < H; r++) {
+      const cy = r + 0.5;
+      while (k + 1 < xs.length && xs[k + 1].p <= cy) k++;
+      if (k >= 0 ? xs[k].sea : !xs[0].sea) data[r * W + cx] = 1;
+    }
+  }
+  let filled = 0; for (let i = 0, N = W * H; i < N; i++) if (data[i]) filled++;
+  return filled;
+}
+
+// Whether river LINES count as impassable (the #imp-rivers toggle). Water areas
+// and the coastline-derived sea are ALWAYS impassable; only the river-line layer
+// is optional. Default true.
+function riversImpassable() { return document.getElementById("imp-rivers")?.checked ?? true; }
+
+// (Re)rasterise the cached OSM water geometry onto the DEM grid and feed it to
+// the uploaded-mask pipeline. Re-callable so the #imp-rivers toggle re-applies
+// without re-querying Overpass. Areas (even-odd fill) + sea (coastline flood)
+// always; river lines (supercover) only when the toggle is on.
+function rebuildOsmWaterMask() {
+  const g = state.osmWaterGeom;
+  if (!g || !state.dem || !state.dem.isGeographic) return;
+  const { originX, originY, H, W, dx, dy } = state.dem;
+  const data = new Uint8Array(W * H);
+  for (const b of g.bodies) fillRingsEvenOdd(b.rings, data, W, H);
+  if (riversImpassable()) for (const rv of g.rivers) rasterPolylineSupercover(rv, data, W, H);
+  fillSeaFromCoastlines(g.coastlines, data, W, H);
+  let cells = 0; for (let i = 0; i < data.length; i++) if (data[i]) cells++;
+  // OSM water has a fixed polarity (water = impassable), so clear a stale Invert
+  // from a prior uploaded raster before applying the canonical mask.
+  const inv = document.getElementById("impassable-invert"); if (inv) inv.checked = false;
+  const fi = document.getElementById("impassable-file"); if (fi) fi.value = "";
+  // Wrap as a DEM-grid raster so the uploaded-mask pipeline consumes it
+  // unchanged (resample is identity; Invert/corridors/overlay/bundle reused).
+  applyImpassableRaster({ width: W, height: H, data, dx, dy, originX, originY, epsg: 4326 }, "OSM water");
+  status.textContent = cells ? t("status.water_done", cells.toLocaleString()) : t("status.water_none");
+}
+
+async function loadOsmWater() {
+  if (!state.dem) { status.innerHTML = `<span style="color:#ff6b6b">${t("status.load_dem_first")}</span>`; return; }
+  if (!state.dem.isGeographic) { status.innerHTML = `<span style="color:#ff6b6b">${t("status.water_geographic")}</span>`; return; }
+  const { originX, originY, H, W, dx, dy } = state.dem;
+  // Full DEM extent — a mask should cover the whole grid, not just the view.
+  const south = originY - H * dy, north = originY, west = originX, east = originX + W * dx;
+  const btn = document.getElementById("impassable-osm");
+  if (btn) btn.disabled = true;
+  progress.classList.add("active");
+  progressBar.style.width = "20%";
+  status.textContent = t("status.water_querying");
+  try {
+    const bbox = `${south.toFixed(6)},${west.toFixed(6)},${north.toFixed(6)},${east.toFixed(6)}`;
+    const query = `[out:json][timeout:120];(` +
+      `way["natural"="water"](${bbox});relation["natural"="water"](${bbox});` +
+      `way["waterway"="riverbank"](${bbox});relation["waterway"="riverbank"](${bbox});` +
+      `way["landuse"="reservoir"](${bbox});relation["landuse"="reservoir"](${bbox});` +
+      `way["natural"="coastline"](${bbox});` +     // the open sea: directed line, water on the right
+      `way["waterway"="river"](${bbox});` +        // streams/canals/ditches intentionally NOT queried
+      `);out geom;`;
+    const resp = await fetch(OVERPASS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "data=" + encodeURIComponent(query),
+    });
+    if (!resp.ok) throw new Error(t("status.overpass_http", resp.status));
+    progressBar.style.width = "55%";
+    status.textContent = t("status.water_parsing");
+    const json = await resp.json();
+    const toGrid = (g) => llToGridFrac(g.lat, g.lon);
+    const bodies = [];     // area bodies: { rings: [[[gx,gy],…], …] }
+    const rivers = [];     // non-tunnelled river polylines: [[[gx,gy],…], …]
+    const coastlines = []; // coastline polylines (sea = right side): [[[gx,gy],…], …]
+    for (const el of json.elements || []) {
+      const tg = el.tags || {};
+      if (el.type === "way" && Array.isArray(el.geometry) && el.geometry.length >= 2) {
+        if (tg.natural === "coastline") coastlines.push(el.geometry.map(toGrid));
+        else if (tg.waterway === "river") { if (!tg.tunnel || tg.tunnel === "no") rivers.push(el.geometry.map(toGrid)); } // tunnelled = passable
+        else bodies.push({ rings: [el.geometry.map(toGrid)] }); // closed water-area way (even-odd wraps it)
+      } else if (el.type === "relation" && Array.isArray(el.members)) {
+        const segs = [];
+        for (const m of el.members) if (Array.isArray(m.geometry) && m.geometry.length >= 2) segs.push(m.geometry.map(toGrid));
+        if (segs.length) bodies.push({ rings: assembleRings(segs) });
+      }
+    }
+    if (!bodies.length && !rivers.length && !coastlines.length) {
+      status.textContent = t("status.water_none"); // a normal "nothing here" result, not an error
+      return;
+    }
+    progressBar.style.width = "75%";
+    status.textContent = t("status.water_rasterising", (bodies.length + rivers.length + coastlines.length).toLocaleString());
+    await new Promise((r) => setTimeout(r, 0)); // let the status paint before the synchronous rasterise
+    state.osmWaterGeom = { bodies, rivers, coastlines }; // cache so the #imp-rivers toggle re-applies without re-querying
+    rebuildOsmWaterMask();
+    progressBar.style.width = "100%";
+  } catch (err) {
+    console.error("[osm-water]", err);
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.water_failed", escapeHtml(err.message))}</span>`;
+  } finally {
+    progress.classList.remove("active");
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function loadImpassableMaskFromFile(file) {
   if (!state.dem) { status.innerHTML = `<span style="color:#ff6b6b">${t("status.load_dem_first")}</span>`; return; }
   const meta = document.getElementById("imp-meta");
@@ -2641,6 +2911,7 @@ function clearImpassableMask() {
   state.impassableMeta = null;
   state.corridorCells = null; state.corridorBase = null; state.corridorRamp = null;
   state.corridorSet = null;
+  state.osmWaterGeom = null; // forget the cached OSM water geometry too
   const inp = document.getElementById("impassable-file");
   if (inp) inp.value = "";
   updateImpassableMeta();
