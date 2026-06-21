@@ -1245,6 +1245,11 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v21</strong> — 2026-06-21<br/>
+              Fix: "Load FABDEM for current viewport" crashed with "TypeError: t is not a
+              function" — the tile-mosaic loop variable shadowed the i18n t() function after
+              status strings were migrated to it. Renamed the loop variable; the button works
+              again.</p>
               <p><strong>v20</strong> — 2026-06-20<br/>
               Bridge follow-ups. Deck passes/density now show up: a bridge portal jumps
               abutment→abutment, so deck cells previously rendered no passes even when the bridge

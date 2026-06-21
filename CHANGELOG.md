@@ -9,6 +9,17 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v21 — 2026-06-21
+
+### Fixes
+
+- **"Load FABDEM for current viewport" crashed** with `TypeError: t is not a
+  function`. The tile-mosaic loop variable (`const t = opened[i]`, a tile)
+  shadowed the i18n `t()` function, and the v19/v20 status-string migration
+  added a `t("status.fabdem_mosaic", …)` call inside that loop — so it called
+  the tile object instead of translating. Renamed the loop variable to `tile`
+  (both tile loops in `loadFabdemForView`). App-only; engine/backend unchanged.
+
 ## v20 — 2026-06-20
 
 ### Fixes & improvements

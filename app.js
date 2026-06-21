@@ -1475,13 +1475,13 @@ async function loadFabdemForView() {
     // strips fall outside FABDEM coverage. We log and skip.
     const opened = [];
     for (let i = 0; i < tileSpecs.length; i++) {
-      const t = tileSpecs[i];
+      const tile = tileSpecs[i];
       try {
-        const tiff = await GeoTIFF.fromUrl(t.url);
+        const tiff = await GeoTIFF.fromUrl(tile.url);
         const image = await tiff.getImage();
-        opened.push({ ...t, image });
+        opened.push({ ...tile, image });
       } catch (e) {
-        console.info(`[fabdem] skipping ${t.url}: ${e.message}`);
+        console.info(`[fabdem] skipping ${tile.url}: ${e.message}`);
       }
       progressBar.style.width = `${((i + 1) / tileSpecs.length * 30).toFixed(1)}%`;
     }
@@ -1503,11 +1503,11 @@ async function loadFabdemForView() {
     // Range requests — that's where the bandwidth saving comes from.
     let placed = 0; // tiles successfully read into the mosaic
     for (let i = 0; i < opened.length; i++) {
-      const t = opened[i];
-      const tileSouth = t.lat;
-      const tileNorth = t.lat + FABDEM_TILE_DEG;
-      const tileWest  = t.lon;
-      const tileEast  = t.lon + FABDEM_TILE_DEG;
+      const tile = opened[i];
+      const tileSouth = tile.lat;
+      const tileNorth = tile.lat + FABDEM_TILE_DEG;
+      const tileWest  = tile.lon;
+      const tileEast  = tile.lon + FABDEM_TILE_DEG;
 
       // Snap the intersection to the same arcsec grid as the mosaic so
       // pixel offsets line up exactly.
@@ -1521,7 +1521,7 @@ async function loadFabdemForView() {
       // skip just that tile instead of letting the whole mosaic abort.
       try {
       // Per-tile nodata sentinel — FABDEM uses GDAL_NODATA, varies by tile.
-      const nodataRaw = t.image.fileDirectory.getValue("GDAL_NODATA");
+      const nodataRaw = tile.image.fileDirectory.getValue("GDAL_NODATA");
       const nodata = nodataRaw ? parseFloat(nodataRaw) : null;
 
       // Convert the geographic intersection to a pixel window. NB:
@@ -1532,15 +1532,15 @@ async function loadFabdemForView() {
       // We compute the pixel window ourselves from the source's origin
       // and resolution so geotiff.js issues Range requests for just the
       // strips overlapping the viewport.
-      const [oX, oY] = t.image.getOrigin();
-      const [rX, rY] = t.image.getResolution(); // rX > 0 east, rY < 0 down
+      const [oX, oY] = tile.image.getOrigin();
+      const [rX, rY] = tile.image.getResolution(); // rX > 0 east, rY < 0 down
       const wnd = [
         Math.round((interWest  - oX) / rX),
         Math.round((interNorth - oY) / rY),
         Math.round((interEast  - oX) / rX),
         Math.round((interSouth - oY) / rY),
       ];
-      const raster = await t.image.readRasters({
+      const raster = await tile.image.readRasters({
         window: wnd,
         interleave: true,
       });
@@ -1565,7 +1565,7 @@ async function loadFabdemForView() {
       }
       placed++;
       } catch (err) {
-        console.warn(`[fabdem] tile ${fabdemTileName(t.lat, t.lon)} read failed — skipping:`, err);
+        console.warn(`[fabdem] tile ${fabdemTileName(tile.lat, tile.lon)} read failed — skipping:`, err);
       }
       progressBar.style.width = `${(30 + (i + 1) / opened.length * 70).toFixed(1)}%`;
       status.textContent = t("status.fabdem_mosaic", i + 1, opened.length);

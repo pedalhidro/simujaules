@@ -177,7 +177,13 @@
 //              Overpass. (4) 1c/1d each get an "apply to compute" toggle to
 //              enable/disable their effect without clearing the data. Bumped so
 //              the updated app.js installs.
-const VERSION  = "v20";
+//   v20 → v21: Fix: "Load FABDEM for current viewport" threw "TypeError: t is
+//              not a function". The tile-mosaic loop's variable (const t =
+//              opened[i]) shadowed the i18n t() function, and the v19/v20 status
+//              i18n migration added a t("status.fabdem_mosaic") call inside that
+//              loop — so it invoked the tile object. Renamed the loop var to
+//              `tile` (both tile loops). App-only patch; engine/backend unchanged.
+const VERSION  = "v21";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
