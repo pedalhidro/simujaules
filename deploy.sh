@@ -2,8 +2,26 @@
 # Deploy the static site to gs://telhas/simujoules (served at
 # https://telhas.pedalhidrografi.co/simujoules/).
 #
-# Requires: gsutil (or `gcloud storage`) authenticated against a project
-# that has write access to the pedal-hidrografico bucket.
+# Requires: the Google Cloud SDK authenticated against a project with write
+# access to the gs://telhas bucket. Uses `gcloud storage`, NOT `gsutil` — the
+# bundled gsutil crashes with "module 'sys' has no attribute 'maxint'" on some
+# SDK/Python installs and silently half-uploads (a stale, inconsistent bucket).
+#
+# CDN: telhas.pedalhidrografi.co is fronted by CLOUDFLARE (origin = the GCS
+# bucket directly), NOT Google Cloud CDN — so cache invalidation is a Cloudflare
+# purge, not a url-map invalidation. Set these to enable it (skipped if unset):
+#   export CF_API_TOKEN=...   # token with the Zone › Cache Purge permission
+#   export CF_ZONE_ID=...     # zone id for pedalhidrografi.co
+# Find the zone id in the Cloudflare dashboard (Overview, API box, right column)
+# or:
+#   curl -s -H "Authorization: Bearer $CF_API_TOKEN" \
+#     "https://api.cloudflare.com/client/v4/zones?name=pedalhidrografi.co" \
+#     | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"][0]["id"])'
+#
+# Heads-up: Cloudflare can OVERRIDE origin Cache-Control via a zone "Browser
+# Cache TTL". If the live sw.js doesn't return `Cache-Control: no-cache`, add a
+# Cloudflare Cache Rule that bypasses cache for URI path ending in /sw.js (and
+# set Browser Cache TTL to "Respect Existing Headers"), or SW updates stall.
 #
 # Usage: ./deploy.sh
 
@@ -11,15 +29,6 @@ set -euo pipefail
 
 BUCKET="gs://telhas/simujoules"
 PUBLIC_URL="https://telhas.pedalhidrografi.co/simujoules/"
-
-# Cloud CDN invalidation. Required so users see the new build instead of
-# whatever the edge has cached. Set URL_MAP to your Cloud CDN url-map name —
-# discover it with:  gcloud compute url-maps list
-# Override per-run via env var:  URL_MAP=my-url-map ./deploy.sh
-URL_MAP="${URL_MAP:-tiles-map}"
-# Path inside the URL map to invalidate. Leave the * — the simujoules
-# subtree is exactly what we just deployed.
-INVALIDATE_PATH="/simujoules/*"
 
 cd "$(dirname "$0")"
 
@@ -70,128 +79,102 @@ cp icons/icon-maskable-192.png  "$STAGE/icons/"
 cp icons/icon-maskable-512.png  "$STAGE/icons/"
 cp icons/apple-touch-icon.png   "$STAGE/icons/"
 
-if ! command -v gsutil >/dev/null 2>&1; then
-  echo "gsutil not on PATH. Install via the Google Cloud SDK." >&2
+if ! command -v gcloud >/dev/null 2>&1; then
+  echo "gcloud not on PATH. Install the Google Cloud SDK." >&2
   exit 1
 fi
 
-# 3. Upload Flags:
-#    -m  parallelise.
-#    -r  recurse into subdirectories (dem/, icons/, vocab/).
-#    -d  delete files in the bucket that aren't in the staging dir, so
-#        renames don't leave orphans.
-#    -c  CRC32C-based change detection. Without it, rsync compares size
-#        + mtime, but the staging dir has fresh mtimes on every run so
-#        every file looks "newer" and gets re-uploaded. With -c, only
-#        files whose contents actually changed are uploaded.
-#    Capture stdout so we can tell whether anything moved (used below to
-#    decide whether to invalidate CDN — invalidation isn't free).
+# 3. Upload with `gcloud storage rsync`:
+#    -r                                      recurse into dem/, icons/, vocab/.
+#    --delete-unmatched-destination-objects  delete bucket objects not in the
+#                                            staging dir (scoped to the
+#                                            simujoules/ prefix) so renames
+#                                            don't leave orphans.
+#    --checksums-only                        compare by CRC32C, not mtime — the
+#                                            staging dir gets fresh mtimes every
+#                                            run, so without this every file
+#                                            looks changed and re-uploads.
 echo ">> Uploading to $BUCKET …"
-gsutil -m rsync -r -d -c "$STAGE" "$BUCKET/" 2>&1 | tee "$RSYNC_LOG"
-# rsync prints "Copying ..." for each upload and "Removing ..." for each
-# delete. If neither appears, nothing actually changed and we can skip
-# the metadata + invalidation churn.
-CHANGED=0
-if grep -qE '^(Copying|Removing) ' "$RSYNC_LOG"; then
-  CHANGED=1
-fi
+gcloud storage rsync -r --checksums-only --delete-unmatched-destination-objects \
+  "$STAGE" "$BUCKET/" 2>&1 | tee "$RSYNC_LOG"
 
-# 4. Set headers. HTML gets a short cache so deploys propagate quickly,
-#    JS gets an hour. Skip when nothing changed — the headers persist
-#    from the previous deploy.
-if [[ "$CHANGED" -eq 1 ]]; then
-  echo ">> Setting headers…"
-  gsutil -m setmeta \
-    -h "Cache-Control: public, max-age=3600" \
-    "$BUCKET/app.js" \
-    "$BUCKET/energy-worker.js" \
-    "$BUCKET/graph-engine.js"
+# 4. Set headers (metadata-only — cheap, so run every deploy). HTML gets a short
+#    cache so deploys propagate quickly; JS an hour; the service worker no-cache
+#    so browsers revalidate it every navigation and pick up updates. NB: a
+#    Cloudflare "Browser Cache TTL" can override these (see the header note).
+echo ">> Setting headers…"
+gcloud storage objects update \
+  "$BUCKET/app.js" "$BUCKET/energy-worker.js" "$BUCKET/graph-engine.js" \
+  --cache-control="public, max-age=3600"
 
-  # The vocab is consumed by RDF tools that content-negotiate; tag it as
-  # application/ld+json (gsutil otherwise infers application/json from the
-  # extension table). Long-lived cache because the vocab churns rarely.
-  gsutil setmeta \
-    -h "Content-Type: application/ld+json" \
-    -h "Cache-Control: public, max-age=86400" \
-    "$BUCKET/vocab/simujoules.jsonld"
+# The vocab is consumed by RDF tools that content-negotiate; tag it as
+# application/ld+json. Long-lived cache because the vocab churns rarely.
+gcloud storage objects update "$BUCKET/vocab/simujoules.jsonld" \
+  --content-type="application/ld+json" --cache-control="public, max-age=86400"
 
-  # SEO descriptors: explicit content types (gsutil guesses .txt right but
-  # .md becomes octet-stream without this) + modest caches.
-  gsutil setmeta \
-    -h "Content-Type: text/plain; charset=utf-8" \
-    -h "Cache-Control: public, max-age=3600" \
-    "$BUCKET/llms.txt"
-  gsutil setmeta \
-    -h "Content-Type: application/xml" \
-    -h "Cache-Control: public, max-age=86400" \
-    "$BUCKET/sitemap.xml"
-  gsutil setmeta \
-    -h "Content-Type: text/markdown; charset=utf-8" \
-    -h "Cache-Control: public, max-age=3600" \
-    "$BUCKET/CHANGELOG.md"
+# SEO descriptors: explicit content types (.md would otherwise be octet-stream)
+# + modest caches.
+gcloud storage objects update "$BUCKET/llms.txt" \
+  --content-type="text/plain; charset=utf-8" --cache-control="public, max-age=3600"
+gcloud storage objects update "$BUCKET/sitemap.xml" \
+  --content-type="application/xml" --cache-control="public, max-age=86400"
+gcloud storage objects update "$BUCKET/CHANGELOG.md" \
+  --content-type="text/markdown; charset=utf-8" --cache-control="public, max-age=3600"
 
-  # PWA manifest: dedicated MIME type (browsers tolerate application/json
-  # but the spec wants this one). Short cache because adding/removing icons
-  # should propagate quickly.
-  gsutil setmeta \
-    -h "Content-Type: application/manifest+json" \
-    -h "Cache-Control: public, max-age=3600" \
-    "$BUCKET/manifest.webmanifest"
+# PWA manifest: dedicated MIME type. Short cache so icon add/remove propagates.
+gcloud storage objects update "$BUCKET/manifest.webmanifest" \
+  --content-type="application/manifest+json" --cache-control="public, max-age=3600"
 
-  # Service worker: must NOT be aggressively cached — browsers check this
-  # file on every navigation to detect updates. With long caching, deploys
-  # would take hours to propagate to existing installs. no-cache forces a
-  # revalidation each time (it's tiny).
-  gsutil setmeta \
-    -h "Content-Type: application/javascript" \
-    -h "Cache-Control: no-cache" \
-    "$BUCKET/sw.js"
+# Service worker: must NOT be aggressively cached — browsers check this file on
+# every navigation to detect updates. no-cache forces a revalidation each time.
+gcloud storage objects update "$BUCKET/sw.js" \
+  --content-type="application/javascript" --cache-control="no-cache"
 
-  # Icons: long cache, content-hashed by their path so we never overwrite
-  # in place (rename + bump in manifest if you ever redesign).
-  gsutil -m setmeta \
-    -h "Cache-Control: public, max-age=2592000" \
-    "$BUCKET/icons/icon.svg" \
-    "$BUCKET/icons/icon-192.png" \
-    "$BUCKET/icons/icon-512.png" \
-    "$BUCKET/icons/icon-maskable-192.png" \
-    "$BUCKET/icons/icon-maskable-512.png" \
-    "$BUCKET/icons/apple-touch-icon.png"
+# Icons: long cache (rename + bump in manifest if you ever redesign).
+gcloud storage objects update \
+  "$BUCKET/icons/icon.svg" "$BUCKET/icons/icon-192.png" "$BUCKET/icons/icon-512.png" \
+  "$BUCKET/icons/icon-maskable-192.png" "$BUCKET/icons/icon-maskable-512.png" \
+  "$BUCKET/icons/apple-touch-icon.png" \
+  --cache-control="public, max-age=2592000"
 
-  gsutil setmeta \
-    -h "Cache-Control: public, max-age=300" \
-    "$BUCKET/index.html"
-fi
+gcloud storage objects update "$BUCKET/index.html" \
+  --cache-control="public, max-age=300"
 
-# 5. Invalidate Cloud CDN. Without this the edge keeps serving the old
-#    build for as long as its TTL allows. The invalidation runs --async
-#    (returns immediately, propagates over a few minutes); drop --async
-#    if you'd rather block until it finishes. Skipped when nothing
-#    changed — invalidation requests count toward GCP quota.
-if [[ "$CHANGED" -eq 0 ]]; then
-  echo
-  echo ">> No files changed — skipping header set and CDN invalidation."
-  echo "   Live at $PUBLIC_URL"
-  exit 0
-fi
-
-if command -v gcloud >/dev/null 2>&1; then
-  echo ">> Invalidating Cloud CDN ($URL_MAP, $INVALIDATE_PATH)…"
-  if ! gcloud compute url-maps invalidate-cdn-cache "$URL_MAP" \
-        --path "$INVALIDATE_PATH" --async 2>"$CDN_ERR"; then
+# 5. Purge Cloudflare's cache for the deployed URLs (Cloudflare fronts the site,
+#    so this is a CF cache purge — there is no Google Cloud CDN url-map). Purges
+#    the EXACT URLs just staged (works on every CF plan; prefix purge is
+#    Enterprise-only). The list is derived from the staging dir, so it stays in
+#    sync automatically and never exceeds the 30-URL per-request limit here.
+#    Skipped — with a notice — when CF_API_TOKEN / CF_ZONE_ID aren't set.
+if [[ -n "${CF_API_TOKEN:-}" && -n "${CF_ZONE_ID:-}" ]]; then
+  echo ">> Purging Cloudflare cache…"
+  # "" → the bare directory URL (serves index.html); then every staged file.
+  PURGE_JSON=""
+  for rel in "" $(cd "$STAGE" && find . -type f | sed 's|^\./||'); do
+    PURGE_JSON+="\"${PUBLIC_URL}${rel}\","
+  done
+  PURGE_JSON="[${PURGE_JSON%,}]"
+  if ! curl -fsS -X POST \
+        "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/purge_cache" \
+        -H "Authorization: Bearer ${CF_API_TOKEN}" \
+        -H "Content-Type: application/json" \
+        --data "{\"files\":${PURGE_JSON}}" >"$CDN_ERR" 2>&1; then
     echo
-    echo "WARNING: CDN invalidation failed. Output:"
+    echo "WARNING: Cloudflare purge failed. Output:"
     cat "$CDN_ERR"
     echo
-    echo "Override the URL map name with:  URL_MAP=<name> ./deploy.sh"
-    echo "List candidates:                 gcloud compute url-maps list"
+    echo "Check the token has Zone › Cache Purge on pedalhidrografi.co and that"
+    echo "CF_ZONE_ID is correct (see the header of this script for how to find it)."
+  else
+    echo "   Cloudflare cache purged."
   fi
 else
-  echo ">> gcloud not on PATH — skipping CDN invalidation."
-  echo "   Run manually:  gcloud compute url-maps invalidate-cdn-cache $URL_MAP --path '$INVALIDATE_PATH'"
+  echo ">> CF_API_TOKEN / CF_ZONE_ID not set — skipping Cloudflare purge."
+  echo "   sw.js is no-cache so it self-revalidates and pulls the new build, but"
+  echo "   cached HTML/JS at the edge persists until its TTL. Export the two vars"
+  echo "   (see this script's header) to purge automatically on each deploy."
 fi
 
 echo
 echo ">> Done."
 echo "   Live at $PUBLIC_URL"
-echo "   (CDN invalidation is async; edge propagation typically <5 min.)"
