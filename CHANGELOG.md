@@ -9,6 +9,40 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v24 — 2026-06-21
+
+### Fixes
+
+- **Graph mode silently suppressed the constrained-vs-unconstrained compare.**
+  "Compute on network graph (follow the vectors)" wins the run dispatch over the
+  raster "Constrain to network" / "Compare with unconstrained" toggles, so with
+  graph mode on — and it's persisted in localStorage, so it can be on from a
+  prior session — the compare never ran and its "Displayed scenario" dropdown
+  (constrained / unconstrained / difference) never appeared. Graph mode now
+  **greys out and disables** those two toggles (with an explanatory tooltip)
+  while it's on, both on toggle and on load, so the precedence is visible.
+
+## v23 — 2026-06-21
+
+### Features
+
+- **OSM `ele` on bridge/tunnel decks (group 1d).** "Pull bridges & tunnels from
+  OSM" now also fetches node `ele` tags and uses the mapped deck elevation for the
+  raster **portal** endpoint heights, instead of guessing from the bare-earth DEM
+  at the abutments. Per-abutment: the way-end node's `ele` if mapped, else a
+  way-level `ele`, else the nearest mapped node from that end. Unmapped ends fall
+  back to the DEM (NaN sentinel), so a pull **without** `ele` is byte-identical to
+  v22. The mapped elevations are persisted in the bundle (`bridges.geojson`).
+
+### Internal
+
+- Portal endpoint heights (`hu`/`hv`) are threaded through the worker pool and the
+  native backend Blob (now 32 B/portal: i32 u, i32 v, f64 lenM, f64 hu, f64 hv).
+  `energy-worker.js buildPortalAdj` and `backend/src/main.rs build_portals` apply
+  the identical NaN→DEM fallback and stay bit-parity (`test-backend.mjs` `+portals`
+  cases now mix NaN and explicit `ele`). Graph mode ("follow the vectors") is
+  unchanged (still DEM-based). A* top-N / maximise still ignore portals.
+
 ## v22 — 2026-06-21
 
 ### Features

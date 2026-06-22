@@ -156,6 +156,7 @@ const STRINGS = {
   "net.osm":             { pt: "Puxar ruas do OSM (highway=*)", en: "Pull streets from OSM (highway=*)" },
   "help.p.network_osm":  { pt: "Consulta o Overpass sobre a vista atual ∩ extensão do DEM. Áreas grandes podem demorar ou estourar limites do Overpass — aproxime o zoom primeiro.", en: "Queries Overpass over the current map view ∩ DEM extent. Large areas can take a while or hit Overpass limits — zoom in first." },
   "net.compare":         { pt: "Comparar com cenário sem rede", en: "Compare with unconstrained" },
+  "net.graph_overrides": { pt: "No modo grafo o cálculo já é sobre a rede — \"restringir\"/\"comparar\" (e o cenário exibido) não se aplicam.", en: "In graph mode the compute is already on the network — \"constrain\"/\"compare\" (and the displayed-scenario picker) don't apply." },
   "layer.energy_source": { pt: "Cenário exibido (energia e passagens)", en: "Displayed scenario (energy & passes)" },
   "esrc.constrained":    { pt: "restrito à rede", en: "network-constrained" },
   "esrc.unconstrained":  { pt: "sem restrição", en: "unconstrained" },
@@ -476,6 +477,7 @@ const PERSIST_IDS = [
 // activeColormap assignment + applyColormapToLegend() call below instead.
 const PERSIST_REFIRE = [
   "mode", "want-density", "want-topn", "maximize", "use-backend", "basemap-select",
+  "vec-graph-mode",
 ];
 
 function savePersistedParams() {
@@ -851,6 +853,12 @@ document.addEventListener("DOMContentLoaded", () => {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", estimateRunTime);
   }
+  // Graph mode supersedes the raster constrain/compare toggles in the run
+  // dispatch — grey them out when it's on so the precedence is visible. Fires
+  // on toggle AND on load (vec-graph-mode is in PERSIST_REFIRE → synthetic
+  // change after restore). See syncGraphModeUI.
+  document.getElementById("vec-graph-mode")?.addEventListener("change", syncGraphModeUI);
+  syncGraphModeUI();
   // Backend URL/toggle: refresh the cached /health core count (used by the
   // estimate's backend-parallelism model), then re-estimate.
   for (const id of ["use-backend", "backend-url"]) {
@@ -2409,7 +2417,9 @@ async function loadOsmBridges() {
     const bbox = `${south.toFixed(6)},${west.toFixed(6)},${north.toFixed(6)},${east.toFixed(6)}`;
     const parts = [`way["bridge"]["bridge"!="no"]["highway"](${bbox});`];
     if (withTunnels) parts.push(`way["tunnel"="yes"]["highway"](${bbox});`);
-    const query = `[out:json][timeout:90];(${parts.join("")});out geom;`;
+    // Pull the ways' geometry AND any `ele` tags on their nodes (mapped deck
+    // elevations): union → set .bw → emit geometry, then its nodes carrying ele.
+    const query = `[out:json][timeout:90];(${parts.join("")})->.bw;.bw out geom;node(w.bw)["ele"];out body;`;
     const resp = await fetch(OVERPASS_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -2419,15 +2429,35 @@ async function loadOsmBridges() {
     progressBar.style.width = "60%";
     status.textContent = "Parsing OSM response…";
     const json = await resp.json();
+    // Mapped node elevations (`ele`), keyed by rounded coord — matched to way
+    // vertices by position (same OSM nodes ⇒ identical coords).
+    const eleByCoord = new Map();
+    const ckey = (lat, lon) => `${lat.toFixed(7)},${lon.toFixed(7)}`;
+    for (const el of json.elements || []) {
+      if (el.type !== "node" || !el.tags || el.tags.ele == null) continue;
+      const e = parseFloat(el.tags.ele);
+      if (Number.isFinite(e)) eleByCoord.set(ckey(el.lat, el.lon), e);
+    }
     const ways = [];
     for (const el of json.elements || []) {
       if (el.type !== "way" || !Array.isArray(el.geometry) || el.geometry.length < 2) continue;
       const tg = el.tags || {};
+      const g = el.geometry;
+      // Deck elevation at each abutment (way end): the end node's `ele` if
+      // mapped, else a way-level `ele`, else the nearest mapped node from that
+      // end; null ⇒ buildPortals falls back to the DEM at the abutment cell.
+      const vEle = g.map((p) => (eleByCoord.has(ckey(p.lat, p.lon)) ? eleByCoord.get(ckey(p.lat, p.lon)) : null));
+      const wayEle = Number.isFinite(parseFloat(tg.ele)) ? parseFloat(tg.ele) : null;
+      let firstTagged = null, lastTagged = null;
+      for (let i = 0; i < vEle.length; i++) { if (vEle[i] != null) { firstTagged = vEle[i]; break; } }
+      for (let i = vEle.length - 1; i >= 0; i--) { if (vEle[i] != null) { lastTagged = vEle[i]; break; } }
       ways.push({
-        latlngs: el.geometry.map((g) => [g.lat, g.lon]),
+        latlngs: g.map((p) => [p.lat, p.lon]),
         kind: tg.tunnel === "yes" ? "tunnel" : "bridge",
         layer: parseInt(tg.layer, 10) || 0,
         name: tg["bridge:name"] || tg.name || null,
+        eleA: vEle[0] ?? wayEle ?? firstTagged ?? null,
+        eleB: vEle[vEle.length - 1] ?? wayEle ?? lastTagged ?? null,
       });
     }
     if (!ways.length) throw new Error("Overpass returned no bridges/tunnels in this extent.");
@@ -2467,7 +2497,8 @@ function installBridgesFromWays(ways, sourceLabel) {
       prev = cur;
     }
     if (!(deckLenM > 0)) { skipped++; continue; }
-    bridges.push({ latlngs: pts, endA, endB, deckLenM, kind: w.kind, layer: w.layer, name: w.name });
+    bridges.push({ latlngs: pts, endA, endB, deckLenM, kind: w.kind, layer: w.layer, name: w.name,
+      eleA: Number.isFinite(w.eleA) ? w.eleA : null, eleB: Number.isFinite(w.eleB) ? w.eleB : null });
   }
   if (!bridges.length) {
     status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(sourceLabel)}: no usable bridges/tunnels on this DEM.</span>`;
@@ -2548,7 +2579,8 @@ function bridgesToFC(bridges) {
     type: "FeatureCollection",
     features: bridges.map((br) => ({
       type: "Feature",
-      properties: { kind: br.kind, layer: br.layer, name: br.name || null },
+      properties: { kind: br.kind, layer: br.layer, name: br.name || null,
+        eleA: br.eleA ?? null, eleB: br.eleB ?? null },
       geometry: { type: "LineString", coordinates: br.latlngs.map(([lat, lng]) => [lng, lat]) },
     })),
   };
@@ -3128,6 +3160,25 @@ function graphModeActive() {
   return !!document.getElementById("vec-graph-mode")?.checked
     && !!state.networkLines && state.networkLines.length > 0
     && !!state.dem && state.dem.isGeographic;
+}
+// Graph mode ("follow the vectors") is a SEPARATE engine that computes on the
+// network graph — it wins the run dispatch over the raster "constrain to
+// network" / "compare with unconstrained" toggles, which then silently no-op
+// (their displayed-scenario dropdown never appears). Grey those toggles out
+// while graph mode is checked so the precedence is visible (the checkbox is
+// persisted, so it can be on from a prior session). Keeps their .checked state.
+function syncGraphModeUI() {
+  const graph = !!document.getElementById("vec-graph-mode")?.checked;
+  for (const id of ["vec-constrain", "vec-compare"]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.disabled = graph;
+    const row = el.closest("label");
+    if (row) {
+      row.style.opacity = graph ? "0.45" : "";
+      row.title = graph ? t("net.graph_overrides") : "";
+    }
+  }
 }
 // Identity of everything the cached graph depends on — a change rebuilds it.
 function computeNetworkGraphToken() {
@@ -3882,6 +3933,8 @@ runBtn.addEventListener("click", async () => {
     portalU: portals ? portals.u : null,
     portalV: portals ? portals.v : null,
     portalLenM: portals ? portals.lenM : null,
+    portalHU: portals ? portals.hu : null,   // deck-end ele (NaN = use DEM)
+    portalHV: portals ? portals.hv : null,
   };
 
   // Shared tail for the density paths (pool and native backend): optional
@@ -4118,7 +4171,8 @@ runBtn.addEventListener("click", async () => {
         hasNetwork: useNetwork,
         maximize,
         // Bridge portal edges appended after the (optional) network mask, in
-        // order: portalU (i32×P), portalV (i32×P), portalLenM (f64×P).
+        // order: portalU (i32×P), portalV (i32×P), portalLenM (f64×P),
+        // portalHU (f64×P), portalHV (f64×P). HU/HV are deck-end ele (NaN=use DEM).
         nPortals: portals ? portals.n : 0,
       };
       const json = new TextEncoder().encode(JSON.stringify(params));
@@ -4130,7 +4184,7 @@ runBtn.addEventListener("click", async () => {
       const body = new Blob([
         head, json, gridHeight, gridMask,
         ...(useNetwork ? [state.networkMask] : []),
-        ...(portals ? [portals.u, portals.v, portals.lenM] : []),
+        ...(portals ? [portals.u, portals.v, portals.lenM, portals.hu, portals.hv] : []),
       ]);
       const resp = await fetch(`${baseUrl}/density`, { method: "POST", body });
       if (!resp.ok) throw new Error(`backend HTTP ${resp.status}`);
@@ -6271,8 +6325,15 @@ function buildPortals() {
   if (!brs || !brs.length || !bridgesEnabled()) return null; // 1d master toggle
   const n = brs.length;
   const u = new Int32Array(n), v = new Int32Array(n), lenM = new Float64Array(n);
-  for (let i = 0; i < n; i++) { u[i] = brs[i].endA; v[i] = brs[i].endB; lenM[i] = brs[i].deckLenM; }
-  return { u, v, lenM, n };
+  // Deck-END elevations from OSM `ele` (NaN = unmapped → the engine falls back to
+  // the DEM at the abutment cell). hu/hv pair with endA/endB.
+  const hu = new Float64Array(n), hv = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    u[i] = brs[i].endA; v[i] = brs[i].endB; lenM[i] = brs[i].deckLenM;
+    hu[i] = (brs[i].eleA != null) ? brs[i].eleA : NaN;
+    hv[i] = (brs[i].eleB != null) ? brs[i].eleB : NaN;
+  }
+  return { u, v, lenM, hu, hv, n };
 }
 
 // Grid cells a bridge's deck geometry passes through (Bresenham along its
@@ -7047,6 +7108,8 @@ function applyMetadataToUI(md, bin = {}) {
         kind: f.properties?.kind || "bridge",
         layer: f.properties?.layer || 0,
         name: f.properties?.name || null,
+        eleA: Number.isFinite(f.properties?.eleA) ? f.properties.eleA : null,
+        eleB: Number.isFinite(f.properties?.eleB) ? f.properties.eleB : null,
       }));
     if (ways.length) installBridgesFromWays(ways, "bundle");
   }

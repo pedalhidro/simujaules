@@ -202,7 +202,10 @@ fn portal_cost(len_m: f64, dh: f64, p: &Params) -> f64 {
     }
 }
 
-fn build_portals(pu: &[i32], pv: &[i32], pl: &[f64], height: &[f32], mask: &[u8], p: &Params) -> PortalAdj {
+// phu/phv: per-portal deck-END elevations (from OSM `ele`). NaN means "no mapped
+// ele" → fall back to the DEM height at the abutment cell. Must match the JS
+// buildPortalAdj fallback exactly for parity.
+fn build_portals(pu: &[i32], pv: &[i32], pl: &[f64], phu: &[f64], phv: &[f64], height: &[f32], mask: &[u8], p: &Params) -> PortalAdj {
     let mut adj: PortalAdj = HashMap::new();
     let n = mask.len() as i32;
     for i in 0..pu.len() {
@@ -214,8 +217,8 @@ fn build_portals(pu: &[i32], pv: &[i32], pl: &[f64], height: &[f32], mask: &[u8]
         if mask[uu] == 0 || mask[vv] == 0 {
             continue;
         }
-        let hu = height[uu] as f64;
-        let hv = height[vv] as f64;
+        let hu = if phu[i].is_nan() { height[uu] as f64 } else { phu[i] };
+        let hv = if phv[i].is_nan() { height[vv] as f64 } else { phv[i] };
         let cost_uv = portal_cost(l, hv - hu, p);
         let cost_vu = portal_cost(l, hu - hv, p);
         adj.entry(u as u32).or_default().push((v as u32, cost_uv, cost_vu));
@@ -647,8 +650,9 @@ fn handle_density(mut req: tiny_http::Request) {
         return respond_json(req, 400, r#"{"error":"empty grid (h or w is 0)"}"#);
     }
     let masks = if params.has_network { 2 } else { 1 };
-    // Bridge portals append portalU (i32×P) + portalV (i32×P) + portalLenM (f64×P).
-    let portal_bytes = params.n_portals * 16;
+    // Bridge portals append portalU (i32×P) + portalV (i32×P) + portalLenM (f64×P)
+    // + portalHU (f64×P) + portalHV (f64×P) = 32 bytes/portal.
+    let portal_bytes = params.n_portals * 32;
     let expected = 4 + json_len + 4 * n + masks * n + portal_bytes;
     if body.len() != expected {
         return respond_json(
@@ -690,13 +694,20 @@ fn handle_density(mut req: tiny_http::Request) {
         off += 4 * pc;
         let mut pl = vec![0f64; pc];
         bytemuck::cast_slice_mut::<f64, u8>(&mut pl).copy_from_slice(&body[off..off + 8 * pc]);
+        off += 8 * pc;
+        let mut phu = vec![0f64; pc];
+        bytemuck::cast_slice_mut::<f64, u8>(&mut phu).copy_from_slice(&body[off..off + 8 * pc]);
+        off += 8 * pc;
+        let mut phv = vec![0f64; pc];
+        bytemuck::cast_slice_mut::<f64, u8>(&mut phv).copy_from_slice(&body[off..off + 8 * pc]);
+        off += 8 * pc;
         // Excluded from maximize mode (mirrors energy-worker.js): a long deck
         // cost would invert against the single-grid-edge maxEdgeCost to a
         // clamped-0 free max-cost shortcut. Still read the bytes to advance off.
         if params.maximize {
             HashMap::new()
         } else {
-            build_portals(&pu, &pv, &pl, &height, &eff_mask, &params)
+            build_portals(&pu, &pv, &pl, &phu, &phv, &height, &eff_mask, &params)
         }
     } else {
         HashMap::new()

@@ -54,6 +54,11 @@ let allOk = true;
 const portalU    = new Int32Array([ 10 * W + 10,  50 * W + 200, 200 * W + 20 ]);
 const portalV    = new Int32Array([ 240 * W + 240, 60 * W + 60,  30 * W + 220 ]);
 const portalLenM = new Float64Array([ 1500, 800, 2000 ]);
+// Deck-end elevations (OSM `ele`): NaN ⇒ engine uses the DEM at the abutment
+// cell; finite ⇒ the mapped deck height. Mix both so the +portals parity cases
+// cover the NaN-fallback AND the explicit-ele paths in one sweep.
+const portalHU = new Float64Array([ NaN, 730, 712 ]);
+const portalHV = new Float64Array([ NaN, 705, 718 ]);
 
 const cases = [];
 for (const portals of [false, true]) {
@@ -80,7 +85,7 @@ for (const { dmode, eMax, eMaxMode, portals = false, maximize = false } of cases
     const head = new Uint8Array(4);
     new DataView(head.buffer).setUint32(0, json.length, true);
     const parts = [head, json, height, mask];
-    if (portals) parts.push(portalU, portalV, portalLenM);
+    if (portals) parts.push(portalU, portalV, portalLenM, portalHU, portalHV);
     const resp = await fetch(`http://${ADDR}/density`, { method: "POST", body: new Blob(parts) });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
     const buf = await resp.arrayBuffer();
@@ -98,6 +103,8 @@ for (const { dmode, eMax, eMaxMode, portals = false, maximize = false } of cases
       portalU: portals ? portalU : null,
       portalV: portals ? portalV : null,
       portalLenM: portals ? portalLenM : null,
+      portalHU: portals ? portalHU : null,
+      portalHV: portals ? portalHV : null,
     });
 
     let maxD = 0, maxE = 0, bad = 0;

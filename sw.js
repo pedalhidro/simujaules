@@ -194,7 +194,24 @@
 //              Reuses the uploaded-mask pipeline (Invert, corridors, overlay,
 //              bundle). App-only; engine/backend unchanged. New test:
 //              test-water-raster.mjs. Bumped so the updated app.js installs.
-const VERSION  = "v22";
+//   v22 → v23: OSM `ele` on bridge/tunnel decks. The 1d "Pull bridges & tunnels
+//              from OSM" pull now also fetches node `ele` tags and uses the
+//              mapped deck elevation for the raster PORTAL endpoint heights
+//              (per-abutment, with way-`ele` / nearest-node fallback). Unmapped
+//              ends fall back to the bare-earth DEM (NaN sentinel), so a pull
+//              without ele is byte-identical to v22. Threaded through the worker
+//              pool + native backend Blob (now 32 B/portal) and persisted in the
+//              bundle (bridges.geojson). energy-worker.js + backend/src/main.rs
+//              kept bit-parity (test-backend.mjs +ele cases). Graph mode stays
+//              DEM-based for now.
+//   v23 → v24: UX fix — "Compute on network graph (follow the vectors)" wins the
+//              run dispatch over the raster "Constrain to network" / "Compare
+//              with unconstrained" toggles, so with graph mode on (it's persisted,
+//              so it can be on silently from a prior session) the compare never
+//              ran and its "Displayed scenario" dropdown never appeared. Graph
+//              mode now greys out + disables those two toggles (with a tooltip)
+//              while it's on, on toggle AND on load. App-only; no engine change.
+const VERSION  = "v24";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

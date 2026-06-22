@@ -96,7 +96,11 @@ function heapRemoveTop(h) {
 // reverse, so a `reverse` search uses bwd — mirroring the grid dh sign flip),
 // or null when there are no portals. `mask` is the EFFECTIVE mask (DEM ∧
 // network): a portal whose endpoint is masked out is dropped.
-function buildPortalAdj(portalU, portalV, portalLenM, height, mask, alpha, beta, eta) {
+// portalHU/portalHV: per-portal deck-END elevations (from OSM `ele`). NaN means
+// "no mapped ele" → fall back to the DEM height at the abutment cell, so a pull
+// without ele is byte-identical to before. Both engines (this + Rust build_portals)
+// must apply the SAME fallback for parity.
+function buildPortalAdj(portalU, portalV, portalLenM, portalHU, portalHV, height, mask, alpha, beta, eta) {
   if (!portalU || !portalU.length) return null;
   const cost = (lenM, dh) => {
     if (dh >= 0) return alpha * lenM + beta * dh;
@@ -113,7 +117,8 @@ function buildPortalAdj(portalU, portalV, portalLenM, height, mask, alpha, beta,
     const u = portalU[i], v = portalV[i], L = portalLenM[i];
     if (u < 0 || v < 0 || u === v) continue;
     if (!mask[u] || !mask[v]) continue; // endpoint not traversable (e.g. network-constrained off the bridge)
-    const hu = height[u], hv = height[v];
+    const hu = (portalHU && !Number.isNaN(portalHU[i])) ? portalHU[i] : height[u];
+    const hv = (portalHV && !Number.isNaN(portalHV[i])) ? portalHV[i] : height[v];
     const costUV = cost(L, hv - hu), costVU = cost(L, hu - hv);
     add(u, v, costUV, costVU);
     add(v, u, costVU, costUV);
@@ -1346,7 +1351,7 @@ self.onmessage = (ev) => {
   // grid edge, so a long deck cost would invert to a clamped-0 "free" max-cost
   // shortcut (degenerate). Mirror the backend (handle_density) and the A*/DP
   // exclusion. Bridges + "maximize energy" isn't a meaningful combination anyway.
-  const portalAdj = maximize ? null : buildPortalAdj(msg.portalU, msg.portalV, msg.portalLenM, height, effMask, alpha, beta, eta);
+  const portalAdj = maximize ? null : buildPortalAdj(msg.portalU, msg.portalV, msg.portalLenM, msg.portalHU, msg.portalHV, height, effMask, alpha, beta, eta);
 
   let energy;
   let passes = null;

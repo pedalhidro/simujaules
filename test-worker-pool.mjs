@@ -199,7 +199,11 @@ for (const dmode of ["from", "round"]) {
   const portalU = new Int32Array([40 * W + 60, 180 * W + 30]);
   const portalV = new Int32Array([220 * W + 230, 30 * W + 240]);
   const portalLenM = new Float64Array([1200, 1800]);
-  const pmsg = (over) => msg({ portalU, portalV, portalLenM, ...over });
+  // Mix NaN (→ DEM at the abutment cell) and mapped OSM `ele` so the pool≡single
+  // equivalence is checked on both the fallback and explicit-ele portal paths.
+  const portalHU = new Float64Array([NaN, 712]);
+  const portalHV = new Float64Array([NaN, 700]);
+  const pmsg = (over) => msg({ portalU, portalV, portalLenM, portalHU, portalHV, ...over });
   const single = run(pmsg({
     wantDensity: true, refPoints: refs, densityMode: dmode, mode: dmode, goalR: -1, goalC: -1,
   }));

@@ -1250,6 +1250,19 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v24</strong> — 2026-06-21<br/>
+              Fix: "Calcular sobre o grafo da rede (seguir os vetores)" takes precedence over the
+              raster "Restringir cálculo à rede" / "Comparar com cenário sem rede" toggles, so with
+              graph mode on (it's remembered between sessions) the comparison never ran and its
+              "Cenário exibido" dropdown never appeared. Graph mode now greys out and disables those
+              two toggles (with a tooltip) while it's on, so the precedence is visible.</p>
+              <p><strong>v23</strong> — 2026-06-21<br/>
+              OSM <code>ele</code> on bridge/tunnel decks (group 1d): "Pull bridges &amp; tunnels from
+              OSM" now also reads node <code>ele</code> tags and uses the mapped deck elevation for the
+              raster portal endpoint heights (per-abutment, with way-<code>ele</code> / nearest-node
+              fallback) instead of guessing from the bare-earth DEM. Unmapped ends fall back to the
+              DEM, so a pull without <code>ele</code> is identical to v22. Persisted in the bundle;
+              engine/backend kept bit-parity. Graph mode stays DEM-based.</p>
               <p><strong>v22</strong> — 2026-06-21<br/>
               New 1c source: "Pull water from OSM" builds the impassable mask straight from
               Overpass — water areas (natural=water / riverbank / reservoir, incl. multipolygon
