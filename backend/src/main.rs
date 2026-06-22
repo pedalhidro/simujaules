@@ -24,12 +24,22 @@
 // forward/backward Dijkstras, so few-refs round runs still use idle cores.
 //
 // Protocol (little-endian throughout — bytemuck casts assume an LE target):
-//   POST /density
+//   POST /density   (multi-reference density: one Dijkstra per ref point)
 //     request body:  [u32 json_len][json Params][f32 height × N][u8 mask × N]
 //                    [u8 network_mask × N  — only when has_network]
+//                    [bridge portals — only when n_portals > 0]
 //     response body: [u32 json_len][json {"elapsed_ms":…,"refs":…}]
 //                    [f64 passes × N][f32 energy × N]
+//   POST /single    (single-source energy field: from/to/round, energy+passes)
+//     request body:  same framing as /density, driven by Params.src +
+//                    Params.want_passes instead of ref_points
+//     response body: [u32 json_len][json {"elapsed_ms":…,"passes":bool}]
+//                    [f32 energy × N][f32 passes × N — only when want_passes]
 //   GET /health → {"ok":true,"version":…,"cores":…,"mem_budget_bytes":…}
+//
+// Both compute endpoints are ports of energy-worker.js (density() / the
+// from/to/round single-point path) — keep cost model, f32 storage, and
+// passes accumulation in sync; test-backend.mjs enforces bit-parity.
 //
 // Usage: cargo run --release [-- 127.0.0.1:8077]
 
@@ -57,10 +67,18 @@ struct Params {
     /// searches still run with e_max — a leg can never exceed the total).
     #[serde(default)]
     e_max_mode: String,
-    /// "from" | "to" | "round" — direction of each reference's Dijkstra.
+    /// "from" | "to" | "round" — direction of each reference's Dijkstra (also
+    /// the direction of the single-source search on /single).
     density_mode: String,
-    /// [[r, c], …] pixel coordinates of the reference points.
+    /// [[r, c], …] pixel coordinates of the reference points. Unused on /single.
+    #[serde(default)]
     ref_points: Vec<[i64; 2]>,
+    /// /single only: [r, c] pixel coordinates of the single source point.
+    #[serde(default)]
+    src: [i64; 2],
+    /// /single only: also return the per-cell passes count (subtree sizes).
+    #[serde(default)]
+    want_passes: bool,
     #[serde(default)]
     has_network: bool,
     #[serde(default)]
@@ -596,6 +614,70 @@ fn compute_density(g: &Grid, p: &Params, portals: &PortalAdj) -> (Vec<f64>, Vec<
     (density, energy)
 }
 
+/// Single-source energy field — port of energy-worker.js's from/to/round
+/// single-point path (the non-density branch). Returns the raw per-cell energy
+/// (NOT averaged like density) and, when `want_passes`, the per-cell passes
+/// count (subtree sizes). Maximize/top-N/path stay browser-only (the backend
+/// produces no routes), so this is energy + passes only. Round mode sums the
+/// forward + backward legs (masking over-budget sums in "total" mode) and
+/// filters passes to round-trip-feasible endpoints — exactly like the worker.
+fn compute_single(g: &Grid, p: &Params, portals: &PortalAdj) -> (Vec<f32>, Vec<f32>) {
+    let n = g.h * g.w;
+    let (sr, sc) = (p.src[0], p.src[1]);
+    // Off-grid seed → empty field (defensive; the app always sends a valid cell).
+    if sr < 0 || sr >= g.h as i64 || sc < 0 || sc >= g.w as i64 {
+        return (vec![f32::INFINITY; n], vec![0.0; n]);
+    }
+    let (sr, sc) = (sr as usize, sc as usize);
+    let round = p.density_mode == "round";
+    let reverse = p.density_mode == "to";
+    let total_cap = if round && p.e_max_mode == "total" && p.e_max > 0.0 { p.e_max } else { 0.0 };
+    // Maximize is excluded from single-source backend (the inverted field is a
+    // browser-only mode), so max_edge_cost is unused here.
+    let max_edge_cost = 0.0;
+
+    if round {
+        let mut s_f = Scratch::new(n);
+        let mut s_b = Scratch::new(n);
+        dijkstra_tree(g, sr, sc, p, false, max_edge_cost, portals, &mut s_f);
+        dijkstra_tree(g, sr, sc, p, true, max_edge_cost, portals, &mut s_b);
+        let mut energy = vec![f32::INFINITY; n];
+        let mut include = vec![0u8; n];
+        for i in 0..n {
+            let fe = s_f.e[i];
+            let be = s_b.e[i];
+            if fe.is_finite() && be.is_finite() {
+                // Compare the f64 sum against the cap BEFORE the f32 rounding,
+                // mirroring the JS worker (and the density round path).
+                let s = fe as f64 + be as f64;
+                if !(total_cap > 0.0 && s > total_cap) {
+                    energy[i] = s as f32;
+                    include[i] = 1;
+                }
+            }
+        }
+        let passes = if p.want_passes {
+            subtree_passes(&mut s_f, Some(&include));
+            subtree_passes(&mut s_b, Some(&include));
+            (0..n).map(|i| s_f.passes[i] + s_b.passes[i]).collect()
+        } else {
+            vec![0.0; n]
+        };
+        (energy, passes)
+    } else {
+        let mut s = Scratch::new(n);
+        dijkstra_tree(g, sr, sc, p, reverse, max_edge_cost, portals, &mut s);
+        let energy = s.e.clone();
+        let passes = if p.want_passes {
+            subtree_passes(&mut s, None);
+            s.passes.clone()
+        } else {
+            vec![0.0; n]
+        };
+        (energy, passes)
+    }
+}
+
 fn cors_headers() -> Vec<Header> {
     vec![
         Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap(),
@@ -613,41 +695,47 @@ fn respond_json(req: tiny_http::Request, status: u16, body: &str) {
     let _ = req.respond(res);
 }
 
-fn handle_density(mut req: tiny_http::Request) {
-    let t0 = Instant::now();
-    // Ceiling on the request body (covers the largest supported DEMs:
-    // ~6 bytes/cell × ~135 M cells ≈ 0.8 GB, so 2 GiB is generous). Without
-    // it, a bogus Content-Length pre-allocs an enormous Vec (abort on alloc
-    // failure) and read_to_end would stream unbounded data — a trivial DoS.
-    const MAX_BODY: u64 = 2 * 1024 * 1024 * 1024;
+// Ceiling on the request body (covers the largest supported DEMs:
+// ~6 bytes/cell × ~135 M cells ≈ 0.8 GB, so 2 GiB is generous). Without it, a
+// bogus Content-Length pre-allocs an enormous Vec (abort on alloc failure) and
+// read_to_end would stream unbounded data — a trivial DoS.
+const MAX_BODY: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Read + frame-parse a /density or /single body into (params, height,
+/// eff_mask, portals). The framing, masks, and portal layout are identical for
+/// both endpoints. On malformed input returns (http_status, json_error_body);
+/// the caller keeps `req` to send the response. `require_refs` rejects an empty
+/// ref_points list (/density needs them; /single uses `src` instead).
+fn parse_grid_request(
+    req: &mut tiny_http::Request,
+    require_refs: bool,
+) -> Result<(Params, Vec<f32>, Vec<u8>, PortalAdj), (u16, String)> {
     let declared = req.body_length().unwrap_or(0) as u64;
     if declared > MAX_BODY {
-        return respond_json(req, 413, r#"{"error":"body too large"}"#);
+        return Err((413, r#"{"error":"body too large"}"#.to_string()));
     }
     let mut body = Vec::with_capacity(declared.min(MAX_BODY) as usize);
     // Hard-cap the read so a client streaming more than it declared can't grow
     // the body unbounded. An over-long body truncates at MAX_BODY and then
     // fails the exact-length check below (→ 400).
     if req.as_reader().take(MAX_BODY).read_to_end(&mut body).is_err() {
-        return respond_json(req, 400, r#"{"error":"body read failed"}"#);
+        return Err((400, r#"{"error":"body read failed"}"#.to_string()));
     }
     if body.len() < 4 {
-        return respond_json(req, 400, r#"{"error":"truncated body"}"#);
+        return Err((400, r#"{"error":"truncated body"}"#.to_string()));
     }
     let json_len = u32::from_le_bytes(body[0..4].try_into().unwrap()) as usize;
     if body.len() < 4 + json_len {
-        return respond_json(req, 400, r#"{"error":"truncated json"}"#);
+        return Err((400, r#"{"error":"truncated json"}"#.to_string()));
     }
-    let params: Params = match serde_json::from_slice(&body[4..4 + json_len]) {
-        Ok(p) => p,
-        Err(e) => return respond_json(req, 400, &format!(r#"{{"error":"bad params: {}"}}"#, e)),
-    };
+    let params: Params = serde_json::from_slice(&body[4..4 + json_len])
+        .map_err(|e| (400, format!(r#"{{"error":"bad params: {}"}}"#, e)))?;
     let n = params.h * params.w;
     // An empty grid (h or w == 0) is meaningless and would make per_slice == 0
     // in compute_density → a divide-by-zero panic that, on this single-threaded
     // request loop, takes down the whole server. Reject it up front.
     if n == 0 {
-        return respond_json(req, 400, r#"{"error":"empty grid (h or w is 0)"}"#);
+        return Err((400, r#"{"error":"empty grid (h or w is 0)"}"#.to_string()));
     }
     let masks = if params.has_network { 2 } else { 1 };
     // Bridge portals append portalU (i32×P) + portalV (i32×P) + portalLenM (f64×P)
@@ -655,14 +743,10 @@ fn handle_density(mut req: tiny_http::Request) {
     let portal_bytes = params.n_portals * 32;
     let expected = 4 + json_len + 4 * n + masks * n + portal_bytes;
     if body.len() != expected {
-        return respond_json(
-            req,
-            400,
-            &format!(r#"{{"error":"body length {} != expected {}"}}"#, body.len(), expected),
-        );
+        return Err((400, format!(r#"{{"error":"body length {} != expected {}"}}"#, body.len(), expected)));
     }
-    if params.ref_points.is_empty() {
-        return respond_json(req, 400, r#"{"error":"no ref points"}"#);
+    if require_refs && params.ref_points.is_empty() {
+        return Err((400, r#"{"error":"no ref points"}"#.to_string()));
     }
 
     let mut off = 4 + json_len;
@@ -713,7 +797,16 @@ fn handle_density(mut req: tiny_http::Request) {
         HashMap::new()
     };
     let _ = off;
+    Ok((params, height, eff_mask, portals))
+}
 
+fn handle_density(mut req: tiny_http::Request) {
+    let t0 = Instant::now();
+    let (params, height, eff_mask, portals) = match parse_grid_request(&mut req, true) {
+        Ok(v) => v,
+        Err((code, msg)) => return respond_json(req, code, &msg),
+    };
+    let n = params.h * params.w;
     let grid = Grid {
         height: &height,
         mask: &eff_mask,
@@ -759,6 +852,63 @@ fn handle_density(mut req: tiny_http::Request) {
     let _ = req.respond(res);
 }
 
+// POST /single — single-source energy field (the non-density modes' fast path).
+// Same framed request as /density (it reuses parse_grid_request), but driven by
+// `src` + `want_passes` instead of `ref_points`. Response:
+//   [u32 json_len][json {"elapsed_ms":…,"passes":bool}]
+//   [f32 energy × N]            (always)
+//   [f32 passes × N]            (only when want_passes)
+// No JSON padding: the app slice-copies both arrays (cheap for a single search),
+// so the f32 views don't need alignment.
+fn handle_single(mut req: tiny_http::Request) {
+    let t0 = Instant::now();
+    let (params, height, eff_mask, portals) = match parse_grid_request(&mut req, false) {
+        Ok(v) => v,
+        Err((code, msg)) => return respond_json(req, code, &msg),
+    };
+    let n = params.h * params.w;
+    let grid = Grid {
+        height: &height,
+        mask: &eff_mask,
+        h: params.h,
+        w: params.w,
+        dx: params.dx,
+        dy: params.dy,
+    };
+    let (energy, passes) = compute_single(&grid, &params, &portals);
+
+    let meta = format!(
+        r#"{{"elapsed_ms":{:.1},"passes":{}}}"#,
+        t0.elapsed().as_secs_f64() * 1000.0,
+        params.want_passes
+    );
+    let mut out = Vec::with_capacity(4 + meta.len() + 4 * n + if params.want_passes { 4 * n } else { 0 });
+    out.extend_from_slice(&(meta.len() as u32).to_le_bytes());
+    out.extend_from_slice(meta.as_bytes());
+    out.extend_from_slice(bytemuck::cast_slice(&energy));
+    if params.want_passes {
+        out.extend_from_slice(bytemuck::cast_slice(&passes));
+    }
+
+    eprintln!(
+        "[single] {}×{} grid, src=({},{}), mode={}, passes={}, {:.0} ms",
+        params.w,
+        params.h,
+        params.src[0],
+        params.src[1],
+        params.density_mode,
+        params.want_passes,
+        t0.elapsed().as_secs_f64() * 1000.0
+    );
+
+    let mut res = Response::from_data(out);
+    for hd in cors_headers() {
+        res.add_header(hd);
+    }
+    res.add_header(Header::from_bytes("Content-Type", "application/octet-stream").unwrap());
+    let _ = req.respond(res);
+}
+
 fn main() {
     // Args: an optional bind address (first non-flag arg) and an optional
     // `--max-mem-gb N` that caps the per-request slice memory budget (it just
@@ -782,7 +932,7 @@ fn main() {
     });
     eprintln!(
         "simujoules-backend listening on http://{} ({} cores, density mem budget ≈ {:.1} GB). \
-         Enable \"Use native backend\" in the app's density panel to use it.",
+         Enable \"Use native backend\" in the app's parameters panel to use it.",
         addr,
         rayon::current_num_threads(),
         density_mem_budget_bytes() as f64 / 1e9,
@@ -816,6 +966,7 @@ fn main() {
                 );
             }
             (Method::Post, "/density") => handle_density(req),
+            (Method::Post, "/single") => handle_single(req),
             _ => respond_json(req, 404, r#"{"error":"not found"}"#),
         }
     }

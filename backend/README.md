@@ -1,16 +1,27 @@
 # simujoules-backend
 
-Optional native compute backend for the Simujoules density mode. **Off by
-default** — the app is fully functional without it (density runs use an
-in-browser worker pool). Enable it per-session with the *Use native backend*
-checkbox inside the density panel; the app falls back to the browser workers
-automatically if the server isn't reachable.
+Optional native compute backend for Simujoules. **Off by default** — the app
+is fully functional without it (compute runs use an in-browser worker pool).
+Enable it per-session with the *Use native backend* checkbox (a top-level
+compute option in the parameters panel); the app falls back to the browser
+workers automatically if the server isn't reachable.
 
-Why it exists: each reference point's Dijkstra is independent, so the density
-field parallelises across cores. Native code is ~2–4× faster per Dijkstra
-than the JS worker, and rayon uses *all* cores (the browser pool leaves one
-for the UI and caps itself by memory on very large DEMs). Expect roughly
-3–10× over the in-browser pool depending on DEM size and core count.
+It accelerates two kinds of run:
+
+- **Multi-reference density** (`POST /density`) — one Dijkstra per reference
+  point, parallelised across cores.
+- **Single-source energy field** (`POST /single`) — one Dijkstra (two for
+  round trip) from a single source, returning the raw energy field + optional
+  passes.
+
+Top-N routes, the destination path, and "maximize" stay browser-only — the
+backend produces no routes.
+
+Why it exists: each Dijkstra is independent, so density parallelises across
+cores. Native code is ~2–4× faster per Dijkstra than the JS worker, and rayon
+uses *all* cores (the browser pool leaves one for the UI and caps itself by
+memory on very large DEMs). Expect roughly 3–10× over the in-browser pool for
+density depending on DEM size and core count.
 
 Performance notes (measured on a 1 M-cell DEM, 10 cores):
 
@@ -34,7 +45,7 @@ cargo run --release            # binds 127.0.0.1:8077
 cargo run --release -- 0.0.0.0:9000   # custom bind address
 ```
 
-Then tick **Use native backend** in the app's density panel (the URL field
+Then tick **Use native backend** in the app's parameters panel (the URL field
 defaults to `http://127.0.0.1:8077`).
 
 ### Memory at scale
@@ -60,13 +71,17 @@ RAYON_NUM_THREADS=4 cargo run --release     # also bounds parallelism directly
 
 Little-endian binary framing, see `src/main.rs` header comment:
 
-- `POST /density` — `[u32 json_len][json params][f32 height×N][u8 mask×N][u8 network×N?]`
+- `POST /density` — `[u32 json_len][json params][f32 height×N][u8 mask×N][u8 network×N?][portals?]`
   → `[u32 json_len][json {elapsed_ms, refs}][f64 passes×N][f32 energy×N]`
-- `GET /health` — `{"ok":true,"version":…,"cores":…}`
+- `POST /single` — same request framing (driven by `src` + `want_passes`
+  instead of `ref_points`)
+  → `[u32 json_len][json {elapsed_ms, passes}][f32 energy×N][f32 passes×N?]`
+- `GET /health` — `{"ok":true,"version":…,"cores":…,"mem_budget_bytes":…}`
 
 The cost model and passes/density math are a port of `energy-worker.js`
-(`dijkstra()` with `wantPasses`); keep the two in sync. `test-backend.mjs`
-in this directory checks the server's output against the JS worker.
+(`dijkstra()` with `wantPasses`, and the from/to/round single-source branch);
+keep the two in sync. `test-backend.mjs` in this directory checks both
+endpoints against the JS worker.
 Energies match bit-for-bit (the f32/f64 round trips mirror the JS
 Float32Array exactly). Passes can differ from the JS worker only where two
 paths have EXACTLY equal f64 cost — the radix heap pops ties in a different

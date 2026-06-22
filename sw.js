@@ -211,7 +211,18 @@
 //              ran and its "Displayed scenario" dropdown never appeared. Graph
 //              mode now greys out + disables those two toggles (with a tooltip)
 //              while it's on, on toggle AND on load. App-only; no engine change.
-const VERSION  = "v24";
+//   v24 → v25: Graph mode now RUNS the comparison instead of disabling it.
+//              "Constrain to network" is forced on + locked (graph mode is
+//              inherently network-constrained) while "Compare with unconstrained"
+//              stays togglable: graph mode runs a full-DEM unconstrained RASTER
+//              scenario alongside the graph compute and exposes the difference via
+//              the "Displayed scenario" picker (graph / unconstrained / difference).
+//              Native backend single-source: "Use native backend" moved out of the
+//              density panel (always visible) and now also accelerates from/to/round
+//              ENERGY-FIELD runs via a new POST /single endpoint (top-N/path/maximize
+//              stay browser-only; auto-fallback unchanged). energy-worker.js +
+//              backend/src/main.rs kept bit-parity (test-backend.mjs +single cases).
+const VERSION  = "v25";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

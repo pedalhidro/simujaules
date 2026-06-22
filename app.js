@@ -156,7 +156,7 @@ const STRINGS = {
   "net.osm":             { pt: "Puxar ruas do OSM (highway=*)", en: "Pull streets from OSM (highway=*)" },
   "help.p.network_osm":  { pt: "Consulta o Overpass sobre a vista atual ∩ extensão do DEM. Áreas grandes podem demorar ou estourar limites do Overpass — aproxime o zoom primeiro.", en: "Queries Overpass over the current map view ∩ DEM extent. Large areas can take a while or hit Overpass limits — zoom in first." },
   "net.compare":         { pt: "Comparar com cenário sem rede", en: "Compare with unconstrained" },
-  "net.graph_overrides": { pt: "No modo grafo o cálculo já é sobre a rede — \"restringir\"/\"comparar\" (e o cenário exibido) não se aplicam.", en: "In graph mode the compute is already on the network — \"constrain\"/\"compare\" (and the displayed-scenario picker) don't apply." },
+  "net.graph_constrain_locked": { pt: "No modo grafo o cálculo é sempre sobre a rede — \"restringir\" fica sempre ativo. \"Comparar\" continua disponível: compara com o cenário em raster sem a rede.", en: "In graph mode the compute is always on the network — \"constrain\" stays on. \"Compare\" is still available: it compares against the raster scenario without the network." },
   "layer.energy_source": { pt: "Cenário exibido (energia e passagens)", en: "Displayed scenario (energy & passes)" },
   "esrc.constrained":    { pt: "restrito à rede", en: "network-constrained" },
   "esrc.unconstrained":  { pt: "sem restrição", en: "unconstrained" },
@@ -229,7 +229,7 @@ const STRINGS = {
   "param.want_density":  { pt: "Calcular densidade multi-referência", en: "Compute multi-reference density" },
   "param.use_backend":   { pt: "Usar backend nativo (Rust)", en: "Use native backend (Rust)" },
   "param.backend_url":   { pt: "URL do backend", en: "Backend URL" },
-  "help.p.backend":      { pt: "Servidor local opcional (backend/ no repositório, cargo run --release). Execuções de densidade são enviadas para lá e computadas em todos os núcleos; se inacessível, o app volta silenciosamente para o pool de workers do navegador.", en: "Optional local server (backend/ in the repo, cargo run --release). Density runs are sent there and computed on all cores; if unreachable, the app silently falls back to the in-browser worker pool." },
+  "help.p.backend":      { pt: "Servidor local opcional (backend/ no repositório, cargo run --release). Acelera tanto a densidade multi-referência (uma Dijkstra por referência, em todos os núcleos) quanto o campo de energia de fonte única (de/para/ida-e-volta). Rotas (top-N), caminho até o destino e \"maximizar\" continuam no navegador (o backend não produz rotas). Se inacessível, o app volta silenciosamente para os workers do navegador.", en: "Optional local server (backend/ in the repo, cargo run --release). Accelerates both multi-reference density (one Dijkstra per reference, across all cores) AND the single-source energy field (from/to/round). Top-N routes, the destination path, and \"maximize\" stay in the browser (the backend produces no routes). If unreachable, the app silently falls back to the in-browser workers." },
   "param.max_workers":   { pt: "Máx. de workers de cálculo (0 = auto)", en: "Max compute workers (0 = auto)" },
   "help.p.workers":      { pt: "Avançado: paraleliza a densidade entre este número de Web Workers. 0 = auto (dimensionado pelos núcleos e memória disponível). Só aumente se sua máquina tiver mais RAM do que o navegador reporta — cada worker usa cerca de 5 GB em um DEM grande, então exceder pode travar a aba.", en: "Advanced: parallelise density across this many Web Workers. 0 = auto (sized to cores and available memory). Only raise it if your machine has more RAM than the browser reports — each worker needs roughly 5 GB on a large DEM, so over-committing can crash the tab." },
   "param.maximize":      { pt: "Maximizar energia (inverter otimização)", en: "Maximize energy (reverse optimization)" },
@@ -740,7 +740,7 @@ document.addEventListener("DOMContentLoaded", () => {
     el.addEventListener("input", updateNetworkLineStyle);
     el.addEventListener("change", updateNetworkLineStyle);
   }
-  // Native-backend toggle (inside the density panel) reveals the URL input.
+  // Native-backend toggle (a top-level compute option) reveals the URL input.
   // Off by default — the in-browser worker pool is always the fallback.
   const backendCheck = document.getElementById("use-backend");
   const backendExtra = document.getElementById("backend-extra");
@@ -849,7 +849,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     // estimate now that interp is a separate phase and graph
                     // mode has its own (much cheaper) compute model.
                     "net-interp", "net-interp-max-dist", "net-interp-smoothing",
-                    "vec-graph-mode", "vec-constrain"]) {
+                    "vec-graph-mode", "vec-constrain", "vec-compare"]) {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", estimateRunTime);
   }
@@ -3162,22 +3162,43 @@ function graphModeActive() {
     && !!state.dem && state.dem.isGeographic;
 }
 // Graph mode ("follow the vectors") is a SEPARATE engine that computes on the
-// network graph — it wins the run dispatch over the raster "constrain to
-// network" / "compare with unconstrained" toggles, which then silently no-op
-// (their displayed-scenario dropdown never appears). Grey those toggles out
-// while graph mode is checked so the precedence is visible (the checkbox is
-// persisted, so it can be on from a prior session). Keeps their .checked state.
+// network graph. The compute is INHERENTLY constrained to the network, so the
+// raster "Constrain compute to network" toggle is forced ON and locked while
+// graph mode is checked (its precedence is visible, not silently ignored).
+// "Compare with unconstrained" STAYS togglable: graph mode now honours it,
+// running a full-DEM unconstrained raster scenario alongside the graph compute
+// and exposing the difference through the displayed-scenario picker (see
+// startGraphCompute). The checkbox is persisted, so it can be on from a prior
+// session; a synthetic change after restore re-runs this.
 function syncGraphModeUI() {
   const graph = !!document.getElementById("vec-graph-mode")?.checked;
-  for (const id of ["vec-constrain", "vec-compare"]) {
-    const el = document.getElementById(id);
-    if (!el) continue;
-    el.disabled = graph;
-    const row = el.closest("label");
-    if (row) {
-      row.style.opacity = graph ? "0.45" : "";
-      row.title = graph ? t("net.graph_overrides") : "";
+  // Constrain: forced ON + locked in graph mode (compute is always on the net).
+  // Remember the user's prior choice in a data attribute and RESTORE it when they
+  // leave graph mode — entering graph mode shouldn't silently flip "constrain" on
+  // for good. Only snapshot on the first entry (repeated calls while graph is on
+  // must not overwrite the snapshot with the now-forced value).
+  const con = document.getElementById("vec-constrain");
+  if (con) {
+    if (graph) {
+      if (con.dataset.preGraph === undefined) con.dataset.preGraph = con.checked ? "1" : "0";
+      con.checked = true;
+    } else if (con.dataset.preGraph !== undefined) {
+      con.checked = con.dataset.preGraph === "1";
+      delete con.dataset.preGraph;
     }
+    con.disabled = graph;
+    const row = con.closest("label");
+    if (row) {
+      row.style.opacity = graph ? "0.6" : "";
+      row.title = graph ? t("net.graph_constrain_locked") : "";
+    }
+  }
+  // Compare: stays available — graph mode does run the comparison now.
+  const cmp = document.getElementById("vec-compare");
+  if (cmp) {
+    cmp.disabled = false;
+    const row = cmp.closest("label");
+    if (row) { row.style.opacity = ""; row.title = ""; }
   }
 }
 // Identity of everything the cached graph depends on — a change rebuilds it.
@@ -3296,17 +3317,31 @@ function buildGraphFieldLayer(graph, field, { pane, greyscale, minId, maxId, per
 // "Draw network". Reads style knobs live → recolours on restyle, no recompute.
 function renderGraphOverlay() {
   if (!state.lastGraphResult || !state.dem) return;
-  const { graph, result } = state.lastGraphResult;
+  const { graph, result, energyAlt } = state.lastGraphResult;
   const { W, H } = state.dem;
   if (state.passesOverlay) { state.passesOverlay.remove(); state.passesOverlay = null; }
   removeGraphLayers();
 
+  // The displayed-scenario picker only makes sense after a graph-mode COMPARE run.
+  const srcRow = document.getElementById("energy-source-row");
+  if (srcRow) srcRow.style.display = energyAlt ? "" : "none";
+  const energySel = energyAlt
+    ? (document.getElementById("energy-source")?.value || "constrained")
+    : "constrained";
+
   // Energy: interpolated RASTER (built in finishGraph), shown through the same
   // energy imageOverlay grid mode uses → the Energy visibility/opacity/colormap
   // controls drive it, and it reads as a smooth field, not a network outline.
+  // In a compare run the picker swaps the raster: the graph (constrained) field,
+  // the full-DEM unconstrained field, or their difference.
   if (state.energyOverlay) { state.energyOverlay.remove(); state.energyOverlay = null; }
-  if (state.graphEnergyRaster) {
-    const out = renderFieldToDataURL(state.graphEnergyRaster, W, H, {
+  const energyField = (energyAlt && energySel === "unconstrained" && energyAlt.unconstrained)
+    ? energyAlt.unconstrained
+    : (energyAlt && energySel === "difference" && energyAlt.difference)
+      ? energyAlt.difference
+      : state.graphEnergyRaster;
+  if (energyField) {
+    const out = renderFieldToDataURL(energyField, W, H, {
       usePercentileBounds: true, percentiles: [1, 80],
       userMin: readRangeInput("vmin", null), userMax: readRangeInput("vmax", null),
       useGreyscale: false, treatZeroAsTransparent: false,
@@ -4226,6 +4261,71 @@ runBtn.addEventListener("click", async () => {
     }
   };
 
+  // ---- Optional native backend: single-source energy field ------------------
+  // POST /single — one Dijkstra (two for round) on the native server, returning
+  // the raw energy field + optional passes. Maximize/top-N/path stay browser-
+  // only (the backend produces no routes), so the caller only reaches here for
+  // the plain from/to/round energy field. Throws on any failure → browser
+  // fallback (a 404 from an old backend without /single lands here too).
+  const startSingleBackend = async (baseUrl) => {
+    progressBar.style.width = "10%"; // no streaming progress from the backend
+    const t0 = performance.now();
+    status.textContent = t("status.backend_computing");
+    const ticker = setInterval(() => {
+      if (gen !== state.computeGen) { clearInterval(ticker); return; }
+      status.textContent =
+        t("status.backend_computing_elapsed", formatDuration(performance.now() - t0));
+    }, 1000);
+    try {
+      const params = {
+        h: H, w: W,
+        dx: state.dem.dxM, dy: state.dem.dyM,
+        alpha, beta, eta, eMax, eMaxMode,
+        densityMode: mode,                 // from | to | round (single-source dir)
+        src: [state.src[0], state.src[1]],
+        wantPasses,
+        hasNetwork: constrainNet,
+        maximize: false,                   // excluded from the single-source path
+        nPortals: portals ? portals.n : 0,
+      };
+      const json = new TextEncoder().encode(JSON.stringify(params));
+      const head = new Uint8Array(4);
+      new DataView(head.buffer).setUint32(0, json.length, true);
+      const { height: gridHeight, mask: gridMask } = buildComputeGrid();
+      const body = new Blob([
+        head, json, gridHeight, gridMask,
+        ...(constrainNet ? [state.networkMask] : []),
+        ...(portals ? [portals.u, portals.v, portals.lenM, portals.hu, portals.hv] : []),
+      ]);
+      const resp = await fetch(`${baseUrl}/single`, { method: "POST", body });
+      if (!resp.ok) throw new Error(`backend HTTP ${resp.status}`);
+      const buf = await resp.arrayBuffer();
+      if (gen !== state.computeGen) return new Promise(() => {});
+      try {
+        const dv = new DataView(buf);
+        const jlen = dv.getUint32(0, true);
+        const expect = 4 + jlen + 4 * N + (wantPasses ? 4 * N : 0);
+        if (buf.byteLength !== expect) {
+          throw new Error(`backend response ${buf.byteLength} B, expected ${expect} B`);
+        }
+        let off = 4 + jlen;
+        // Slice-copy (a single search, so the copy is cheap and the views need
+        // no alignment): energy first, then passes when present.
+        const energy = new Float32Array(buf.slice(off, off + 4 * N));
+        off += 4 * N;
+        const passes = wantPasses ? new Float32Array(buf.slice(off, off + 4 * N)) : null;
+        progressBar.style.width = "100%";
+        return { energy, passes };
+      } catch (err) {
+        console.error("[backend] single response handling failed:", err);
+        computeFailed(`backend response handling failed: ${err.message}`);
+        return new Promise(() => {}); // run is dead; keep the chain pending
+      }
+    } finally {
+      clearInterval(ticker);
+    }
+  };
+
   // Backend with browser-pool fallback, per scenario. Resolves with raw
   // {energy, passes} like computeDensityField.
   const densityField = async (opts) => {
@@ -4320,6 +4420,11 @@ runBtn.addEventListener("click", async () => {
   };
 
   const compareOn = constrainNet && !!document.getElementById("vec-compare")?.checked;
+  // Graph mode is inherently network-constrained, so "Compare with unconstrained"
+  // applies there too (independent of the now-locked-on raster constrain toggle):
+  // graph mode runs a full-DEM unconstrained RASTER scenario alongside the graph
+  // compute and exposes the difference through the displayed-scenario picker.
+  const graphCompareOn = graphModeActive() && !!document.getElementById("vec-compare")?.checked;
 
   const backendOn = !!document.getElementById("use-backend")?.checked;
   const backendUrl = (document.getElementById("backend-url")?.value || "http://127.0.0.1:8077")
@@ -4352,54 +4457,112 @@ runBtn.addEventListener("click", async () => {
     });
   };
 
+  // Full-DEM UNCONSTRAINED raster energy field for graph-mode compare (no network
+  // mask). Density → browser pool; single-source → one worker (energy only, no
+  // path/top-N). Resolves a Float32Array (Infinity where unreachable), or null on
+  // cancel/error. Runs in-browser (graph mode never uses the native backend).
+  const computeUnconstrainedEnergy = () => {
+    if (wantDensity) return computeDensityField({ useNetwork: false }).then((r) => r.energy);
+    return new Promise((resolve) => {
+      const w = spawnWorker((m) => {
+        if (m.kind === "done") resolve(m.energy);
+        else if (m.kind === "error") { computeFailed(m.message); resolve(null); }
+      });
+      const { height, mask, transfer } = buildComputeGrid();
+      // Same mode/cost/budget as the graph run; no network, no path/top-N/interp.
+      w.postMessage(
+        { ...baseMsg, height, mask, networkMask: null, goalR: -1, goalC: -1, wantTopN: false, maximizeLength: 0, wantNetworkInterp: false },
+        transfer,
+      );
+    });
+  };
+
   // "Follow the vectors": route on the network graph instead of the raster.
   // Lazily (re)builds the cached graph in a worker, then runs the chosen mode
   // on it and renders the colored-vector overlay. Same gen/cancel semantics.
   const startGraphCompute = () => {
     const token = computeNetworkGraphToken();
-    const finishGraph = (graph, result) => {
+    // IDW-fill a rasterised graph field (energy or difference) off-network, using
+    // the field's own finite cells as seeds (the graph IS the network). Resolves
+    // with the filled field; transfers the input buffer (caller must not reuse it).
+    const graphInterp = (field) => new Promise((resolve) => {
+      const seedMask = new Uint8Array(field.length);
+      for (let i = 0; i < field.length; i++) seedMask[i] = Number.isFinite(field[i]) ? 1 : 0;
+      const mask = buildComputeGrid({ maskOnly: true }).mask; // don't fill across water
+      const w = spawnWorker((m) => {
+        if (m.kind === "interp-done") { if (gen !== state.computeGen) return; resolve(m.energy); }
+        // On error, `field` is already DETACHED (transferred to the worker), so it
+        // can't be returned — resolve null and let the caller keep the prior field.
+        else if (m.kind === "error") { console.warn("[graph interp]", m.message); resolve(null); }
+      });
+      w.postMessage(
+        { kind: "interp", energy: field, networkMask: seedMask, mask, H: state.dem.H, W: state.dem.W, dx: state.dem.dxM, dy: state.dem.dyM, interpMaxDistance, interpSmoothing },
+        [field.buffer, seedMask.buffer, mask.buffer],
+      );
+    });
+    const finishGraph = async (graph, result) => {
       if (gen !== state.computeGen) return;
+      // Rasterise the graph energy onto the grid (network cells only) BEFORE
+      // terminating workers — graph-mode compare spawns an unconstrained partner.
+      const eGrid = rasterizeGraphEnergy(graph, result);
+
+      // Graph-mode compare: run a full-DEM unconstrained RASTER scenario and diff
+      // it against the graph energy (network cells), mirroring raster compare. The
+      // diff is the energy COST of being restricted to the network (clamped ≥ 0).
+      let energyAlt = null;
+      if (graphCompareOn && eGrid) {
+        status.textContent = t("status.computing");
+        const uncon = await computeUnconstrainedEnergy();
+        if (gen !== state.computeGen || !uncon) return;
+        const diff = new Float32Array(N);
+        for (let i = 0; i < N; i++) {
+          const a = eGrid[i], b = uncon[i];
+          diff[i] = (Number.isFinite(a) && Number.isFinite(b)) ? Math.max(0, a - b) : Infinity;
+        }
+        energyAlt = { unconstrained: uncon, difference: diff };
+      }
+
+      // Finalise the run now (the partner, if any, is done).
       for (const w of state.workers) w.terminate();
       state.workers = [];
       progress.classList.remove("active");
       updateRunButtonState();
       state.computeStartedAt = 0;
-      state.lastGraphResult = { graph, result };
+      state.lastGraphResult = { graph, result, energyAlt };
       state.graphEnergyRaster = null;
       renderGraphOverlay();   // passes corridors show immediately
       // Learn the graph engine's real per-edge cost (corrGraph). The graph's
-      // actual node/edge counts also sharpen the next estimate.
+      // actual node/edge counts also sharpen the next estimate. Skip the
+      // correction on compare runs — their elapsed includes the partner scenario.
       if (state.networkGraph) { state.networkGraph.nNodes = graph.nNodes; state.networkGraph.nEdges = graph.nEdges; }
-      updateEstimateCorrection(result.elapsedMs, 0);
-      estimateRunTime();
+      if (!energyAlt) { updateEstimateCorrection(result.elapsedMs, 0); estimateRunTime(); }
       const routeNote = result.routes ? t("status.graph_route_note", result.routes.length) : "";
       const doneMsg = t("status.graph_done", result.elapsedMs.toFixed(0), graph.nNodes, graph.nEdges, routeNote);
       // Energy field: rasterise the graph energy onto the grid, then (when the
       // interp option is on) IDW-fill off-network — the smooth field grid shows.
-      const eGrid = rasterizeGraphEnergy(graph, result);
       if (eGrid && wantNetworkInterp) {
         status.textContent = t("status.interpolating_energy");
-        const seedMask = new Uint8Array(eGrid.length);
-        for (let i = 0; i < eGrid.length; i++) seedMask[i] = Number.isFinite(eGrid[i]) ? 1 : 0;
-        const mask = buildComputeGrid({ maskOnly: true }).mask; // don't fill across water
         const interpStart = performance.now();
-        const w = spawnWorker((m) => {
-          if (m.kind === "interp-done") {
-            if (gen !== state.computeGen) return;
-            state.graphEnergyRaster = m.energy;
-            renderGraphOverlay();
-            status.textContent = doneMsg;
-            // Graph interp is single-worker — learn its rate (corrInterp).
-            updateEstimateCorrection(0, performance.now() - interpStart);
-            estimateRunTime();
-          } else if (m.kind === "error") { console.warn("[graph interp]", m.message); status.textContent = doneMsg; }
-        });
-        w.postMessage(
-          { kind: "interp", energy: eGrid, networkMask: seedMask, mask, H: state.dem.H, W: state.dem.W, dx: state.dem.dxM, dy: state.dem.dyM, interpMaxDistance, interpSmoothing },
-          [eGrid.buffer, seedMask.buffer, mask.buffer],
-        );
+        // null = interp failed (e.g. OOM); leave graphEnergyRaster null (no energy
+        // overlay, passes corridors still show) — the pre-refactor behaviour.
+        const filled = await graphInterp(eGrid);
+        if (gen !== state.computeGen) return;
+        if (filled) state.graphEnergyRaster = filled;
+        // Fill the difference field the same way so the "difference" scenario reads
+        // as a smooth field (it's analysed on network cells, filled for display).
+        // On interp failure difference becomes null → the picker falls back to the
+        // constrained field (renderGraphOverlay) instead of a blank overlay.
+        if (energyAlt) {
+          energyAlt.difference = await graphInterp(energyAlt.difference);
+          if (gen !== state.computeGen) return;
+        }
+        renderGraphOverlay();
+        status.textContent = doneMsg;
+        // Graph interp is single-worker — learn its rate (corrInterp).
+        if (!energyAlt) { updateEstimateCorrection(0, performance.now() - interpStart); estimateRunTime(); }
       } else {
-        if (eGrid) { state.graphEnergyRaster = eGrid; renderGraphOverlay(); }
+        if (eGrid) state.graphEnergyRaster = eGrid;
+        renderGraphOverlay();
         status.textContent = doneMsg;
       }
     };
@@ -4461,6 +4624,40 @@ runBtn.addEventListener("click", async () => {
     })();
   } else if (compareOn) {
     startComparePair();
+  } else if (backendOn && !wantTopN && !maximize && !state.dst) {
+    // Single-source energy field on the native backend (energy + optional
+    // passes). Top-N / maximize / a destination path need the browser (the
+    // backend produces no routes); any backend failure falls back too.
+    (async () => {
+      const t0 = performance.now();
+      let r;
+      try {
+        r = await startSingleBackend(backendUrl);
+      } catch (err) {
+        if (gen !== state.computeGen) return;
+        console.warn("[backend] falling back to in-browser workers:", err);
+        status.textContent = t("status.backend_fallback");
+        if (state.lastRun) state.lastRun.backend = false;
+        startSingleWorker();
+        return;
+      }
+      if (gen !== state.computeGen || !r) return;
+      const computeMs = performance.now() - t0;
+      // The backend returns the raw network-constrained field; the IDW fill is
+      // a separate browser phase (the worker did it inline for the JS path).
+      let energy = r.energy, interpMs = 0;
+      if (wantNetworkInterp && constrainNet) {
+        const ti = performance.now();
+        energy = await runInterp(energy);
+        if (gen !== state.computeGen) return;
+        interpMs = performance.now() - ti;
+      }
+      computeDone({
+        energy, passes: r.passes,
+        path: null, pathEnergy: null, pathLengthM: null, routes: null,
+        elapsedMs: performance.now() - t0, computeMs, interpMs,
+      });
+    })();
   } else {
     startSingleWorker();
   }
@@ -5626,7 +5823,10 @@ function predictComputeMs(cal, opts, applyCorr) {
   // on a typical network/DEM). Using the raster model here is the severe
   // over-estimate users hit in graph mode.
   if (graph) {
-    const ms = predictGraphComputeMs(opts);
+    let ms = predictGraphComputeMs(opts);
+    // Compare adds a full-DEM unconstrained RASTER scenario (single-point or
+    // density pool) — add its cost via the raster model (graph off, browser).
+    if (opts.graphCompare) ms += predictComputeMs(cal, { ...opts, graph: false, backend: false }, false);
     return applyCorr ? ms * (cal.corrGraph || 1) : ms;
   }
 
@@ -5656,6 +5856,13 @@ function predictComputeMs(cal, opts, applyCorr) {
       ms = cal.allocMsN + (refs / poolN) * perRef * dijk;
       corr = cal.corrBrowser || 1;
     }
+  } else if (backend && !wantTopN && !opts.maximize && !opts.wantPath) {
+    // Native backend single-source (POST /single) — same dispatch gate as the
+    // runner. No per-worker browser DEM alloc; native per-Dijkstra speedup.
+    // corrBackend is trained by density backend runs (a reasonable proxy — the
+    // online correction skips the fast single-point modes by design).
+    ms = (perRef / NATIVE_SPEEDUP) * dijk;
+    corr = cal.corrBackend || 1;
   } else {
     // Single-point modes (from/to/round) — one Dijkstra (two for round).
     ms = cal.allocMsN + perRef * dijk;
@@ -5685,11 +5892,17 @@ function currentRunOpts(cal, N) {
     N,
     wantDensity: !!document.getElementById("want-density")?.checked,
     wantTopN: !!document.getElementById("want-topn")?.checked,
+    // maximize / a destination path keep single-source runs in the browser (the
+    // backend produces no routes) — the predictor gates the backend arm on these.
+    maximize: !!document.getElementById("maximize")?.checked,
+    wantPath: !!state.dst,
     refs: state.refPoints?.length || 0,
     eMax: Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0,
     mode, alpha,
     backend: !!document.getElementById("use-backend")?.checked,
     graph,
+    // Graph-mode compare also runs a full-DEM unconstrained raster scenario.
+    graphCompare: graph && !!document.getElementById("vec-compare")?.checked,
     netEdges: graph ? networkEdgeCount() : 0,
     interp,
     interpMaxDist: Math.max(1, parseInt(document.getElementById("net-interp-max-dist")?.value, 10) || 50),

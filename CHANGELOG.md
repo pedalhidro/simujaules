@@ -9,6 +9,35 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v25 — 2026-06-22
+
+### Fixes
+
+- **Graph mode locked out the comparison toggles instead of honouring them.**
+  v24 greyed out both "Constrain to network" and "Compare with unconstrained"
+  while "Compute on network graph (follow the vectors)" was on. Now graph mode
+  *runs* the comparison: "Constrain to network" is forced on and locked (graph
+  mode is inherently network-constrained), while "Compare with unconstrained"
+  stays togglable. With it on, graph mode computes a full-DEM **unconstrained
+  raster** scenario alongside the graph compute and exposes the energy
+  difference (the cost of being restricted to the network) through the
+  "Displayed scenario" picker — graph / unconstrained / difference.
+- **The native backend was unusable with multi-reference density off.** "Use
+  native backend (Rust)" lived inside the density panel, so it disappeared
+  whenever density was unchecked. It's now a top-level compute option (always
+  visible).
+
+### Features
+
+- **Native backend single-source energy fields.** The backend previously only
+  computed multi-reference density. A new `POST /single` endpoint accelerates
+  single-source `from`/`to`/`round` energy-field runs (energy + optional passes)
+  on the native server too, with the same auto-fallback to browser workers.
+  Top-N routes, the destination path, and "maximize" stay browser-only (the
+  backend produces no routes). `energy-worker.js` and `backend/src/main.rs` are
+  kept bit-parity — `test-backend.mjs` gained `+single` cases (from/to/round ×
+  budget × portals × network × passes), all matching to 0 ULP.
+
 ## v24 — 2026-06-21
 
 ### Fixes

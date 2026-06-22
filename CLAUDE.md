@@ -12,9 +12,13 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 - `energy-worker.js` — the compute engine (Web Worker): Dijkstra with
   passes count, A* top-N routes, multi-ref density, layered-DP max-cost
   path, IDW network fill. Pure JS on typed arrays.
-- `backend/` — optional native density server (Rust + rayon, see its
-  README). OFF by default; the app's "Use native backend" checkbox lives in
-  the density panel and falls back to browser workers on any failure.
+- `backend/` — optional native compute server (Rust + rayon, see its
+  README). OFF by default; the app's "Use native backend" checkbox is a
+  top-level compute option (always visible, NOT inside the density panel) and
+  falls back to browser workers on any failure. Two endpoints: `POST /density`
+  (multi-reference density) and `POST /single` (single-source from/to/round
+  energy field + optional passes). Top-N / destination path / maximize stay
+  browser-only — the backend produces no routes.
 - `sw.js` — service worker (precache + runtime cache). `index.html`,
   `manifest.webmanifest`, `icons/` are the PWA shell.
 - `deploy.sh` — stages and rsyncs to `gs://telhas/simujoules` (GCS + Cloud
@@ -75,8 +79,12 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 
 - `backend/src/main.rs` is a PORT of `energy-worker.js` `dijkstra()`
   (cost model, f32 energy storage, settled-flag handling, passes
-  accumulation, density normalisation). Any change to one must land in the
-  other; `node backend/test-backend.mjs` enforces energy bit-parity.
+  accumulation, density normalisation). `compute_density` mirrors the JS
+  density path; `compute_single` (the `/single` endpoint) mirrors the JS
+  worker's from/to/round single-source branch (raw energy, NOT averaged;
+  optional passes; round = fwd+bwd sum with the budget mask + endpoint-filtered
+  passes). Any change to one must land in the other; `node backend/test-backend.mjs`
+  enforces energy bit-parity (`+single` cases cover the single-source path).
   Backend passes may differ from JS only on EXACT f64 cost ties (radix heap
   vs binary heap tie order) — both trees are valid optima.
 - BRIDGE PORTAL EDGES (OSM bridges/tunnels, group 1d) are relaxed ALONGSIDE

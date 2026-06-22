@@ -124,6 +124,82 @@ for (const { dmode, eMax, eMaxMode, portals = false, maximize = false } of cases
   }
 }
 
+// ---- /single single-source parity (energy field + optional passes) ----
+// The non-density fast path: one Dijkstra (two for round) from a single source,
+// returning the RAW energy field (not averaged) + optional passes counts. Mirror
+// the JS worker's from/to/round single-point branch. Cover network-constrained
+// (the eff_mask = dem_mask AND network_mask path) and bridge portals too.
+const SR = 128, SC = 128;
+// A diagonal band that includes the seed — exercises the network constraint
+// (and so the shared eff_mask path) on both engines.
+const netMask = new Uint8Array(N);
+for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) netMask[r * W + c] = Math.abs(r - c) < 90 ? 1 : 0;
+
+const singleCases = [];
+for (const portals of [false, true]) {
+  for (const hasNetwork of [false, true]) {
+    for (const dmode of ["from", "to", "round"]) {
+      for (const eMax of [0, 20000]) {
+        for (const wantPasses of [false, true]) {
+          singleCases.push({ dmode, eMax, eMaxMode: "leg", portals, hasNetwork, wantPasses });
+        }
+      }
+    }
+    singleCases.push({ dmode: "round", eMax: 20000, eMaxMode: "total", portals, hasNetwork, wantPasses: true });
+  }
+}
+
+for (const { dmode, eMax, eMaxMode, portals, hasNetwork, wantPasses } of singleCases) {
+  const nPortals = portals ? portalU.length : 0;
+  const params = {
+    h: H, w: W, dx: 30, dy: 30, alpha: 1, beta: 30, eta: 0.3, eMax, eMaxMode,
+    densityMode: dmode, src: [SR, SC], wantPasses, hasNetwork, nPortals,
+  };
+  const json = new TextEncoder().encode(JSON.stringify(params));
+  const head = new Uint8Array(4);
+  new DataView(head.buffer).setUint32(0, json.length, true);
+  const parts = [head, json, height, mask];
+  if (hasNetwork) parts.push(netMask);
+  if (portals) parts.push(portalU, portalV, portalLenM, portalHU, portalHV);
+  const resp = await fetch(`http://${ADDR}/single`, { method: "POST", body: new Blob(parts) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+  const buf = await resp.arrayBuffer();
+  const jlen = new DataView(buf).getUint32(0, true);
+  let off = 4 + jlen;
+  const energy = new Float32Array(buf.slice(off, off + 4 * N)); off += 4 * N;
+  const passes = wantPasses ? new Float32Array(buf.slice(off, off + 4 * N)) : null;
+
+  // JS reference — the worker's single-source branch (wantDensity false).
+  const ref = runWorker({
+    kind: "run", H, W, dx: 30, dy: 30, alpha: 1, beta: 30, eta: 0.3, eMax, eMaxMode,
+    seedR: SR, seedC: SC, goalR: -1, goalC: -1, mode: dmode,
+    wantPasses, wantDensity: false,
+    height: new Float32Array(height), mask: new Uint8Array(mask),
+    networkMask: hasNetwork ? new Uint8Array(netMask) : null,
+    portalU: portals ? portalU : null,
+    portalV: portals ? portalV : null,
+    portalLenM: portals ? portalLenM : null,
+    portalHU: portals ? portalHU : null,
+    portalHV: portals ? portalHV : null,
+  });
+
+  let maxE = 0, bad = 0, maxP = 0;
+  for (let i = 0; i < N; i++) {
+    const a = energy[i], b = ref.energy[i];
+    if (Number.isFinite(a) !== Number.isFinite(b)) bad++;
+    else if (Number.isFinite(a)) maxE = Math.max(maxE, Math.abs(a - b));
+    if (wantPasses) maxP = Math.max(maxP, Math.abs(passes[i] - ref.passes[i]));
+  }
+  const ok = maxE < 1e-3 && bad === 0 && (!wantPasses || maxP < 1e-15);
+  allOk = allOk && ok;
+  console.log(
+    `[single] mode=${dmode} eMax=${eMax}${eMaxMode === "total" ? " (total)" : ""}` +
+    `${portals ? " +portals" : ""}${hasNetwork ? " +net" : ""}${wantPasses ? " +passes" : ""}: ` +
+    `max|Δenergy|=${maxE.toExponential(2)}, finite-mismatch=${bad}` +
+    `${wantPasses ? `, max|Δpasses|=${maxP.toExponential(2)}` : ""} ${ok ? "✓" : "✗"}`,
+  );
+}
+
 server.kill();
 console.log(allOk ? "BACKEND MATCHES JS WORKER" : "MISMATCH");
 process.exit(allOk ? 0 : 1);
