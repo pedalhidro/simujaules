@@ -229,6 +229,23 @@ const STRINGS = {
   "param.want_density":  { pt: "Calcular densidade multi-referência", en: "Compute multi-reference density" },
   "param.use_backend":   { pt: "Usar backend nativo (Rust)", en: "Use native backend (Rust)" },
   "param.backend_url":   { pt: "URL do backend", en: "Backend URL" },
+  // ---- Compute source (three-way: navegador / localhost / nuvem) --------
+  "param.compute_source":  { pt: "Fonte de cálculo", en: "Compute source" },
+  "cs.browser":            { pt: "Navegador (workers na página)", en: "Browser (in-page workers)" },
+  "cs.localhost":          { pt: "Localhost (Rust nativo)", en: "Localhost (native Rust)" },
+  "cs.cloud":              { pt: "Nuvem (VM orquestrada)", en: "Cloud (orchestrated VM)" },
+  "param.orchestrator_url":{ pt: "URL do orquestrador", en: "Orchestrator URL" },
+  "cloud.local_only":      { pt: "A nuvem só está disponível quando o app é servido localmente (o orquestrador escuta em loopback).", en: "Cloud is only available when the app is served locally (the orchestrator listens on loopback)." },
+  "cloud.idle":            { pt: "VM da nuvem parada.", en: "Cloud VM stopped." },
+  "cloud.starting":        { pt: "Iniciando a VM da nuvem… (~{0})", en: "Starting cloud VM… (~{0})" },
+  "cloud.ready":           { pt: "VM da nuvem pronta ({0} núcleos).", en: "Cloud VM ready ({0} cores)." },
+  "cloud.stopping":        { pt: "Parando a VM da nuvem…", en: "Stopping cloud VM…" },
+  "cloud.stopped_after":   { pt: "VM da nuvem parada após o cálculo.", en: "Cloud VM stopped after the run." },
+  "cloud.orch_unreachable":{ pt: "Orquestrador inacessível — usando workers do navegador…", en: "Orchestrator unreachable — using browser workers…" },
+  "cloud.boot_failed":     { pt: "Falha ao iniciar a VM da nuvem — usando workers do navegador…", en: "Cloud VM failed to start — using browser workers…" },
+  "cloud.preempted":       { pt: "VM da nuvem interrompida — recalculando no navegador…", en: "Cloud VM dropped — recomputing in the browser…" },
+  "cloud.transfer":        { pt: "Transferência: ↑ {0} · ↓ {1} · ~{2}", en: "Transfer: ↑ {0} up · ↓ {1} down · ~{2}" },
+  "cloud.need_orch_url":   { pt: "Informe a URL do orquestrador para usar a nuvem.", en: "Enter the orchestrator URL to use Cloud." },
   "help.p.backend":      { pt: "Servidor local opcional (backend/ no repositório, cargo run --release). Acelera tanto a densidade multi-referência (uma Dijkstra por referência, em todos os núcleos) quanto o campo de energia de fonte única (de/para/ida-e-volta). Rotas (top-N), caminho até o destino e \"maximizar\" continuam no navegador (o backend não produz rotas). Se inacessível, o app volta silenciosamente para os workers do navegador.", en: "Optional local server (backend/ in the repo, cargo run --release). Accelerates both multi-reference density (one Dijkstra per reference, across all cores) AND the single-source energy field (from/to/round). Top-N routes, the destination path, and \"maximize\" stay in the browser (the backend produces no routes). If unreachable, the app silently falls back to the in-browser workers." },
   "param.max_workers":   { pt: "Máx. de workers de cálculo (0 = auto)", en: "Max compute workers (0 = auto)" },
   "help.p.workers":      { pt: "Avançado: paraleliza a densidade entre este número de Web Workers. 0 = auto (dimensionado pelos núcleos e memória disponível). Só aumente se sua máquina tiver mais RAM do que o navegador reporta — cada worker usa cerca de 5 GB em um DEM grande, então exceder pode travar a aba.", en: "Advanced: parallelise density across this many Web Workers. 0 = auto (sized to cores and available memory). Only raise it if your machine has more RAM than the browser reports — each worker needs roughly 5 GB on a large DEM, so over-committing can crash the tab." },
@@ -414,6 +431,9 @@ function setLang(lang) {
   currentLang = lang;
   try { localStorage.setItem("simu-lang", lang); } catch {}
   applyTranslations();
+  // The cloud transfer line is set imperatively via t() (no data-i18n), so
+  // re-render it after a language switch.
+  if (typeof estimateRunTime === "function") estimateRunTime();
 }
 
 // ---- Loaded-group highlight (style only — never affects compute) --------
@@ -456,7 +476,7 @@ const PERSIST_IDS = [
   "mode", "alpha", "beta", "eta", "e-max", "e-max-mode",
   "want-passes", "want-topn", "want-density", "maximize", "maximize-length",
   "n-refs", "ref-source", "ref-sampling", "refs-visible",
-  "use-backend", "backend-url", "n-routes", "penalty", "repulsion-mode",
+  "backend-url", "orchestrator-url", "n-routes", "penalty", "repulsion-mode",
   "routes-colormap", "colormap",
   // Vector network
   "vec-width", "vec-snap", "vec-constrain", "vec-graph-mode", "vec-junction-mode",
@@ -476,9 +496,13 @@ const PERSIST_IDS = [
 // flag a bogus "● refresh" on load; the legend is reconciled directly via the
 // activeColormap assignment + applyColormapToLegend() call below instead.
 const PERSIST_REFIRE = [
-  "mode", "want-density", "want-topn", "maximize", "use-backend", "basemap-select",
+  "mode", "want-density", "want-topn", "maximize", "basemap-select",
   "vec-graph-mode",
 ];
+// The compute-source selector is a radiogroup (no single element to dispatch a
+// change on), so its restore + UI reconcile is handled inline in
+// setupParamPersistence via syncComputeSourceUI(). Persisted under this key.
+const COMPUTE_SOURCE_KEY = "compute-source";
 
 function savePersistedParams() {
   const out = {};
@@ -487,6 +511,8 @@ function savePersistedParams() {
     if (!el) continue;
     out[id] = el.type === "checkbox" ? !!el.checked : el.value;
   }
+  // The compute-source radiogroup persists as its checked value (not by id).
+  out[COMPUTE_SOURCE_KEY] = computeMode();
   try { localStorage.setItem(PERSIST_KEY, JSON.stringify(out)); } catch {}
 }
 
@@ -510,12 +536,31 @@ function setupParamPersistence() {
     for (const id of PERSIST_REFIRE) {
       document.getElementById(id)?.dispatchEvent(new Event("change"));
     }
+    // Restore the compute-source selection. Prefer the new radiogroup key;
+    // MIGRATE the old "use-backend" boolean: true → Localhost, false/absent →
+    // Browser (Cloud is opt-in, never auto-selected on migration).
+    let csVal = saved[COMPUTE_SOURCE_KEY];
+    if (csVal == null && ("use-backend" in saved)) csVal = saved["use-backend"] ? "localhost" : "browser";
+    if (csVal === "browser" || csVal === "localhost" || csVal === "cloud") {
+      const radio = document.getElementById(
+        csVal === "localhost" ? "cs-localhost" : csVal === "cloud" ? "cs-cloud" : "cs-browser");
+      // Don't restore a disabled (non-local origin) Cloud radio — fall to Browser.
+      if (radio && !radio.disabled) radio.checked = true;
+    }
     applyColormapToLegend();
     applyLayerControls();
   }
+  // Reconcile the compute-source sub-panels to whatever ended up selected
+  // (always — even with no saved state, so the local-only gating note shows).
+  syncComputeSourceUI();
   for (const id of PERSIST_IDS) {
     document.getElementById(id)?.addEventListener("change", savePersistedParams);
   }
+  // The radios live under name="compute-source", not in PERSIST_IDS — wire
+  // their change to persist too.
+  document.querySelectorAll('input[name="compute-source"]').forEach((el) => {
+    el.addEventListener("change", savePersistedParams);
+  });
 }
 
 // ------- Compute workers -------
@@ -740,15 +785,15 @@ document.addEventListener("DOMContentLoaded", () => {
     el.addEventListener("input", updateNetworkLineStyle);
     el.addEventListener("change", updateNetworkLineStyle);
   }
-  // Native-backend toggle (a top-level compute option) reveals the URL input.
-  // Off by default — the in-browser worker pool is always the fallback.
-  const backendCheck = document.getElementById("use-backend");
-  const backendExtra = document.getElementById("backend-extra");
-  if (backendCheck && backendExtra) {
-    const syncBackend = () => { backendExtra.style.display = backendCheck.checked ? "" : "none"; };
-    backendCheck.addEventListener("change", syncBackend);
-    syncBackend();
-  }
+  // Compute-source selector (Browser / Localhost / Cloud — a top-level compute
+  // option). Each radio's change reconciles the sub-panels (Localhost URL /
+  // Cloud orchestrator) and gates Cloud to local origins. Browser is the
+  // default and the always-available fallback. syncComputeSourceUI also runs in
+  // setupParamPersistence after the persisted selection is restored.
+  document.querySelectorAll('input[name="compute-source"]').forEach((el) => {
+    el.addEventListener("change", syncComputeSourceUI);
+  });
+  syncComputeSourceUI();
   // Persist the advanced max-workers override per device (like the lang /
   // layer-order prefs) — power users on big-RAM machines set it once.
   const maxWorkersEl = document.getElementById("max-workers");
@@ -842,9 +887,10 @@ document.addEventListener("DOMContentLoaded", () => {
   // Anything that affects the time estimate
   // Inputs that move the (now budget- and engine-aware) time estimate.
   // `alpha` scales the explored region (flat reach ∝ eMax/alpha); the
-  // backend toggle/URL switches the engine model.
+  // compute-source selector switches the engine model (handled below with the
+  // radios, since they share a name rather than a single id).
   for (const id of ["mode", "want-passes", "want-topn", "n-routes", "want-density",
-                    "n-refs", "e-max", "alpha", "use-backend", "max-workers",
+                    "n-refs", "e-max", "alpha", "max-workers",
                     // Network/graph + interpolation controls — they move the
                     // estimate now that interp is a separate phase and graph
                     // mode has its own (much cheaper) compute model.
@@ -859,11 +905,17 @@ document.addEventListener("DOMContentLoaded", () => {
   // change after restore). See syncGraphModeUI.
   document.getElementById("vec-graph-mode")?.addEventListener("change", syncGraphModeUI);
   syncGraphModeUI();
-  // Backend URL/toggle: refresh the cached /health core count (used by the
-  // estimate's backend-parallelism model), then re-estimate.
-  for (const id of ["use-backend", "backend-url"]) {
+  // Compute-source / URL changes refresh the cached /health core count (used by
+  // the estimate's backend-parallelism model) AND re-estimate (engine model +
+  // transfer line). The radios share name="compute-source"; the two URL fields
+  // (backend / orchestrator) feed the same /health probe via effectiveBackendUrl.
+  const onComputeSourceChange = () => { refreshBackendCores(); estimateRunTime(); };
+  document.querySelectorAll('input[name="compute-source"]').forEach((el) => {
+    el.addEventListener("change", onComputeSourceChange);
+  });
+  for (const id of ["backend-url", "orchestrator-url"]) {
     const el = document.getElementById(id);
-    if (el) el.addEventListener("change", refreshBackendCores);
+    if (el) { el.addEventListener("change", onComputeSourceChange); el.addEventListener("input", estimateRunTime); }
   }
   // Example DEM loader links — populated declaratively in HTML, wired here.
   for (const ex of DEM_EXAMPLES) {
@@ -1184,6 +1236,15 @@ const state = {
   // at run start so the post-compute online correction can compare the
   // estimate it would have made against the real elapsed time.
   lastRun: null,
+  // Cloud compute-source state machine (see computeMode()/ensureCloudVm()):
+  //   mode           — last computeMode() resolved at run start ("cloud" arms it)
+  //   orchestratorUrl — base URL of the local orchestrator (loopback)
+  //   vmState        — last STATE seen from /cloud/status (STOPPED/PROVISIONING/
+  //                    RUNNING/STOPPING/ERROR)
+  //   keepaliveTimer — interval extending the VM lease while a compute runs
+  //   pollTimer      — interval polling /cloud/status while booting (unused as a
+  //                    stored handle; the boot loop awaits inline, kept for clarity)
+  cloud: { mode: "browser", orchestratorUrl: "", vmState: "STOPPED", keepaliveTimer: null, pollTimer: null },
   // Stacked overlays — z-order from bottom up:
   //   OSM basemap → tileOverlay (rmsampa-v2) → energyOverlay → passesOverlay
   tileOverlay: null,
@@ -1286,6 +1347,36 @@ function escapeHtml(s) {
   ));
 }
 
+// ---- Compute-source indirection (Browser / Localhost / Cloud) -----------
+// The single source of truth for which engine a run uses. `computeMode()`
+// reads the selector radios; `effectiveBackendUrl()` maps Localhost→backend
+// URL and Cloud→orchestrator URL (both trimmed, trailing slashes stripped).
+// Everything downstream (startDensityBackend / startSingleBackend / the binary
+// frame builders / the /health probe) is engine-agnostic — it just receives
+// the right base URL. The orchestrator mirrors the Rust backend's /density,
+// /single, /health byte-for-byte, so Cloud is an opaque pass-through.
+function computeMode() {
+  return document.querySelector('input[name="compute-source"]:checked')?.value || "browser";
+}
+function effectiveBackendUrl() {
+  const cloud = computeMode() === "cloud";
+  // Localhost keeps the historical default (an empty field → the standard
+  // backend port). Cloud has no safe default — an empty orchestrator URL blocks
+  // the run with cloud.need_orch_url rather than guessing.
+  const id = cloud ? "orchestrator-url" : "backend-url";
+  const raw = (document.getElementById(id)?.value || "").trim();
+  const val = (!cloud && !raw) ? "http://127.0.0.1:8077" : raw;
+  return val.replace(/\/+$/, "");
+}
+// Cloud is only meaningful when the orchestrator (loopback-only) is reachable —
+// i.e. the applet itself is served locally. Same-origin fetches to 127.0.0.1
+// from a public-origin page would be blocked anyway.
+function isLocalOrigin() {
+  if (location.protocol === "file:") return true;
+  const h = location.hostname;
+  return h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "::1";
+}
+
 // Terminate every in-flight compute worker and invalidate their pending
 // messages via the generation bump. Safe to call when idle. Must run before
 // anything that changes the grid a result would be rendered against (DEM
@@ -1294,6 +1385,9 @@ function cancelActiveCompute() {
   state.computeGen++;
   for (const w of state.workers) w.terminate();
   state.workers = [];
+  // A superseded cloud run must stop extending the VM lease; the orchestrator's
+  // own lease deadline (or the next run's stop) reaps the VM.
+  stopCloudKeepalive();
   if (state.computeStartedAt) {
     state.computeStartedAt = 0;
     progress.classList.remove("active");
@@ -1311,12 +1405,37 @@ function handleWedgedCompute(detail) {
   if (!state.computeStartedAt) return;
   console.error("[compute] unhandled failure while running:", detail);
   cancelActiveCompute();
+  // Run encalhado na nuvem: libera a VM (cancelActiveCompute só corta o
+  // keepalive, não desliga a instância).
+  if (state.cloud.mode === "cloud" && state.cloud.orchestratorUrl) {
+    stopCloudVm(state.cloud.orchestratorUrl);
+  }
   const msg = (detail && detail.message) || String(detail || "unknown error");
   status.innerHTML =
     `<span style="color:#ff6b6b">${t("status.compute_failed", escapeHtml(msg))}</span>`;
 }
 window.addEventListener("unhandledrejection", (e) => handleWedgedCompute(e.reason));
 window.addEventListener("error", (e) => handleWedgedCompute(e.error || e.message));
+
+// Cloud: if the tab is hidden or unloaded while a cloud VM is up AND IDLE, stop
+// it now (default-ON "stop after each run", extended to the leave-the-page case)
+// via a fire-and-forget sendBeacon — a normal fetch wouldn't survive the unload.
+// NEVER stop a VM that's mid-compute: visibilitychange→hidden fires on an
+// ordinary tab switch / minimize / screen lock, and stopping then would abort
+// the in-flight remote run (the stream-proxy fetch drops → it falls back to the
+// far slower / OOM-prone browser pool, losing the whole run). keepaliveTimer is
+// the precise "a run is in flight" signal. If the tab truly dies mid-run, the
+// orchestrator lease + hard-cap + in-VM idle-watchdog are the backstops.
+function beaconStopCloudVm() {
+  if (state.cloud.keepaliveTimer) return; // a compute is running — leave the VM alone
+  if (state.cloud.mode === "cloud" && state.cloud.orchestratorUrl) {
+    stopCloudVm(state.cloud.orchestratorUrl, { beacon: true });
+  }
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") beaconStopCloudVm();
+});
+window.addEventListener("pagehide", beaconStopCloudVm);
 
 // ------- DEM loading -------
 const demFile = document.getElementById("dem-file");
@@ -3869,6 +3988,12 @@ runBtn.addEventListener("click", async () => {
   const computeFailed = (message) => {
     if (gen !== state.computeGen) return;
     cancelActiveCompute();
+    // Falha de cálculo na nuvem: para a VM agora em vez de deixá-la ligada até o
+    // lease expirar (cancelActiveCompute só corta o keepalive). computeDone faz o
+    // mesmo no sucesso; stopCloudVm é idempotente.
+    if (state.cloud.mode === "cloud" && state.cloud.orchestratorUrl) {
+      stopCloudVm(state.cloud.orchestratorUrl);
+    }
     status.innerHTML = `<span style="color:#ff6b6b">${t("status.worker_error", escapeHtml(message))}</span>`;
   };
 
@@ -3896,6 +4021,11 @@ runBtn.addEventListener("click", async () => {
     // The calibration probe is skipped while a compute runs — if this DEM
     // still has no calibration, run it now that the cores are free.
     if (!state.calibration) startCalibrationProbe();
+    // Cloud: stop the VM after each run (default-ON), releasing the lease so it
+    // doesn't bill idle. The keepalive is cleared inside stopCloudVm.
+    if (state.cloud.mode === "cloud" && state.cloud.orchestratorUrl) {
+      stopCloudVm(state.cloud.orchestratorUrl);
+    }
   };
 
   const reportProgress = (frac) => {
@@ -4329,13 +4459,15 @@ runBtn.addEventListener("click", async () => {
   // Backend with browser-pool fallback, per scenario. Resolves with raw
   // {energy, passes} like computeDensityField.
   const densityField = async (opts) => {
-    if (backendOn) {
+    if (runUseBackend) {
       try {
         return await startDensityBackend(backendUrl, opts);
       } catch (err) {
         if (gen !== state.computeGen) return new Promise(() => {});
         console.warn("[backend] falling back to in-browser workers:", err);
-        status.textContent = t("status.backend_fallback");
+        // In cloud mode a dropped backend fetch usually means the VM was
+        // preempted/reaped mid-run — say so; otherwise the generic message.
+        status.textContent = t(cloudMode ? "cloud.preempted" : "status.backend_fallback");
         // This run is now executing on the browser pool, not the backend.
         // Re-tag it so computeDone's online correction trains corrBrowser
         // (actual/predicted vs the browser model), not corrBackend — otherwise
@@ -4426,9 +4558,25 @@ runBtn.addEventListener("click", async () => {
   // compute and exposes the difference through the displayed-scenario picker.
   const graphCompareOn = graphModeActive() && !!document.getElementById("vec-compare")?.checked;
 
-  const backendOn = !!document.getElementById("use-backend")?.checked;
-  const backendUrl = (document.getElementById("backend-url")?.value || "http://127.0.0.1:8077")
-    .trim().replace(/\/+$/, "");
+  // Compute source: Browser (in-page pool) / Localhost (native Rust) / Cloud
+  // (local orchestrator → pre-baked VM). backendOn = "anything but browser":
+  // the density/single dispatch is engine-agnostic and just gets the right
+  // base URL (the orchestrator mirrors the backend's /density,/single bytes).
+  const cloudMode = computeMode() === "cloud";
+  const backendOn = computeMode() !== "browser";
+  const backendUrl = effectiveBackendUrl();
+  // Will THIS run actually use the native backend? It only does raster density
+  // and backend-eligible single-source (from/to/round); top-N, the destination
+  // path, "maximize", graph mode, AND a non-density compare (which routes to the
+  // browser-only startComparePair) always run in-browser. Used to avoid booting a
+  // cloud VM for a run that would compute in-browser anyway.
+  const willUseBackend = backendOn && !graphModeActive() &&
+    (wantDensity || (!compareOn && !wantTopN && !maximize && !state.dst));
+  // Run-scoped engine override. Normally tracks backendOn, but a failed cloud
+  // boot flips it to false so the density path (which reads it inside
+  // densityField) finishes in-browser like the single path. Assigned in
+  // dispatchCompute(useBackend) before any compute starts.
+  let runUseBackend = backendOn;
 
   // Density + compare: the two scenarios run sequentially (each already
   // saturates the cores), splitting the progress bar. Diffs come from the
@@ -4612,54 +4760,107 @@ runBtn.addEventListener("click", async () => {
     );
   };
 
-  if (graphModeActive() && state.networkLines && state.networkLines.length) {
-    startGraphCompute();
-  } else if (wantDensity && compareOn) {
-    startDensityCompare();
-  } else if (wantDensity) {
+  // The actual engine dispatch. `useBackend` is normally `backendOn`, but a
+  // failed cloud boot calls it with `false` so the run finishes in-browser.
+  // Mirror it into runUseBackend so the density path (densityField) agrees.
+  const dispatchCompute = (useBackend) => {
+    runUseBackend = useBackend;
+    if (graphModeActive() && state.networkLines && state.networkLines.length) {
+      startGraphCompute();
+    } else if (wantDensity && compareOn) {
+      startDensityCompare();
+    } else if (wantDensity) {
+      (async () => {
+        const r = await densityField({ useNetwork: constrainNet });
+        if (gen !== state.computeGen) return;
+        finishDensityOutputs(r.energy, r.passes);
+      })();
+    } else if (compareOn) {
+      startComparePair();
+    } else if (useBackend && !wantTopN && !maximize && !state.dst) {
+      // Single-source energy field on the native backend (energy + optional
+      // passes). Top-N / maximize / a destination path need the browser (the
+      // backend produces no routes); any backend failure falls back too.
+      (async () => {
+        const t0 = performance.now();
+        let r;
+        try {
+          r = await startSingleBackend(backendUrl);
+        } catch (err) {
+          if (gen !== state.computeGen) return;
+          console.warn("[backend] falling back to in-browser workers:", err);
+          status.textContent = t(cloudMode ? "cloud.preempted" : "status.backend_fallback");
+          if (state.lastRun) state.lastRun.backend = false;
+          startSingleWorker();
+          return;
+        }
+        if (gen !== state.computeGen || !r) return;
+        const computeMs = performance.now() - t0;
+        // The backend returns the raw network-constrained field; the IDW fill is
+        // a separate browser phase (the worker did it inline for the JS path).
+        let energy = r.energy, interpMs = 0;
+        if (wantNetworkInterp && constrainNet) {
+          const ti = performance.now();
+          energy = await runInterp(energy);
+          if (gen !== state.computeGen) return;
+          interpMs = performance.now() - ti;
+        }
+        computeDone({
+          energy, passes: r.passes,
+          path: null, pathEnergy: null, pathLengthM: null, routes: null,
+          elapsedMs: performance.now() - t0, computeMs, interpMs,
+        });
+      })();
+    } else {
+      startSingleWorker();
+    }
+  };
+
+  // The browser/localhost paths dispatch straight away. Cloud first boots the
+  // VM through the local orchestrator (idempotent), keeps the lease alive while
+  // the compute runs, and stops the VM in computeDone. On a missing
+  // orchestrator URL, or an orchestrator/boot failure, it falls back to the
+  // in-browser pool for this run (densityField()/single's own try/catch then
+  // re-tags lastRun.backend=false; here we force useBackend=false up front).
+  if (!cloudMode) {
+    state.cloud.mode = "browser"; // a prior cloud run must not stop a VM in this run's computeDone
+    dispatchCompute(backendOn);
+  } else if (!willUseBackend) {
+    // Cloud selected, but THIS run (top-N / destination / maximize / graph)
+    // computes in-browser regardless — don't boot a billable VM we won't touch
+    // (it would only delay the run ~1 min and bill for nothing). The orchestrator
+    // URL is irrelevant for such a run, so don't require it either.
+    state.cloud.mode = "browser";
+    dispatchCompute(false);
+  } else if (!backendUrl) {
+    status.innerHTML = `<span style="color:#ff6b6b">${t("cloud.need_orch_url")}</span>`;
+    cancelActiveCompute();
+    runBtn.disabled = false;
+    progress.classList.remove("active");
+  } else {
+    state.cloud.mode = "cloud";
+    state.cloud.orchestratorUrl = backendUrl;
     (async () => {
-      const r = await densityField({ useNetwork: constrainNet });
-      if (gen !== state.computeGen) return;
-      finishDensityOutputs(r.energy, r.passes);
-    })();
-  } else if (compareOn) {
-    startComparePair();
-  } else if (backendOn && !wantTopN && !maximize && !state.dst) {
-    // Single-source energy field on the native backend (energy + optional
-    // passes). Top-N / maximize / a destination path need the browser (the
-    // backend produces no routes); any backend failure falls back too.
-    (async () => {
-      const t0 = performance.now();
-      let r;
+      let ready = false;
       try {
-        r = await startSingleBackend(backendUrl);
+        ready = await ensureCloudVm(backendUrl, () => gen !== state.computeGen);
       } catch (err) {
         if (gen !== state.computeGen) return;
-        console.warn("[backend] falling back to in-browser workers:", err);
-        status.textContent = t("status.backend_fallback");
+        console.warn("[cloud] VM unavailable, falling back to browser:", err);
+        const bootFailed = err && err.reason === "boot_failed";
+        status.textContent = t(bootFailed ? "cloud.boot_failed" : "cloud.orch_unreachable");
         if (state.lastRun) state.lastRun.backend = false;
-        startSingleWorker();
+        // A boot_failed VM may have actually started before going unhealthy —
+        // best-effort stop it so it doesn't linger (the lease is the backstop).
+        if (bootFailed) stopCloudVm(backendUrl);
+        state.cloud.mode = "browser"; // computeDone must not try to stop a VM that never started
+        dispatchCompute(false);
         return;
       }
-      if (gen !== state.computeGen || !r) return;
-      const computeMs = performance.now() - t0;
-      // The backend returns the raw network-constrained field; the IDW fill is
-      // a separate browser phase (the worker did it inline for the JS path).
-      let energy = r.energy, interpMs = 0;
-      if (wantNetworkInterp && constrainNet) {
-        const ti = performance.now();
-        energy = await runInterp(energy);
-        if (gen !== state.computeGen) return;
-        interpMs = performance.now() - ti;
-      }
-      computeDone({
-        energy, passes: r.passes,
-        path: null, pathEnergy: null, pathLengthM: null, routes: null,
-        elapsedMs: performance.now() - t0, computeMs, interpMs,
-      });
+      if (gen !== state.computeGen || !ready) return;
+      startCloudKeepalive(backendUrl);
+      dispatchCompute(true);
     })();
-  } else {
-    startSingleWorker();
   }
 });
 
@@ -5606,10 +5807,14 @@ function densityPoolSize({ N, K, round }) {
 // backend toggle/URL changes (not per estimate). Cleared/ignored when the
 // backend is off; falls back to BACKEND_PAR_CAP if unreachable.
 async function refreshBackendCores() {
-  const on = !!document.getElementById("use-backend")?.checked;
-  if (!on) { state.backendCores = null; estimateRunTime(); return; }
-  const url = (document.getElementById("backend-url")?.value || "http://127.0.0.1:8077")
-    .trim().replace(/\/+$/, "");
+  // Both Localhost and Cloud probe /health; the orchestrator proxies the VM's
+  // /health (same fields: cores, mem_budget_bytes) when the VM is up, and
+  // returns {ok:false,vmState:…} when it isn't — Number.isFinite gates below
+  // tolerate the missing cores, so a stopped VM just leaves the estimate on its
+  // fallback parallelism cap until the run boots it.
+  if (computeMode() === "browser") { state.backendCores = null; estimateRunTime(); return; }
+  const url = effectiveBackendUrl();
+  if (!url) { state.backendCores = null; estimateRunTime(); return; }
   try {
     const resp = await fetch(`${url}/health`, { signal: AbortSignal.timeout(2000) });
     if (resp.ok) {
@@ -5626,6 +5831,168 @@ async function refreshBackendCores() {
     }
   } catch { /* unreachable — estimate falls back to the parallelism cap */ }
   estimateRunTime();
+}
+
+// Reconcile the compute-source sub-panels (Localhost URL / Cloud orchestrator)
+// to the selected radio, and gate Cloud to local origins. Called on every
+// selector change AND on load (the radiogroup is in PERSIST_REFIRE). Mirrors
+// the old syncBackend's show/hide, extended to three states.
+function syncComputeSourceUI() {
+  const mode = computeMode();
+  const lh = document.getElementById("localhost-extra");
+  const cl = document.getElementById("cloud-extra");
+  if (lh) lh.style.display = mode === "localhost" ? "" : "none";
+  if (cl) cl.style.display = mode === "cloud" ? "" : "none";
+  // Origin gating: Cloud is only usable when the orchestrator (loopback-only)
+  // is reachable — i.e. the applet is served locally. Disable the radio and
+  // show a note when it isn't; if Cloud was somehow selected, snap to Browser.
+  const cloudRadio = document.getElementById("cs-cloud");
+  if (cloudRadio && !isLocalOrigin()) {
+    cloudRadio.disabled = true;
+    if (mode === "cloud") {
+      const browserRadio = document.getElementById("cs-browser");
+      if (browserRadio) { browserRadio.checked = true; }
+      if (cl) cl.style.display = "none";
+    }
+    const note = ensureCloudLocalOnlyNote();
+    if (note) note.style.display = "";
+  } else {
+    if (cloudRadio) cloudRadio.disabled = false;
+    const note = document.getElementById("cloud-local-only-note");
+    if (note) note.style.display = "none";
+  }
+  // Seed the VM-status hint when Cloud is freshly shown (no VM up yet); clear it
+  // otherwise. A live boot/stop sequence overwrites it via setCloudHint.
+  if (mode === "cloud" && !cloudRadio?.disabled) {
+    if (!state.cloud.keepaliveTimer && state.cloud.vmState !== "RUNNING") setCloudHint("cloud.idle");
+  } else {
+    setCloudHint(null);
+  }
+}
+
+// Lazily create (once) the "cloud only works locally" note placed right after
+// the #cloud-extra block. Text is set through t() so it follows the language.
+function ensureCloudLocalOnlyNote() {
+  let note = document.getElementById("cloud-local-only-note");
+  if (note) { note.textContent = t("cloud.local_only"); return note; }
+  const cloudExtra = document.getElementById("cloud-extra");
+  if (!cloudExtra || !cloudExtra.parentNode) return null;
+  note = document.createElement("div");
+  note.id = "cloud-local-only-note";
+  // data-i18n lets the standard applyTranslations() walk re-translate the note
+  // on a language switch (it's created after the initial walk).
+  note.setAttribute("data-i18n", "cloud.local_only");
+  note.style.cssText = "font-size: 10px; color: var(--muted); margin-top: 3px;";
+  note.textContent = t("cloud.local_only");
+  cloudExtra.parentNode.insertBefore(note, cloudExtra.nextSibling);
+  return note;
+}
+
+// ---- Cloud VM state machine ---------------------------------------------
+// Drives the LOCAL orchestrator that fronts a pre-baked compute VM. The RUN
+// path calls ensureCloudVm() before dispatching the (unchanged) backend
+// density/single fetch against the orchestrator URL. Lease keepalive runs
+// while a compute is in flight; the VM is stopped after each run and on tab
+// hide (a "stop VM after each run" default-ON behaviour). All status text goes
+// through t(); the hint line lives in #cloud-vm-status.
+const CLOUD_POLL_MS = 3000;       // /cloud/status poll cadence while booting
+const CLOUD_KEEPALIVE_MS = 60000; // lease-extension cadence while computing
+const CLOUD_BOOT_TIMEOUT_MS = 300000; // give the VM up to 5 min to go healthy
+
+function setCloudHint(key, ...args) {
+  const el = document.getElementById("cloud-vm-status");
+  if (el) el.textContent = key ? t(key, ...args) : "";
+}
+
+// POST/GET helpers with a short timeout. Throw on transport failure (caller
+// maps that to a fallback); a non-ok HTTP status throws too.
+async function cloudFetchJson(url, { method = "GET", timeoutMs = 8000 } = {}) {
+  const resp = await fetch(url, { method, signal: AbortSignal.timeout(timeoutMs) });
+  if (!resp.ok) throw new Error(`orchestrator HTTP ${resp.status}`);
+  return resp.json();
+}
+
+// Ensure the cloud VM is RUNNING && healthy, then refresh the backend core
+// cache against the orchestrator. Resolves true on ready; throws on
+// orchestrator-unreachable / boot failure (the caller falls back to browser).
+// `gen`/`isStale` let a superseded run bail out of the poll loop.
+async function ensureCloudVm(orchUrl, isStale) {
+  // Kick the (idempotent) start — returns fast if already RUNNING.
+  let started;
+  try {
+    started = await cloudFetchJson(`${orchUrl}/cloud/start`, { method: "POST", timeoutMs: 10000 });
+  } catch (err) {
+    state.cloud.vmState = "ERROR";
+    throw Object.assign(new Error("orch_unreachable"), { reason: "orch_unreachable", cause: err });
+  }
+  state.cloud.vmState = started.state || "PROVISIONING";
+  const etaS = Number.isFinite(started.etaSeconds) ? started.etaSeconds : 60;
+  setCloudHint("cloud.starting", formatDuration(etaS * 1000));
+  status.textContent = t("cloud.starting", formatDuration(etaS * 1000));
+
+  // Poll /cloud/status until RUNNING && healthy (or timeout / cancel).
+  const deadline = performance.now() + CLOUD_BOOT_TIMEOUT_MS;
+  for (;;) {
+    if (isStale && isStale()) return false;
+    let st;
+    try {
+      st = await cloudFetchJson(`${orchUrl}/cloud/status`, { method: "GET", timeoutMs: 8000 });
+    } catch (err) {
+      state.cloud.vmState = "ERROR";
+      throw Object.assign(new Error("orch_unreachable"), { reason: "orch_unreachable", cause: err });
+    }
+    state.cloud.vmState = st.state || state.cloud.vmState;
+    if (st.state === "ERROR") {
+      throw Object.assign(new Error("boot_failed"), { reason: "boot_failed" });
+    }
+    if (st.state === "RUNNING" && st.healthy === true) {
+      // Cache cores/mem from the status payload (camelCase here) so the
+      // estimate's slice model reflects the just-booted VM immediately.
+      if (Number.isFinite(st.cores)) {
+        state.backendCores = {
+          url: orchUrl, cores: st.cores,
+          memBudgetBytes: Number.isFinite(st.memBudgetBytes) ? st.memBudgetBytes : null,
+        };
+      }
+      setCloudHint("cloud.ready", Number.isFinite(st.cores) ? st.cores : "?");
+      return true;
+    }
+    if (performance.now() > deadline) {
+      throw Object.assign(new Error("boot_failed"), { reason: "boot_failed" });
+    }
+    await new Promise((r) => setTimeout(r, CLOUD_POLL_MS));
+  }
+}
+
+// Lease keepalive: while a cloud compute is in flight, extend the VM lease so
+// the orchestrator doesn't reap it mid-run. Cleared by stopCloudKeepalive().
+function startCloudKeepalive(orchUrl) {
+  stopCloudKeepalive();
+  state.cloud.keepaliveTimer = setInterval(() => {
+    fetch(`${orchUrl}/cloud/keepalive`, { method: "POST", signal: AbortSignal.timeout(8000) })
+      .catch(() => { /* best-effort — a missed keepalive just risks an early reap */ });
+  }, CLOUD_KEEPALIVE_MS);
+}
+function stopCloudKeepalive() {
+  if (state.cloud.keepaliveTimer) { clearInterval(state.cloud.keepaliveTimer); state.cloud.keepaliveTimer = null; }
+}
+
+// Stop the VM now (default-ON "stop after each run"). Best-effort: a POST with
+// a short timeout from the in-page path, or a sendBeacon from a page-hide
+// handler (which can't await). Always clears the keepalive first.
+function stopCloudVm(orchUrl, { beacon = false } = {}) {
+  stopCloudKeepalive();
+  if (!orchUrl) return;
+  if (beacon && navigator.sendBeacon) {
+    try { navigator.sendBeacon(`${orchUrl}/cloud/stop`); } catch { /* best-effort */ }
+    state.cloud.vmState = "STOPPING";
+    return;
+  }
+  setCloudHint("cloud.stopping");
+  state.cloud.vmState = "STOPPING";
+  fetch(`${orchUrl}/cloud/stop`, { method: "POST", signal: AbortSignal.timeout(8000) })
+    .then(() => { state.cloud.vmState = "STOPPED"; setCloudHint("cloud.stopped_after"); })
+    .catch(() => { /* best-effort — the orchestrator's lease will reap it anyway */ });
 }
 
 // Calibration probe: each ref runs an UNBUDGETED search stopped after
@@ -5756,6 +6123,11 @@ const BACKEND_PAR_CAP = 8;    // fallback core count when /health is unreachable
 // backend/src/main.rs: 17 scratch + 20 acc; round doubles scratch + 1 byte).
 const BACKEND_BYTES_PER_CELL = 37;
 const BACKEND_BYTES_PER_CELL_ROUND = 55;
+// Cloud transfer-size estimate: assumed wire bandwidth (megabits/s) for the
+// up/down byte counts → a rough wall-time guess. Nominal home/office values;
+// the estimate is informational only (it never gates a run).
+const UPLINK_MBPS   = 50;
+const DOWNLINK_MBPS = 200;
 // Network-graph ("follow the vectors") compute: a graph Dijkstra is ∝ EDGES,
 // not raster cells — orders of magnitude cheaper than the grid, so the raster
 // model massively over-estimates it. Nominal; corrGraph tunes per network.
@@ -5899,7 +6271,7 @@ function currentRunOpts(cal, N) {
     refs: state.refPoints?.length || 0,
     eMax: Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0,
     mode, alpha,
-    backend: !!document.getElementById("use-backend")?.checked,
+    backend: computeMode() !== "browser",
     graph,
     // Graph-mode compare also runs a full-DEM unconstrained raster scenario.
     graphCompare: graph && !!document.getElementById("vec-compare")?.checked,
@@ -5911,6 +6283,9 @@ function currentRunOpts(cal, N) {
 }
 
 function estimateRunTime() {
+  // Cloud transfer-size estimate (always reconciled — even before a DEM/probe).
+  updateCloudTransferEstimate();
+
   const out = document.getElementById("time-estimate");
   if (!out) return;
   if (!state.dem) { out.textContent = ""; return; }
@@ -5925,6 +6300,34 @@ function estimateRunTime() {
   let ms = predictComputeMs(cal, opts, true);
   ms += predictInterpMs(opts) * (cal.corrInterp || 1);
   out.textContent = `≈ ${formatDuration(ms)}`;
+}
+
+// Cloud-only: estimate the bytes shipped to/from the orchestrator for the
+// current run config and render them (+ a wire-time guess) into #cloud-transfer.
+// Pulls the same inputs estimateRunTime uses. Cleared when not in cloud mode or
+// when there's no DEM to size against.
+function updateCloudTransferEstimate() {
+  const line = document.getElementById("cloud-transfer");
+  if (!line) return;
+  if (computeMode() !== "cloud" || !state.dem) { line.textContent = ""; return; }
+
+  const N = state.dem.H * state.dem.W;
+  const mode = document.getElementById("mode")?.value || "from";
+  const wantDensity = !!document.getElementById("want-density")?.checked;
+  const wantPasses  = !!document.getElementById("want-passes")?.checked;
+  const hasNetwork  = networkConstraintActive();
+  const nPortals    = buildPortals()?.n || 0;
+
+  // Upload: gridHeight (f32 → 4·N) + gridMask (u8 → N) + optional networkMask
+  // (u8 → N) + the bridge portal arrays (~32 B/portal: 2×i32 + 3×f64). The JSON
+  // header is negligible against the grid.
+  const up = 4 * N + N + (hasNetwork ? N : 0) + nPortals * 32;
+  // Download: density returns f64 density (8·N) + f32 energy (4·N); single
+  // returns f32 energy (4·N) + optional f32 passes (4·N).
+  const down = wantDensity ? (8 * N + 4 * N) : (4 * N + (wantPasses ? 4 * N : 0));
+  // Rough wire time at the assumed link speeds (bytes·8 / (Mbps·1e6)).
+  const wireMs = (up * 8 / (UPLINK_MBPS * 1e6) + down * 8 / (DOWNLINK_MBPS * 1e6)) * 1000;
+  line.textContent = t("cloud.transfer", formatBytes(up), formatBytes(down), formatDuration(wireMs));
 }
 
 // Online correction: after a run finishes, nudge the per-PHASE correction
@@ -5957,6 +6360,16 @@ function formatDuration(ms) {
   if (ms < 950) return `${Math.round(ms)} ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
   return `${Math.round(ms / 1000)} s`;
+}
+
+// Binary-unit byte formatter for the cloud transfer estimate (KiB/MiB/GiB).
+function formatBytes(b) {
+  if (!Number.isFinite(b) || b < 0) return "—";
+  if (b < 1024) return `${Math.round(b)} B`;
+  const u = ["KiB", "MiB", "GiB", "TiB"];
+  let v = b / 1024, i = 0;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${u[i]}`;
 }
 
 function formatEnergy(v) {

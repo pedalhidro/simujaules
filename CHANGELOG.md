@@ -9,6 +9,30 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v26 — 2026-06-23
+
+### Features
+
+- **Cloud compute source.** The single "Use native backend (Rust)" checkbox is
+  now a three-way **Compute source** selector: **Browser** (in-page worker pool,
+  the default), **Localhost** (the native Rust backend, with its URL field), and
+  **Cloud**. Cloud drives a small local orchestrator (default
+  `http://127.0.0.1:8079`) that boots a pre-baked VM on demand, waits for it to
+  report healthy, proxies the existing `POST /density` and `POST /single`
+  compute requests through it byte-for-byte, then stops the VM after each run
+  (and on tab hide via a `sendBeacon` to `/cloud/stop`). While a compute is in
+  flight the app extends the VM lease with a periodic `/cloud/keepalive`.
+- **Transfer-size estimate.** With Cloud selected, a line shows the estimated
+  upload / download bytes and the wire time at an assumed uplink/downlink, so
+  the network cost of a remote run is visible before pressing Compute.
+- **Cloud is local-only.** The Cloud option is offered only when the applet is
+  served from `localhost`/`127.0.0.1`/`[::1]` or `file:` (the orchestrator
+  binds loopback); otherwise it's disabled with an explanatory note.
+- **Graceful fallback.** On any orchestrator-unreachable or VM-boot failure the
+  run falls back to the in-browser worker pool, with a cloud-aware status
+  message. Browser/Localhost behaviour and engine bit-parity are unchanged — the
+  compute path is untouched; Cloud just sends the same bytes to a proxy URL.
+
 ## v25 — 2026-06-22
 
 ### Fixes

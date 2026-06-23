@@ -222,7 +222,16 @@
 //              ENERGY-FIELD runs via a new POST /single endpoint (top-N/path/maximize
 //              stay browser-only; auto-fallback unchanged). energy-worker.js +
 //              backend/src/main.rs kept bit-parity (test-backend.mjs +single cases).
-const VERSION  = "v25";
+//   v25 → v26: Cloud compute source. The "Use native backend (Rust)" checkbox
+//              became a three-way Compute-source selector: Browser (in-page
+//              workers, default), Localhost (native Rust backend), and Cloud — a
+//              local orchestrator (127.0.0.1:8079) that boots a pre-baked VM on
+//              demand, waits for health, proxies /density & /single, then stops
+//              the VM after each run (and on tab hide). Adds a transfer-size
+//              estimate. Cloud is only offered when the applet is served locally.
+//              On orchestrator/boot failure the run falls back to the browser
+//              pool. No new served files; compute path / bit-parity unchanged.
+const VERSION  = "v26";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

@@ -894,16 +894,36 @@
           <select id="routes-colormap"></select>
         </div>
 
-        <!-- Native backend (Rust): a general compute-engine option, not density-
+        <!-- Compute source (a general compute-engine option, not density-
              specific — it accelerates multi-reference density AND single-source
-             energy fields. Always visible so it's usable with density off. -->
-        <label style="display: flex; align-items: center; gap: 6px; margin-top: 8px;">
-          <input type="checkbox" id="use-backend" />
-          <span data-i18n="param.use_backend">Use native backend (Rust)</span>
-        </label>
-        <div id="backend-extra" style="display: none;">
+             energy fields). Three-way: Browser (in-page worker pool, default),
+             Localhost (native Rust backend), Cloud (a local orchestrator that
+             boots a pre-baked VM). Cloud is only offered when the applet is
+             served locally (the orchestrator listens on loopback). -->
+        <label id="compute-source-label" data-i18n="param.compute_source" style="margin-top: 8px;">Compute source</label>
+        <div id="compute-source" role="radiogroup" aria-labelledby="compute-source-label">
+          <label style="display: flex; align-items: center; gap: 6px;">
+            <input type="radio" name="compute-source" id="cs-browser" value="browser" checked />
+            <span data-i18n="cs.browser">Browser (in-page workers)</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 6px;">
+            <input type="radio" name="compute-source" id="cs-localhost" value="localhost" />
+            <span data-i18n="cs.localhost">Localhost (native Rust)</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 6px;">
+            <input type="radio" name="compute-source" id="cs-cloud" value="cloud" />
+            <span data-i18n="cs.cloud">Cloud (orchestrated VM)</span>
+          </label>
+        </div>
+        <div id="localhost-extra" style="display: none;">
           <label data-i18n="param.backend_url">Backend URL</label>
           <input type="text" id="backend-url" value="http://127.0.0.1:8077" spellcheck="false" />
+        </div>
+        <div id="cloud-extra" style="display: none;">
+          <label data-i18n="param.orchestrator_url">Orchestrator URL</label>
+          <input type="text" id="orchestrator-url" value="http://127.0.0.1:8079" spellcheck="false" />
+          <div id="cloud-vm-status" style="font-size: 10px; color: var(--muted); margin-top: 3px;"></div>
+          <div id="cloud-transfer" style="font-size: 10px; color: var(--muted); margin-top: 3px;"></div>
         </div>
 
         <label data-i18n="param.field_cmap">Field colormap</label>
@@ -1254,6 +1274,18 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v26</strong> — 2026-06-23<br/>
+              Cloud compute source. The "Use native backend (Rust)" checkbox is now a
+              three-way <em>Compute source</em> selector: <em>Browser</em> (in-page worker
+              pool, the default), <em>Localhost</em> (the native Rust backend, with its URL
+              field), and <em>Cloud</em>. Cloud drives a small local orchestrator
+              (<code>http://127.0.0.1:8079</code>) that boots a pre-baked VM on demand,
+              waits for it to be healthy, runs the compute through it, then stops the VM
+              after the run (and on tab hide). A transfer-size estimate (upload / download /
+              wire time) shows beforehand. Cloud is only available when the applet is served
+              locally (the orchestrator listens on loopback). On any orchestrator or boot
+              failure the run falls back to the in-browser worker pool. Browser/Localhost
+              behaviour and engine bit-parity are unchanged.</p>
               <p><strong>v25</strong> — 2026-06-22<br/>
               Graph mode now RUNS the comparison instead of disabling it. "Constrain to
               network" is forced on + locked while "Compute on network graph (follow the

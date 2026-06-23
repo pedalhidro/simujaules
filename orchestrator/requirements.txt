@@ -1,0 +1,4 @@
+flask
+gunicorn
+requests
+google-cloud-compute

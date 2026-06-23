@@ -35,7 +35,8 @@
 //                    Params.want_passes instead of ref_points
 //     response body: [u32 json_len][json {"elapsed_ms":…,"passes":bool}]
 //                    [f32 energy × N][f32 passes × N — only when want_passes]
-//   GET /health → {"ok":true,"version":…,"cores":…,"mem_budget_bytes":…}
+//   GET /health → {"ok":true,"version":…,"cores":…,"mem_budget_bytes":…,
+//                  "idle_seconds":…}  (idle_seconds = agora − último cálculo)
 //
 // Both compute endpoints are ports of energy-worker.js (density() / the
 // from/to/round single-point path) — keep cost model, f32 storage, and
@@ -47,8 +48,26 @@ use rayon::prelude::*;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::Read; // Take/read_to_end on the request body reader
-use std::time::Instant;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tiny_http::{Header, Method, Response, Server};
+
+// Carimbo (unix segundos) do último CÁLCULO recebido (/density ou /single) — e
+// NÃO de /health/OPTIONS. Inicializado com o horário de boot em main(). É lido
+// pelo /health (idle_seconds = agora − este carimbo) e, por tabela, pelo
+// idle-watchdog da VM, que desliga a instância quando fica ociosa demais (ver
+// vm/README.md). CRÍTICO carimbar SÓ em cálculo: se /health também carimbasse, o
+// próprio poll periódico do watchdog zeraria o relógio e a VM nunca desligaria.
+// Não toca o caminho de cálculo; é só observabilidade pro backstop de custo.
+static LAST_COMPUTE_AT: AtomicU64 = AtomicU64::new(0);
+
+// Segundos de relógio de parede (epoch). 0 se o relógio estiver antes de 1970.
+fn unix_now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -938,6 +957,12 @@ fn main() {
         density_mem_budget_bytes() as f64 / 1e9,
     );
 
+    // Inicializa o relógio de ociosidade com o horário de boot: uma VM
+    // recém-ligada que ainda não recebeu cálculo mede ociosidade desde o boot (e
+    // não desde 1970), dando margem pro upload inicial do DEM antes do primeiro
+    // /density — e ainda assim se desliga sozinha se nunca for usada.
+    LAST_COMPUTE_AT.store(unix_now_secs(), Ordering::SeqCst);
+
     for req in server.incoming_requests() {
         match (req.method().clone(), req.url().to_string().as_str()) {
             (Method::Options, _) => {
@@ -954,19 +979,37 @@ fn main() {
                 // assuming all cores parallelise — the dominant error on huge
                 // DEMs, where each slice's ~5 GB scratch limits concurrency to
                 // 1-2 regardless of core count. See estimateRunTime in app.js.
+                // idle_seconds = agora − último cálculo (/density|/single), ou
+                // desde o boot se nada rodou ainda (>= 0). /health NÃO carimba,
+                // então o valor cresce de verdade entre cálculos e o watchdog
+                // (poll periódico) desliga a VM quando passa de IDLE_MAX_S.
+                let now = unix_now_secs();
+                let last = LAST_COMPUTE_AT.load(Ordering::SeqCst);
+                let idle_seconds = now.saturating_sub(last);
                 respond_json(
                     req,
                     200,
                     &format!(
-                        r#"{{"ok":true,"version":"{}","cores":{},"mem_budget_bytes":{}}}"#,
+                        r#"{{"ok":true,"version":"{}","cores":{},"mem_budget_bytes":{},"idle_seconds":{}}}"#,
                         env!("CARGO_PKG_VERSION"),
                         rayon::current_num_threads(),
-                        density_mem_budget_bytes()
+                        density_mem_budget_bytes(),
+                        idle_seconds
                     ),
                 );
             }
-            (Method::Post, "/density") => handle_density(req),
-            (Method::Post, "/single") => handle_single(req),
+            // Carimba o relógio de ociosidade SÓ aqui (cálculo real), na chegada
+            // da requisição — ver LAST_COMPUTE_AT. Um cálculo longo conta a
+            // ociosidade desde a chegada, então IDLE_MAX_S deve folgar acima da
+            // duração de um cálculo único (o alvo roda em poucos minutos << 900 s).
+            (Method::Post, "/density") => {
+                LAST_COMPUTE_AT.store(unix_now_secs(), Ordering::SeqCst);
+                handle_density(req)
+            }
+            (Method::Post, "/single") => {
+                LAST_COMPUTE_AT.store(unix_now_secs(), Ordering::SeqCst);
+                handle_single(req)
+            }
             _ => respond_json(req, 404, r#"{"error":"not found"}"#),
         }
     }
