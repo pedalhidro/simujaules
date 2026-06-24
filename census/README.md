@@ -1,18 +1,89 @@
 # census/ — population-weighted reference sampling (IBGE Censo 2022)
 
-Offline tooling that seeds a simujoules **passes-density** field from the real
-population distribution instead of uniform/random reference points. The idea:
-reference "trips" should originate where people actually live, so the density
-field over a DEM approximates real cycling demand.
+Tooling that seeds simujoules reference points from the real population
+distribution instead of uniform/random placement. The idea: reference "trips"
+should originate where people actually live, so the density field over a DEM
+approximates real cycling demand.
 
-Three small scripts, run in order. Nothing here is shipped — `deploy.sh` only
-stages an explicit file list, so `census/` never reaches users (same status as
-`backend/` and the `test-*.mjs` files).
+Two consumers share that idea, from the same IBGE inputs:
+
+- **Live, in-browser ("census" sampling strategy).** `build_fgb.py` joins the
+  national setor population onto the national geometry and writes a single
+  cloud-hosted **FlatGeobuf** (`setores_br_pop.fgb`). The PWA's *Sampling
+  strategy → "IBGE 2022 census"* option fetches only the setores inside the
+  current DEM's bbox over **HTTP Range requests** and runs the same
+  population-weighted Sobol sampler as `sample_census.py`, live. This is the
+  path most users hit. → section **"Live cloud sampling"** below.
+- **Offline precompute (a baked bundle).** `sample_census.py` →
+  `census-density.mjs` samples points and runs the density engine ahead of time,
+  producing an app-importable `simujoules-*.zip`. → sections 0–3 below.
+
+Nothing here is shipped by `deploy.sh` (it stages an explicit file list, so
+`census/` never reaches users, same as `backend/` and the `test-*.mjs` files).
+The cloud FlatGeobuf is **not** in the app bundle either — it lives in the GCS
+bucket and is uploaded by hand (below).
 
 ```
+# live cloud path (most users):
+download_census.py --national  →  build_fgb.py  →  gcloud upload  →  cloud .fgb
+   (BR_setores gpkg + CSV)         (setores_br_pop.fgb)              (queried by bbox)
+
+# offline precompute path (a fixed baked bundle):
 download_census.py  →  sample_census.py  →  census-density.mjs
    (IBGE files)         (points.geojson)      (simujoules-*.zip)
 ```
+
+## Live cloud sampling — `build_fgb.py` (+ upload)
+
+Needs **GDAL ≥ 3.x** on `PATH` (`ogr2ogr`, `ogrinfo`) with the FlatGeobuf
+driver — no geopandas/osgeo bindings required.
+
+```sh
+# 1. national geometry (~1.5 GB) + the national "basico" population CSV
+python download_census.py --national
+
+# 2. join pop (v0001) + simplify (~11 m) + reproject to EPSG:4326 + FlatGeobuf
+python build_fgb.py            # -> setores_br_pop.fgb  (~450 MB, indexed)
+
+# 3. upload (NOT via deploy.sh — the .fgb is cloud-only)
+gcloud storage cp setores_br_pop.fgb \
+  gs://telhas/simujoules/census/setores_br_pop.fgb \
+  --content-type=application/octet-stream --cache-control="public, max-age=86400"
+```
+
+FlatGeobuf carries a packed Hilbert R-tree, so the browser fetches only the
+bbox slice (a few hundred KB for a city), never the whole file — a raw `.gpkg`
+**cannot** be range-queried over HTTP, which is why we convert. The app reads
+the **direct GCS URL** (`storage.googleapis.com/telhas/…`, native Range +
+bucket CORS), set as `CENSUS_FGB_URL` in `app.js`. To repoint, change that
+constant.
+
+**CORS (one-time, bucket-level).** Cross-origin Range reads from the app origin
+need the bucket to allow them and expose the range headers:
+
+```sh
+cat > cors.json <<'JSON'
+[{ "maxAgeSeconds": 3600, "method": ["GET","HEAD"], "origin": ["*"],
+   "responseHeader": ["Content-Type","Cache-Control","Content-Range","Content-Length","Accept-Ranges","ETag"] }]
+JSON
+gcloud storage buckets update gs://telhas --cors-file=cors.json
+```
+
+Verify end-to-end before relying on it in the app (queries the SP city bbox):
+
+```sh
+curl -s -o /dev/null -D - -H "Range: bytes=0-7" \
+  https://storage.googleapis.com/telhas/simujoules/census/setores_br_pop.fgb | grep -i 206   # 206 Partial Content
+ogrinfo -spat -46.77 -23.60 -46.59 -23.48 setores_br_pop.fgb setores | head   # local sanity
+node test-census-sampler.mjs                                                   # sampler math (mirrors app.js)
+```
+
+> `build_fgb.py` works on a (reflink) copy of the malha — the source download
+> is never mutated — and drops the scratch pop table afterwards. The simplify
+> tolerance (`--simplify`, default `0.0001°`) is conservative on purpose:
+> aggressive values can push a sampled point across a real setor edge. Points
+> are locality seeds, not survey-grade; the app still snaps each to a passable
+> DEM cell.
 
 ## 0. Download the IBGE data — `download_census.py`
 

@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""One-shot downloader for IBGE Censo 2022 census-sector data (default: SP).
+"""One-shot downloader for IBGE Censo 2022 census-sector data.
 
 Fetches into ./census_data/:
-  1. Malha de setores censitarios 2022 (geometry, GeoPackage) for one UF.
+  1. Malha de setores censitarios 2022 (geometry, GeoPackage) — one UF, or the
+     whole country (`--national`, a single ~1.5 GB BR_setores_CD2022.gpkg).
   2. Agregados por setor - "basico" table (national zip; total population is
      column v0001), unzipped to its CSV.
+
+`--national` is the input for build_fgb.py, which produces the cloud-hosted
+FlatGeobuf the PWA's "census" sampling reads. `--uf SP` keeps the old offline
+sample_census.py path working on a single state.
 
 Stdlib only. Re-running skips files already present.
 """
@@ -14,11 +19,19 @@ from pathlib import Path
 
 UA = "Mozilla/5.0 (simujoules census downloader)"
 
-MALHA_URL = (
+# Geometry GeoPackage. Per-UF files live under .../gpkg/UF/<UF>/<UF>_..., the
+# national file under .../gpkg/BR/BR_... — so the directory segment differs.
+MALHA_BASE = (
     "https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/"
     "malhas_de_setores_censitarios__divisoes_intramunicipais/censo_2022/"
-    "setores/gpkg/UF/{uf}/{uf}_setores_CD2022.gpkg"
+    "setores/gpkg"
 )
+
+
+def malha_url(code: str) -> str:
+    """code='BR' -> national file; code='SP' -> that UF's file."""
+    seg = "BR" if code == "BR" else f"UF/{code}"
+    return f"{MALHA_BASE}/{seg}/{code}_setores_CD2022.gpkg"
 # NOTE: the date suffix changes when IBGE republishes. If this 404s, list
 # .../Agregados_por_Setores_Censitarios/Agregados_por_Setor_csv/ for the
 # current "basico" filename.
@@ -59,13 +72,17 @@ def download(url: str, dest: Path) -> Path:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Download IBGE Censo 2022 sector data.")
     ap.add_argument("--uf", default="SP", help="State abbreviation (default SP).")
+    ap.add_argument("--national", action="store_true",
+                    help="Fetch the single national BR malha (~1.5 GB) instead of "
+                         "one UF — the input for build_fgb.py.")
     ap.add_argument("-o", "--out", default=Path("census_data"), type=Path)
     ap.add_argument("--dict", action="store_true", help="Also fetch the data dictionary.")
     args = ap.parse_args()
-    uf, out = args.uf.upper(), args.out
+    code = "BR" if args.national else args.uf.upper()
+    out = args.out
 
-    print(f"[1/2] Malha de setores ({uf}) ...")
-    download(MALHA_URL.format(uf=uf), out / f"{uf}_setores_CD2022.gpkg")
+    print(f"[1/2] Malha de setores ({code}) ...")
+    download(malha_url(code), out / f"{code}_setores_CD2022.gpkg")
 
     print("[2/2] Agregados basico (BR) ...")
     zpath = download(BASICO_URL, out / "Agregados_por_setores_basico_BR.zip")
@@ -82,8 +99,10 @@ def main() -> None:
         download(DICT_URL, out / "dicionario_agregados_setores.xlsx")
 
     print(f"\nDone -> {out.resolve()}")
-    print(f"  malha:   {uf}_setores_CD2022.gpkg   (join key: CD_SETOR)")
+    print(f"  malha:   {code}_setores_CD2022.gpkg   (join key: CD_SETOR)")
     print("  pop CSV: basico CSV                 (total population = v0001)")
+    if args.national:
+        print("  next:    python build_fgb.py   (-> setores_br_pop.fgb)")
 
 
 if __name__ == "__main__":

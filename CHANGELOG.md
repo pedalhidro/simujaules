@@ -9,6 +9,31 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v32 — 2026-06-24
+
+### Features
+
+- **New "IBGE 2022 census (population density)" reference-sampling strategy.** A
+  fourth option in the density panel's *Sampling strategy* selector. Instead of
+  spreading reference points uniformly (pseudo-random / Sobol / Halton), it
+  samples them by **where people actually live** — a live, in-browser port of
+  `census/sample_census.py`:
+  - Fetches the census **setores** intersecting the current DEM's bounding box
+    from a cloud-hosted **FlatGeobuf** over **HTTP Range requests** — only the
+    bbox slice transfers (a few hundred KB for a city), never the ~450 MB
+    national file. The dataset is the IBGE 2022 *malha de setores* joined to the
+    *básico* population (`v0001`), built by the new `census/build_fgb.py` and
+    served from `gs://telhas/simujoules/census/setores_br_pop.fgb`.
+  - Weights each setor by `pop · (area clipped to the DEM / full area)`, picks
+    setores by a **1-D Sobol inverse-CDF**, and places each point inside its
+    setor with a **2-D Sobol** bbox draw + point-in-polygon rejection (structural
+    parity with the Python; bit-parity is not required).
+  - **Brazil-only** and **online-only** (consistent with the Overpass/FABDEM/
+    cloud features) — clear messages when the DEM is projected, outside Brazil,
+    has no populated setores, or the network/library is unavailable. Replaces the
+    current reference set (like the GeoJSON file loader); JS-only, backend
+    untouched. Adds the `flatgeobuf` CDN library (runtime-cached like the others).
+
 ## v30 — 2026-06-23
 
 ### Fixes

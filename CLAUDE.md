@@ -163,8 +163,15 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 ```sh
 node test-worker-pool.mjs                  # worker regression suite
 node test-water-raster.mjs                 # OSM water-mask rasterisation (areas/sea/rivers)
+node census/test-census-sampler.mjs        # in-browser census sampler helpers (mirrors app.js)
 cd backend && cargo build --release && node test-backend.mjs
 ```
+
+`census/test-census-sampler.mjs` holds PURE MIRRORS of `app.js`'s census-sampling
+helpers (`pointInPolygon`, `ringArea`/`polyArea`, `clipRingToBbox`/`clippedPolyArea`,
+`sobolScalar1D`) — same hand-kept-in-sync rule as below. It checks population
+weighting, in-polygon placement, and the clip-area ratio. The cloud `.fgb`
+(`census/build_fgb.py` → GCS) is built/uploaded out-of-band, never shipped.
 
 `test-water-raster.mjs` holds PURE MIRRORS of `app.js`'s OSM water-mask helpers
 (`fillRingsEvenOdd`, `rasterPolylineSupercover`, `assembleRings`,

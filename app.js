@@ -264,7 +264,18 @@ const STRINGS = {
   "sampling.random":     { pt: "pseudoaleatória", en: "pseudo-random" },
   "sampling.sobol":      { pt: "Sobol (quase-aleatória)", en: "Sobol (quasi-random)" },
   "sampling.halton":     { pt: "Halton (quase-aleatória)", en: "Halton (quasi-random)" },
-  "help.p.sampling":     { pt: "Sequências quase-aleatórias (QMC) cobrem a área uniformemente sem aglomerados nem vazios — melhor convergência da densidade com menos referências. Cliques sucessivos continuam a sequência em vez de repeti-la.", en: "Quasi-random (QMC) sequences cover the area evenly, without the clumps and gaps of pseudo-random — the density converges with fewer references. Successive clicks continue the sequence rather than repeat it." },
+  "sampling.census":     { pt: "Censo IBGE 2022 (densidade populacional)", en: "IBGE 2022 census (population density)" },
+  "help.p.sampling":     { pt: "Sequências quase-aleatórias (QMC) cobrem a área uniformemente sem aglomerados nem vazios — melhor convergência da densidade com menos referências. Cliques sucessivos continuam a sequência em vez de repeti-la. <strong>Censo IBGE 2022</strong> amostra as referências por densidade populacional (onde as pessoas moram): busca os setores censitários dentro do DEM na nuvem e sorteia pontos ponderados pela população — só funciona para DEMs no Brasil e exige internet.", en: "Quasi-random (QMC) sequences cover the area evenly, without the clumps and gaps of pseudo-random — the density converges with fewer references. Successive clicks continue the sequence rather than repeat it. <strong>IBGE 2022 census</strong> samples references by population density (where people actually live): it fetches the census sectors inside the DEM from the cloud and draws population-weighted points — Brazil-only DEMs, and it needs a network connection." },
+  "census.fetching":     { pt: "Buscando setores censitários…", en: "Fetching census sectors…" },
+  "census.placed":       { pt: "{0} referências distribuídas por população (Censo 2022).", en: "{0} references placed by population (2022 census)." },
+  "census.placed.skipped": { pt: "{0} referências distribuídas por população ({1} fora do DEM ignoradas).", en: "{0} references placed by population ({1} skipped outside the DEM)." },
+  "census.no_dem":       { pt: "Carregue um DEM antes de amostrar pelo censo.", en: "Load a DEM before census sampling." },
+  "census.geographic":   { pt: "A amostragem por censo exige um DEM geográfico (lon/lat).", en: "Census sampling requires a geographic (lon/lat) DEM." },
+  "census.outside_brazil": { pt: "O DEM está fora da cobertura do censo (Brasil).", en: "The DEM is outside census coverage (Brazil)." },
+  "census.no_setores":   { pt: "Nenhum setor censitário com população na extensão do DEM.", en: "No populated census sectors in the DEM extent." },
+  "census.no_points":    { pt: "Os pontos do censo caíram fora do DEM ou em células sem dado.", en: "The census points fell outside the DEM or on nodata cells." },
+  "census.fetch_failed": { pt: "Falha ao buscar setores censitários: {0}", en: "Failed to fetch census sectors: {0}" },
+  "census.lib_missing":  { pt: "Biblioteca FlatGeobuf indisponível (offline?). Reconecte e recarregue.", en: "FlatGeobuf library unavailable (offline?). Reconnect and reload." },
   "ref.clear":           { pt: "Limpar referências", en: "Clear refs" },
   "ref.none":            { pt: "nenhuma referência marcada", en: "no references placed" },
   "ref.show_markers":    { pt: "Mostrar marcadores de referência", en: "Show reference markers" },
@@ -1331,6 +1342,9 @@ const state = {
   // random". Persists across clicks so each batch continues the sequence;
   // reset whenever the refs are cleared or the DEM changes.
   qmcIndex: 0,
+  // Guards the async "census" sampler so a double-click can't fire two
+  // overlapping cloud queries that both clear + re-add reference points.
+  censusInFlight: false,
   // Live-ETA bookkeeping (set on Compute, cleared on done/error).
   computeStartedAt: 0,
   estimatedTotalMs: 0,
@@ -3734,6 +3748,9 @@ function placeRandomRefPoints(n) {
   // preserves the QMC sequences' even coverage over the masked subset.
   const want = Math.max(1, Math.min(2000, n | 0));
   const sampling = document.getElementById("ref-sampling")?.value || "random";
+  // "census" is population-weighted and runs an async cloud query (FlatGeobuf
+  // over the DEM bbox); fork to it and leave the QMC/random paths synchronous.
+  if (sampling === "census") { placeCensusRefPoints(want); return; }
   const nextUV =
     sampling === "sobol"  ? () => sobolPoint2D(++state.qmcIndex) :
     sampling === "halton" ? () => haltonPoint2D(++state.qmcIndex) :
@@ -3763,6 +3780,194 @@ function placeRandomRefPoints(n) {
     placed.push([r, c]);
   }
   for (const rc of placed) addRefPoint(rc);
+}
+
+// ---- Census (IBGE 2022) population-weighted reference sampling ------------
+// A live, in-browser port of census/sample_census.py. Instead of spreading
+// references uniformly, it samples them by where people actually live: fetch
+// the census setores intersecting the DEM bbox from a cloud FlatGeobuf (HTTP
+// Range queries — only the bbox slice transfers, not the ~450 MB national
+// file), weight each setor by pop·(area clipped to the DEM / full area), pick
+// setores by a 1-D Sobol inverse-CDF, and drop each point inside its setor
+// with a 2-D Sobol rejection draw. Brazil-only; needs the network. Structural
+// parity with the Python (NOT bit-parity — there's no harness pairing them).
+const CENSUS_FGB_URL =
+  "https://storage.googleapis.com/telhas/simujoules/census/setores_br_pop.fgb";
+// Built + uploaded out-of-band by census/build_fgb.py — it lives in the cloud
+// bucket, NOT in the deployed app bundle (deploy.sh never stages census/).
+// Coarse Brazil bbox: skip the (multi-MB) index walk for DEMs that can't
+// possibly intersect the national census coverage.
+const BRAZIL_BBOX = { xmin: -74.5, ymin: -34.5, xmax: -28.5, ymax: 6.0 };
+
+// 1-D Sobol / van der Corput scalar in [0,1) — the first axis of sobolPoint2D.
+function sobolScalar1D(i) { return bitReverse32(i >>> 0) / 2 ** 32; }
+
+// Ray-cast (even-odd) point-in-ring test; ring = [[lng,lat], …].
+function pointInRing(x, y, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+    if (((yi > y) !== (yj > y)) &&
+        (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+// A polygon is [outerRing, hole1, …]: inside the outer ring and outside holes.
+function pointInPolygon(x, y, rings) {
+  if (!rings.length || !pointInRing(x, y, rings[0])) return false;
+  for (let h = 1; h < rings.length; h++) if (pointInRing(x, y, rings[h])) return false;
+  return true;
+}
+
+// Shoelace ring area (abs; works on open or closed rings). lon/lat units — we
+// only ever use the clipped/full RATIO, which is valid in any consistent CRS.
+function ringArea(ring) {
+  let a = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++)
+    a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+  return Math.abs(a) / 2;
+}
+function polyArea(rings) {        // outer − holes
+  let a = rings.length ? ringArea(rings[0]) : 0;
+  for (let h = 1; h < rings.length; h++) a -= ringArea(rings[h]);
+  return Math.max(0, a);
+}
+
+// Sutherland–Hodgman clip of a ring against the axis-aligned DEM bbox; returns
+// the clipped vertex list (possibly empty). Used only for the area ratio.
+function clipRingToBbox(ring, bb) {
+  let poly = ring;
+  if (poly.length > 1) {         // drop the duplicate closing vertex if present
+    const a = poly[0], b = poly[poly.length - 1];
+    if (a[0] === b[0] && a[1] === b[1]) poly = poly.slice(0, -1);
+  }
+  const ix = (p, q, x) => { const t = (x - p[0]) / (q[0] - p[0]); return [x, p[1] + t * (q[1] - p[1])]; };
+  const iy = (p, q, y) => { const t = (y - p[1]) / (q[1] - p[1]); return [p[0] + t * (q[0] - p[0]), y]; };
+  const clip = (pts, inside, cut) => {
+    const out = [];
+    for (let i = 0; i < pts.length; i++) {
+      const cur = pts[i], prev = pts[(i + pts.length - 1) % pts.length];
+      const ci = inside(cur), pi = inside(prev);
+      if (ci) { if (!pi) out.push(cut(prev, cur)); out.push(cur); }
+      else if (pi) out.push(cut(prev, cur));
+    }
+    return out;
+  };
+  poly = clip(poly, (p) => p[0] >= bb.xmin, (p, q) => ix(p, q, bb.xmin)); if (!poly.length) return poly;
+  poly = clip(poly, (p) => p[0] <= bb.xmax, (p, q) => ix(p, q, bb.xmax)); if (!poly.length) return poly;
+  poly = clip(poly, (p) => p[1] >= bb.ymin, (p, q) => iy(p, q, bb.ymin)); if (!poly.length) return poly;
+  poly = clip(poly, (p) => p[1] <= bb.ymax, (p, q) => iy(p, q, bb.ymax));
+  return poly;
+}
+function clippedPolyArea(rings, bb) {
+  if (!rings.length) return 0;
+  let a = ringArea(clipRingToBbox(rings[0], bb));
+  for (let h = 1; h < rings.length; h++) a -= ringArea(clipRingToBbox(rings[h], bb));
+  return Math.max(0, a);
+}
+
+// Place `want` references sampled from census population over the DEM bbox.
+// Async + detached from placeRandomRefPoints (the sync QMC paths are unchanged).
+async function placeCensusRefPoints(want) {
+  const fail = (key, ...a) =>
+    void (status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t(key, ...a))}</span>`);
+  if (!state.dem) return fail("census.no_dem");
+  if (!state.dem.isGeographic) return fail("census.geographic");
+  if (typeof flatgeobuf === "undefined") return fail("census.lib_missing");
+  const bb = state.dem.bbox;     // {xmin,ymin,xmax,ymax} lon/lat
+  if (bb.xmax < BRAZIL_BBOX.xmin || bb.xmin > BRAZIL_BBOX.xmax ||
+      bb.ymax < BRAZIL_BBOX.ymin || bb.ymin > BRAZIL_BBOX.ymax)
+    return fail("census.outside_brazil");
+  if (state.censusInFlight) return;
+  state.censusInFlight = true;
+  const btn = document.getElementById("ref-place-random");
+  if (btn) btn.disabled = true;
+  status.textContent = t("census.fetching");
+  try {
+    // 1. Fetch setores intersecting the DEM bbox (HTTP Range over the .fgb).
+    const rect = { minX: bb.xmin, minY: bb.ymin, maxX: bb.xmax, maxY: bb.ymax };
+    const setores = [];          // { parts:[poly…], box:{minx…}, w }
+    let totalW = 0;
+    for await (const f of flatgeobuf.deserialize(CENSUS_FGB_URL, rect)) {
+      const pop = +f?.properties?.pop;
+      if (!Number.isFinite(pop) || pop <= 0) continue;
+      const g = f.geometry;
+      const parts = g?.type === "Polygon" ? [g.coordinates]
+        : g?.type === "MultiPolygon" ? g.coordinates : null;
+      if (!parts) continue;
+      let full = 0, clip = 0;
+      let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+      for (const rings of parts) {
+        full += polyArea(rings);
+        clip += clippedPolyArea(rings, bb);
+        for (const p of rings[0]) {
+          if (p[0] < minx) minx = p[0]; if (p[0] > maxx) maxx = p[0];
+          if (p[1] < miny) miny = p[1]; if (p[1] > maxy) maxy = p[1];
+        }
+      }
+      if (full <= 0) continue;
+      const w = pop * Math.min(1, clip / full);   // pop weighted by in-extent area
+      if (!(w > 0)) continue;
+      setores.push({ parts, box: { minx, miny, maxx, maxy }, w });
+      totalW += w;
+    }
+    if (!setores.length || totalW <= 0) return fail("census.no_setores");
+
+    // 2. Population-weighted setor selection: 1-D Sobol → inverse CDF.
+    const cdf = new Float64Array(setores.length);
+    let acc = 0;
+    for (let i = 0; i < setores.length; i++) { acc += setores[i].w; cdf[i] = acc / totalW; }
+    const searchsorted = (u) => {
+      let lo = 0, hi = setores.length - 1;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (cdf[m] < u) lo = m + 1; else hi = m; }
+      return lo;
+    };
+
+    // 3. Place each point inside its setor: 2-D Sobol bbox draw + PIP rejection.
+    const posCtr = new Map();     // setor idx → its 2-D Sobol counter (continues)
+    const coords = [];
+    for (let k = 0; k < want; k++) {
+      const si = searchsorted(sobolScalar1D(k + 1));
+      const s = setores[si];
+      const { minx, miny, maxx, maxy } = s.box;
+      let ctr = posCtr.get(si) ?? 0, pt = null;
+      for (let tries = 0; tries < 64; tries++) {
+        const [qx, qy] = sobolPoint2D(++ctr);
+        const lng = minx + qx * (maxx - minx);
+        const lat = miny + qy * (maxy - miny);
+        if (s.parts.some((rings) => pointInPolygon(lng, lat, rings))) { pt = [lng, lat]; break; }
+      }
+      posCtr.set(si, ctr);
+      if (!pt) { const r0 = s.parts[0][0]; pt = [r0[0][0], r0[0][1]]; }  // sliver fallback
+      coords.push(pt);
+    }
+
+    // 4. lng/lat → pixel → passable → reference point (reuses the file-load path).
+    const constrained = networkConstraintActive();
+    const valid = [];
+    let skipped = 0;
+    for (const [lng, lat] of coords) {
+      let rc = latLngToPixel(L.latLng(lat, lng));
+      if (rc && constrained) {
+        rc = snapToNetwork(rc);
+        if (!state.networkMask[rc[0] * state.dem.W + rc[1]]) rc = null;
+      }
+      if (rc && effectivePassableAt(rc[0] * state.dem.W + rc[1])) valid.push(rc);
+      else skipped++;
+    }
+    if (!valid.length) return fail("census.no_points");   // refs left untouched
+    clearRefPoints();             // census REPLACES the current set (like file load)
+    for (const rc of valid) addRefPoint(rc);
+    const placed = state.refPoints.length;
+    status.textContent = skipped
+      ? t("census.placed.skipped", placed, skipped)
+      : t("census.placed", placed);
+  } catch (err) {
+    fail("census.fetch_failed", err?.message || String(err));
+  } finally {
+    state.censusInFlight = false;
+    if (btn) btn.disabled = false;
+  }
 }
 
 // Load reference points from a GeoJSON of Point / MultiPoint features. Each

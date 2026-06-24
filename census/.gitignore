@@ -5,6 +5,9 @@ node_modules/
 census_data/
 points.geojson
 *.zip
+# Cloud FlatGeobuf build output (~450 MB) — lives in GCS, never committed.
+*.fgb
+*.work.gpkg
 
 # Python
 __pycache__/

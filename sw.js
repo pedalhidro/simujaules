@@ -252,7 +252,17 @@
 //              the #vec-compare flag + e-max-mode, and load restores the toggle and
 //              rebuilds energyAlt/passesAlt so the scenario picker + difference view
 //              come back. (Graph-mode compare restore is still a follow-up.)
-const VERSION  = "v30";
+//   v31 → v32: New "IBGE 2022 census (population density)" reference-sampling
+//              strategy. Instead of spreading references uniformly, it samples
+//              them where people live: a live port of census/sample_census.py
+//              that fetches the census setores inside the DEM bbox from a cloud
+//              FlatGeobuf (HTTP Range — only the bbox slice transfers, not the
+//              ~450 MB national file), weights each setor by pop·(area in the
+//              DEM / full area), picks setores by a 1-D Sobol inverse-CDF and
+//              drops points inside them with a 2-D Sobol rejection draw. Adds
+//              the flatgeobuf CDN lib (runtime-cached, like geotiff/jszip).
+//              Brazil-only, online-only (like Overpass/FABDEM); JS-only.
+const VERSION  = "v32";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

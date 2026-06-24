@@ -862,6 +862,7 @@
             <option value="random" data-i18n="sampling.random">pseudo-random</option>
             <option value="sobol"  data-i18n="sampling.sobol">Sobol (quasi-random)</option>
             <option value="halton" data-i18n="sampling.halton">Halton (quasi-random)</option>
+            <option value="census" data-i18n="sampling.census">IBGE 2022 census (population density)</option>
           </select>
           <div class="hint" id="ref-display" data-i18n="ref.none" style="margin-top: 3px;">no references placed</div>
           <label style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
@@ -1139,6 +1140,16 @@
     integrity="sha384-8D3Rsfo535FqoC1pHCCQMrNf75UgzyoG/HQm9zOzITRrz3QKzecc2E7JXKGCXoWu"
     crossorigin="anonymous"
   ></script>
+  <!-- FlatGeobuf: cloud-native vector with a packed Hilbert R-tree, so
+       flatgeobuf.deserialize(url, {minX,minY,maxX,maxY}) fetches ONLY the
+       features inside a bbox via HTTP Range requests. Powers the "census"
+       reference-sampling strategy (see placeCensusRefPoints in app.js).
+       crossorigin lets sw.js runtime-cache it offline like the other libs. -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/flatgeobuf@3.36.0/dist/flatgeobuf-geojson.min.js"
+    integrity="sha384-0zsXXGoRDkeFkSmQMO6+loKfQ+SOqY302gh79NpNuSka2VyJzFEpQJggXVHixQ2h"
+    crossorigin="anonymous"
+  ></script>
 
   <!-- Drawer toggle (mobile only). Inline + standalone so the panel is still
        reachable if app.js fails to load. Exposes window.__simuDrawer.close()
@@ -1288,6 +1299,17 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v32</strong> — 2026-06-24<br/>
+              New <em>IBGE 2022 census (population density)</em> reference-sampling
+              strategy. Instead of spreading references uniformly, it samples them by
+              where people actually live: a live, in-browser port of
+              <code>census/sample_census.py</code> that fetches the census setores
+              inside the DEM from a cloud FlatGeobuf over HTTP Range requests (only the
+              bbox slice transfers, not the ~450&nbsp;MB national file), weights each
+              setor by population&nbsp;×&nbsp;(area inside the DEM&nbsp;/&nbsp;full area),
+              picks setores by a 1-D Sobol inverse-CDF and drops points inside them with
+              a 2-D Sobol rejection draw. Brazil-only and online-only (like the OSM and
+              cloud features); replaces the current reference set.</p>
               <p><strong>v30</strong> — 2026-06-23<br/>
               Bundles now round-trip the "Comparar com cenário sem rede" (compare) view:
               the unconstrained energy/passes and the saved difference field are written
