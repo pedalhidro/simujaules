@@ -216,6 +216,7 @@ const STRINGS = {
   "draw.cleared":        { pt: "Desenhos apagados.", en: "Drawings erased." },
   "draw.imp_meta":       { pt: "{0} barreira(s), {1} corredor(es) desenhado(s)", en: "{0} barrier(s), {1} corridor(s) drawn" },
   "draw.portal_meta":    { pt: "{0} portal(is) desenhado(s)", en: "{0} portal(s) drawn" },
+  "draw.delete_this":    { pt: "Apagar este desenho", en: "Delete this drawing" },
   "bridge.show":         { pt: "Mostrar tabuleiros no mapa", en: "Show decks on map" },
   "bridge.opacity":      { pt: "opacidade do tabuleiro", en: "deck opacity" },
   "bridge.none":         { pt: "Nenhuma ponte carregada.", en: "No bridges loaded." },
@@ -3072,9 +3073,28 @@ let drawMode = null; // 'barrier' | 'corridor' | 'portal' while a draw is armed
 
 function ensureDrawLayers() {
   if (!state.drawLayers) {
-    state.drawLayers = { barrier: L.layerGroup().addTo(map), corridor: L.layerGroup().addTo(map) };
+    state.drawLayers = {
+      barrier:  L.layerGroup().addTo(map),
+      corridor: L.layerGroup().addTo(map),
+      portal:   L.layerGroup().addTo(map),
+    };
   }
   return state.drawLayers;
+}
+
+// Bind a popup with a "delete this shape" button to a drawn layer, and stop the
+// click from also reaching the map (which would drop a source/reference point).
+function bindDeletePopup(layer, onDelete) {
+  const btn = document.createElement("button");
+  btn.type = "button"; btn.className = "secondary";
+  btn.textContent = t("draw.delete_this");
+  btn.style.cssText = "margin:0;padding:3px 10px;font-size:12px;";
+  btn.addEventListener("click", () => { layer.closePopup(); onDelete(); });
+  const wrap = document.createElement("div");
+  wrap.style.textAlign = "center";
+  wrap.appendChild(btn);
+  layer.bindPopup(wrap);
+  layer.on("click", (e) => L.DomEvent.stopPropagation(e)); // don't place a point too
 }
 
 // lat/lng polygon rings → DEM-grid Uint8Array (1 inside). null if no geo DEM.
@@ -3142,6 +3162,38 @@ function startDraw(mode) {
   if (window.innerWidth <= 860 && window.__simuDrawer) window.__simuDrawer.close();
 }
 
+// Render a barrier/corridor ring as a clickable polygon (delete popup wired to
+// remove THIS ring from state + rebuild). Reused by draw + restore.
+function addDrawnPolygon(mode, ring) {
+  const key = mode === "barrier" ? "drawnImpassable" : "drawnPassable";
+  const layer = L.polygon(ring, DRAW_STYLE[mode]).addTo(ensureDrawLayers()[mode]);
+  bindDeletePopup(layer, () => {
+    state[key] = (state[key] || []).filter((r) => r !== ring);
+    layer.remove();
+    rebuildDrawnMasks();
+    status.textContent = t("draw.cleared");
+  });
+  return layer;
+}
+
+// Render a drawn portal as a clickable polyline (delete popup removes THIS
+// portal + its bridge). Drawn portals live in their own layer group;
+// applyBridgeOverlay skips drawn bridges so they aren't double-drawn.
+function addDrawnPortalLayer(entry) {
+  const layer = L.polyline(entry.latlngs, DRAW_STYLE.portal).addTo(ensureDrawLayers().portal);
+  bindDeletePopup(layer, () => {
+    state.drawnPortals = (state.drawnPortals || []).filter((p) => p !== entry);
+    state.bridges = (state.bridges || []).filter((b) => !b.drawn);
+    reappendDrawnPortals();
+    layer.remove();
+    applyBridgeOverlay();
+    markBridgesDirty(true);
+    updateDrawMeta();
+    status.textContent = t("draw.cleared");
+  });
+  return layer;
+}
+
 function onDrawCreate(e) {
   const mode = drawMode;
   drawMode = null;
@@ -3156,10 +3208,11 @@ function onDrawCreate(e) {
     const br = makePortalBridge(pts);
     if (!br) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("draw.portal_invalid"))}</span>`; return; }
     state.drawnPortals = state.drawnPortals || [];
-    state.drawnPortals.push({ latlngs: pts });
+    const entry = { latlngs: pts };
+    state.drawnPortals.push(entry);
     state.bridges = state.bridges || [];
     state.bridges.push(br);
-    applyBridgeOverlay();
+    addDrawnPortalLayer(entry);
     markBridgesDirty(true);
     updateDrawMeta();
     status.textContent = t("draw.portal_added", state.drawnPortals.length);
@@ -3169,7 +3222,7 @@ function onDrawCreate(e) {
     const key = mode === "barrier" ? "drawnImpassable" : "drawnPassable";
     state[key] = state[key] || [];
     state[key].push(ring);
-    L.polygon(ring, DRAW_STYLE[mode]).addTo(ensureDrawLayers()[mode]);
+    addDrawnPolygon(mode, ring);
     rebuildDrawnMasks();
     status.textContent = t(mode === "barrier" ? "draw.barrier_added" : "draw.corridor_added", state[key].length);
   }
@@ -3188,6 +3241,7 @@ function clearDrawnImpassable() {
 function clearDrawnPortals() {
   state.drawnPortals = [];
   state.bridges = (state.bridges || []).filter((b) => !b.drawn);
+  ensureDrawLayers().portal.clearLayers();
   applyBridgeOverlay();
   markBridgesDirty(true);
   updateDrawMeta();
@@ -3200,10 +3254,12 @@ function restoreDrawnGeometry() {
   const layers = ensureDrawLayers();
   layers.barrier.clearLayers();
   layers.corridor.clearLayers();
-  for (const ring of state.drawnImpassable || []) L.polygon(ring, DRAW_STYLE.barrier).addTo(layers.barrier);
-  for (const ring of state.drawnPassable || []) L.polygon(ring, DRAW_STYLE.corridor).addTo(layers.corridor);
+  layers.portal.clearLayers();
+  for (const ring of state.drawnImpassable || []) addDrawnPolygon("barrier", ring);
+  for (const ring of state.drawnPassable || []) addDrawnPolygon("corridor", ring);
   state.bridges = (state.bridges || []).filter((b) => !b.drawn);
   reappendDrawnPortals();
+  for (const entry of state.drawnPortals || []) addDrawnPortalLayer(entry);
   state.drawnImpassableMask = rasterizeRingsToMask(state.drawnImpassable);
   state.drawnPassableMask = rasterizeRingsToMask(state.drawnPassable);
   updateDrawMeta();
@@ -3234,6 +3290,7 @@ function applyBridgeOverlay() {
   const op = bridgeOverlayOpacity();
   const group = L.layerGroup();
   for (const br of state.bridges) {
+    if (br.drawn) continue; // user-drawn portals render in their own clickable group
     L.polyline(br.latlngs, {
       color: br.kind === "tunnel" ? "#a26bff" : "#ff7f0e",
       weight: 3, opacity: op, pane: "networkPane", interactive: false,
@@ -4059,6 +4116,9 @@ function renderGraphOverlay() {
 }
 
 map.on("click", (e) => {
+  // While a Geoman draw is armed, map clicks are placing polygon/line vertices —
+  // don't ALSO drop a source/reference point (the two were confounding).
+  if (drawMode || (map.pm && map.pm.globalDrawModeEnabled && map.pm.globalDrawModeEnabled())) return;
   if (!state.dem) {
     status.textContent = t("status.load_dem_first");
     return;
