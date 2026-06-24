@@ -9,6 +9,24 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v33 — 2026-06-24
+
+### Changed
+
+- **App moved to its own domain.** The simulator now lives at the root of
+  **https://simujaules.pedalhidrografi.co/** (a dedicated `gs://simujaules`
+  bucket) instead of `telhas.pedalhidrografi.co/simujoules/`. The brand is
+  spelled **Simujaules** — a deliberate, affective typo of *joules*.
+  - Absolute URLs (canonical / Open Graph / schema.org, the bundled example
+    DEMs, the census FlatGeobuf, `sitemap.xml`, `llms.txt`) repoint to the new
+    root.
+  - The RDF `@vocab` namespace IRI deliberately **stays** on
+    `telhas.pedalhidrografi.co/simujoules/vocab/…` (a stable linked-data
+    identifier) and resolves to the new domain via a redirect, so previously
+    exported bundles keep validating.
+  - Shared raster assets (the `rmsampa-v2` overlay and FABDEM tiles) stay on
+    `telhas`. No engine or compute changes.
+
 ## v32 — 2026-06-24
 
 ### Features

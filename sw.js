@@ -262,7 +262,16 @@
 //              drops points inside them with a 2-D Sobol rejection draw. Adds
 //              the flatgeobuf CDN lib (runtime-cached, like geotiff/jszip).
 //              Brazil-only, online-only (like Overpass/FABDEM); JS-only.
-const VERSION  = "v32";
+//   v32 → v33: App moved to its own domain — now served from the root of
+//              https://simujaules.pedalhidrografi.co/ (dedicated gs://simujaules
+//              bucket) instead of telhas.pedalhidrografi.co/simujoules/. Brand
+//              spelled "Simujaules" (affective typo of joules). Absolute URLs
+//              (canonical/og/schema, example DEMs, census FGB, sitemap, llms.txt)
+//              repoint to the new root; the RDF @vocab namespace IRI stays on
+//              telhas (stable identifier) and resolves via a redirect. Shared
+//              raster assets (rmsampa-v2, FABDEM tiles) stay on telhas. No engine
+//              changes.
+const VERSION  = "v33";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

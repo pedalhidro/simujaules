@@ -16,36 +16,36 @@
        Keep the description in sync with manifest.webmanifest and llms.txt.
        The canonical URL is the deployed root (deploy.sh → GCS + CDN). -->
   <meta name="description" content="Simulador de campos de energia para ciclismo sobre modelos digitais de elevação (DEM): custo assimétrico subida/descida, rotas ótimas, corredores naturais (contagem de passagens) e densidade multi-referência. Gratuito, roda inteiro no navegador. / Cycling energy-field simulator over DEMs — runs entirely in the browser." />
-  <link rel="canonical" href="https://telhas.pedalhidrografi.co/simujoules/" />
+  <link rel="canonical" href="https://simujaules.pedalhidrografi.co/" />
   <meta property="og:type" content="website" />
-  <meta property="og:site_name" content="Simujoules" />
-  <meta property="og:title" content="Simujoules — Simulador bici-geo-energético" />
+  <meta property="og:site_name" content="Simujaules" />
+  <meta property="og:title" content="Simujaules — Simulador bici-geo-energético" />
   <meta property="og:description" content="Campos de energia para ciclismo sobre DEMs: custo assimétrico de subida/descida, rotas ótimas, corredores naturais e densidade de passagens. Roda no navegador, exporta GeoTIFF para QGIS." />
-  <meta property="og:url" content="https://telhas.pedalhidrografi.co/simujoules/" />
-  <meta property="og:image" content="https://telhas.pedalhidrografi.co/simujoules/icons/icon-512.png" />
+  <meta property="og:url" content="https://simujaules.pedalhidrografi.co/" />
+  <meta property="og:image" content="https://simujaules.pedalhidrografi.co/icons/icon-512.png" />
   <meta property="og:locale" content="pt_BR" />
   <meta property="og:locale:alternate" content="en_US" />
   <meta name="twitter:card" content="summary" />
-  <meta name="twitter:title" content="Simujoules — Simulador bici-geo-energético" />
+  <meta name="twitter:title" content="Simujaules — Simulador bici-geo-energético" />
   <meta name="twitter:description" content="Cycling energy fields over elevation models — asymmetric climb/descent costs, optimal routes, natural corridors. Free, in-browser, exports GeoTIFF." />
-  <meta name="twitter:image" content="https://telhas.pedalhidrografi.co/simujoules/icons/icon-512.png" />
+  <meta name="twitter:image" content="https://simujaules.pedalhidrografi.co/icons/icon-512.png" />
   <!-- schema.org structured data: the machine-readable summary search
        engines and LLM crawlers actually parse. -->
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "WebApplication",
-    "name": "Simujoules — Simulador bici-geo-energético",
-    "alternateName": "Simujoules",
-    "url": "https://telhas.pedalhidrografi.co/simujoules/",
+    "name": "Simujaules — Simulador bici-geo-energético",
+    "alternateName": "Simujaules",
+    "url": "https://simujaules.pedalhidrografi.co/",
     "description": "Browser-based simulator of cycling energy fields over digital elevation models (DEMs). Computes asymmetric-cost (climb vs. descent) shortest-path energy fields with Dijkstra on an 8-connected grid, passes counts (natural corridors), top-N alternative routes, multi-reference density, and optional vector-network constraints. Imports GeoTIFF DEMs and GeoPackage networks; exports georeferenced GeoTIFF rasters and reproducible JSON-LD bundles for QGIS.",
     "applicationCategory": "Scientific / GIS web application",
     "operatingSystem": "Any (modern web browser)",
     "browserRequirements": "Requires JavaScript and Web Workers",
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "BRL" },
     "inLanguage": ["pt-BR", "en"],
-    "image": "https://telhas.pedalhidrografi.co/simujoules/icons/icon-512.png",
-    "publisher": { "@type": "Organization", "name": "pedalhidrografi.co", "url": "https://telhas.pedalhidrografi.co/" },
+    "image": "https://simujaules.pedalhidrografi.co/icons/icon-512.png",
+    "publisher": { "@type": "Organization", "name": "pedalhidrografi.co", "url": "https://pedalhidrografi.co/" },
     "featureList": [
       "Asymmetric climb/descent energy cost model (alpha per flat metre, beta per metre climbed, eta downhill recovery)",
       "Energy fields from/to a point or round trip, with per-leg or total energy budgets",
@@ -68,7 +68,7 @@
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Simujoules" />
+  <meta name="apple-mobile-web-app-title" content="Simujaules" />
   <meta name="mobile-web-app-capable" content="yes" />
   <link
     rel="stylesheet" 
@@ -1299,6 +1299,13 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v33</strong> — 2026-06-24<br/>
+              App moved to its own domain: now served from the root of
+              <code>simujaules.pedalhidrografi.co</code> (dedicated bucket) instead of
+              <code>telhas.pedalhidrografi.co/simujoules/</code>, and branded
+              <em>Simujaules</em> (an affective typo of <em>joules</em>). Absolute URLs
+              repoint to the new root; the RDF vocabulary namespace stays on telhas as a
+              stable identifier (resolved via redirect). No engine changes.</p>
               <p><strong>v32</strong> — 2026-06-24<br/>
               New <em>IBGE 2022 census (population density)</em> reference-sampling
               strategy. Instead of spreading references uniformly, it samples them by

@@ -1,9 +1,16 @@
-# Simujoules (sampasimu)
+# Simujaules (sampasimu)
 
 Static, build-step-free PWA that computes asymmetric-cost cycling energy
 fields over DEMs (Dijkstra variants on an 8-connected grid), plus an
 optional native Rust backend. No package.json, no bundler — `index.html`
 loads `app.js` directly and libraries come from CDNs with SRI hashes.
+
+> **Name:** the app is **Simujaules** — a deliberate, affective typo of
+> *joules* ("simu" + "jaules"), NOT a misspelling of "simujoules". Do not
+> "correct" it. The public site lives at `simujaules.pedalhidrografi.co`. Only
+> the **branding / hostnames** use this spelling; internal code identifiers and
+> the legacy `simujoules.jsonld` vocab filename keep the old spelling so
+> exported bundles keep resolving.
 
 ## Layout
 

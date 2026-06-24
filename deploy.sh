@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Deploy the static site to gs://telhas/simujoules (served at
-# https://telhas.pedalhidrografi.co/simujoules/).
+# Deploy the static site to gs://simujaules (served at the root of
+# https://simujaules.pedalhidrografi.co/).
 #
 # Requires: the Google Cloud SDK authenticated against a project with write
-# access to the gs://telhas bucket. Uses `gcloud storage`, NOT `gsutil` — the
+# access to the gs://simujaules bucket. Uses `gcloud storage`, NOT `gsutil` — the
 # bundled gsutil crashes with "module 'sys' has no attribute 'maxint'" on some
 # SDK/Python installs and silently half-uploads (a stale, inconsistent bucket).
 #
-# CDN: telhas.pedalhidrografi.co is fronted by CLOUDFLARE (origin = the GCS
+# CDN: simujaules.pedalhidrografi.co is fronted by CLOUDFLARE (origin = the GCS
 # bucket directly), NOT Google Cloud CDN — so cache invalidation is a Cloudflare
 # purge, not a url-map invalidation. Set these to enable it (skipped if unset):
 #   export CF_API_TOKEN=...   # token with the Zone › Cache Purge permission
@@ -27,8 +27,8 @@
 
 set -euo pipefail
 
-BUCKET="gs://telhas/simujoules"
-PUBLIC_URL="https://telhas.pedalhidrografi.co/simujoules/"
+BUCKET="gs://simujaules"
+PUBLIC_URL="https://simujaules.pedalhidrografi.co/"
 
 cd "$(dirname "$0")"
 
@@ -61,9 +61,9 @@ mkdir -p "$STAGE/vocab"
 cp vocab/simujoules.jsonld "$STAGE/vocab/"
 
 # SEO / LLM-crawler descriptors + the changelog (linked from llms.txt and
-# index.html's noscript). NB: sitemap.xml lives under /simujoules/, not the
-# domain root, so submit it explicitly in Search Console — crawlers won't
-# discover it via a domain-root robots.txt this repo doesn't control.
+# index.html's noscript). sitemap.xml now lives at the subdomain root
+# (https://simujaules.pedalhidrografi.co/sitemap.xml); still worth submitting it
+# explicitly in Search Console.
 cp llms.txt sitemap.xml CHANGELOG.md "$STAGE/"
 
 # PWA assets: manifest, service worker, icons. The service worker has its
@@ -87,8 +87,8 @@ fi
 # 3. Upload with `gcloud storage rsync`:
 #    -r                                      recurse into dem/, icons/, vocab/.
 #    --delete-unmatched-destination-objects  delete bucket objects not in the
-#                                            staging dir (scoped to the
-#                                            simujoules/ prefix) so renames
+#                                            staging dir (the whole dedicated
+#                                            simujaules bucket) so renames
 #                                            don't leave orphans.
 #    --checksums-only                        compare by CRC32C, not mtime — the
 #                                            staging dir gets fresh mtimes every

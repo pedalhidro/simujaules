@@ -132,7 +132,7 @@ def main() -> None:
                             "MAX(pop) mx FROM setores"])
     print(summ.strip())
     print("\nNext: upload + CORS (see README) — NOT shipped by deploy.sh:")
-    print(f"  gcloud storage cp {args.out} gs://telhas/simujoules/census/{args.out.name}")
+    print(f"  gcloud storage cp {args.out} gs://simujaules/census/{args.out.name}")
 
 
 if __name__ == "__main__":

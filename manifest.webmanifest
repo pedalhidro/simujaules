@@ -1,6 +1,6 @@
 {
   "name": "Simulador bici-geo-energético",
-  "short_name": "Simujoules",
+  "short_name": "Simujaules",
   "description": "Asymmetric-cost energy field simulator over digital elevation models, for cycling route analysis.",
   "lang": "pt-BR",
   "start_url": "./",

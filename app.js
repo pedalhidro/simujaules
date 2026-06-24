@@ -1497,11 +1497,11 @@ demFile.addEventListener("change", async (e) => {
 // Three example DEMs hosted alongside the rmsampa-v2 tiles. Wired below.
 const DEM_EXAMPLES = [
   { id: "ex-aguapreta", label: "Entorno da Água Preta", size: "instantâneo",
-    url: "https://telhas.pedalhidrografi.co/simujoules/dem/sampa_aguapreta.tif" },
+    url: "https://simujaules.pedalhidrografi.co/dem/sampa_aguapreta.tif" },
   { id: "ex-centro",    label: "Sampa Centro Expandido", size: "rápido",
-    url: "https://telhas.pedalhidrografi.co/simujoules/dem/sampa_centro.tif" },
+    url: "https://simujaules.pedalhidrografi.co/dem/sampa_centro.tif" },
   { id: "ex-geral",     label: "Sampa Sítio Urbano",    size: "lento",
-    url: "https://telhas.pedalhidrografi.co/simujoules/dem/sampa_geral.tif" },
+    url: "https://simujaules.pedalhidrografi.co/dem/sampa_geral.tif" },
 ];
 
 async function loadDemFromUrl(url, label) {
@@ -3792,7 +3792,7 @@ function placeRandomRefPoints(n) {
 // with a 2-D Sobol rejection draw. Brazil-only; needs the network. Structural
 // parity with the Python (NOT bit-parity — there's no harness pairing them).
 const CENSUS_FGB_URL =
-  "https://storage.googleapis.com/telhas/simujoules/census/setores_br_pop.fgb";
+  "https://storage.googleapis.com/simujaules/census/setores_br_pop.fgb";
 // Built + uploaded out-of-band by census/build_fgb.py — it lives in the cloud
 // bucket, NOT in the deployed app bundle (deploy.sh never stages census/).
 // Coarse Brazil bbox: skip the (multi-MB) index walk for DEMs that can't
