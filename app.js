@@ -376,6 +376,8 @@ const STRINGS = {
   "btn.download_bundle": { pt: "Baixar bundle (.zip)", en: "Download bundle (.zip)" },
   "btn.export_rendered": { pt: "Exportar imagens renderizadas (.zip)", en: "Export rendered images (.zip)" },
   "btn.export_refs":     { pt: "Exportar referências (GeoJSON)", en: "Export references (GeoJSON)" },
+  "ref.export_empty":    { pt: "Nenhuma referência para exportar.", en: "No references to export." },
+  "ref.export_done":     { pt: "{0} referência(s) exportada(s).", en: "Exported {0} reference(s)." },
   "credit":              { pt: "feito por Cláudio e dirigido pelos neogeógrafos geomorfológicos", en: "made by Cláudio, directed by the geomorphological neo-geographers" },
 
   // ---- Help modal -------------------------------------------------------
@@ -1078,6 +1080,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (f) await loadRefPointsFromFile(f);
     ev.target.value = "";   // let the same file be re-loaded
   });
+  document.getElementById("ref-export")?.addEventListener("click", exportRefPoints);
   // Anything that affects the time estimate
   // Inputs that move the (now budget- and engine-aware) time estimate.
   // `alpha` scales the explored region (flat reach ∝ eMax/alpha); the
@@ -1814,6 +1817,18 @@ function centerOnUserLocation() {
       if (btn) btn.disabled = false;
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
+      const acc = pos.coords.accuracy; // metres
+      // Drop a marker + accuracy circle at the located point (replace any prior).
+      if (state.locateMarker) { state.locateMarker.remove(); state.locateMarker = null; }
+      if (state.locateCircle) { state.locateCircle.remove(); state.locateCircle = null; }
+      state.locateMarker = L.circleMarker([lat, lng], {
+        radius: 6, color: "#1f6fd0", weight: 2, fillColor: "#4ea3ff", fillOpacity: 0.9,
+      }).addTo(map);
+      if (Number.isFinite(acc) && acc > 0) {
+        state.locateCircle = L.circle([lat, lng], {
+          radius: acc, color: "#1f6fd0", weight: 1, fillColor: "#4ea3ff", fillOpacity: 0.12,
+        }).addTo(map);
+      }
       // panTo keeps the current zoom; setView would force a zoom change.
       map.panTo([lat, lng]);
       status.textContent = t("locate.centered", lat.toFixed(4), lng.toFixed(4));
@@ -4239,6 +4254,29 @@ async function placeCensusRefPoints(want) {
   }
 }
 
+// Export the current reference points as a GeoJSON FeatureCollection (the
+// inverse of loadRefPointsFromFile). Cells → lon/lat via pixelToLatLng; only
+// works on a geographic DEM (same guard as the loader).
+function exportRefPoints() {
+  if (!state.refPoints || !state.refPoints.length) {
+    status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("ref.export_empty"))}</span>`;
+    return;
+  }
+  const features = [];
+  for (let i = 0; i < state.refPoints.length; i++) {
+    const ll = pixelToLatLng(state.refPoints[i][0], state.refPoints[i][1]);
+    if (!ll) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("ref.load.geographic"))}</span>`; return; }
+    features.push({ type: "Feature", properties: { index: i + 1 }, geometry: { type: "Point", coordinates: [ll.lng, ll.lat] } });
+  }
+  const blob = new Blob([JSON.stringify({ type: "FeatureCollection", features })], { type: "application/geo+json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "referencias.geojson";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  status.textContent = t("ref.export_done", features.length);
+}
+
 // Load reference points from a GeoJSON of Point / MultiPoint features. Each
 // coordinate is converted to a DEM pixel via latLngToPixel and placed through
 // addRefPoint (reusing its mask check / numbered marker / FIFO cap). Replaces
@@ -5550,9 +5588,11 @@ function rerenderCachedResult() {
     const energyColor = blend === "energy" && energy && Number.isFinite(state.lastAutoMin);
     const out = renderFieldToDataURL(passes, W, H, {
       // p10/p90 default; passes counts are heavily long-tailed and a few
-      // "highway" cells would otherwise dominate the stretch.
+      // "highway" cells would otherwise dominate the stretch. maxAboveMin re-takes
+      // p90 over only the cells above auto-min (the near-zero tail washed it out).
       usePercentileBounds: true,
       percentiles: [10, 90],
+      maxAboveMin: true,
       userMin: readRangeInput("passes-vmin", null),
       userMax: readRangeInput("passes-vmax", null),
       gamma: Number.isFinite(gamma) ? gamma : 1,
@@ -5719,6 +5759,15 @@ function renderFieldToDataURL(field, W, H, opts) {
       const at = (p) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p / 100))];
       autoLo = at(pLo);
       autoHi = at(pHi);
+      // Passes density heuristic: the long low tail (near-zero cells) drags the
+      // pHi percentile down, washing the field out. Re-take pHi over only the
+      // cells STRICTLY above auto-min so the upper bound tracks the actual ridges.
+      if (opts.maxAboveMin) {
+        let s = 0;
+        while (s < sorted.length && sorted[s] <= autoLo) s++;
+        const len = sorted.length - s;
+        if (len > 0) autoHi = sorted[s + Math.min(len - 1, Math.floor(len * pHi / 100))];
+      }
     }
   }
   if (opts.autoMin != null) autoLo = opts.autoMin;
@@ -6308,8 +6357,8 @@ function syncRangePlaceholders() {
   // Passes absolute inputs — placeholders show the auto bounds.
   const pLo = document.getElementById("passes-vmin");
   const pHi = document.getElementById("passes-vmax");
-  if (pLo && state.lastPassesAutoMin != null) pLo.placeholder = formatEnergy(state.lastPassesAutoMin);
-  if (pHi && state.lastPassesAutoMax != null) pHi.placeholder = formatEnergy(state.lastPassesAutoMax);
+  if (pLo && state.lastPassesAutoMin != null) pLo.placeholder = formatSci(state.lastPassesAutoMin);
+  if (pHi && state.lastPassesAutoMax != null) pHi.placeholder = formatSci(state.lastPassesAutoMax);
 }
 
 // Density worker-pool size, shared by the runner and the time estimator so
@@ -6912,6 +6961,13 @@ function formatEnergy(v) {
   if (a >= 100) return v.toFixed(0);
   if (a >= 10) return v.toFixed(1);
   return v.toFixed(2);
+}
+
+// Always-scientific formatter — passes/density bounds span many orders of
+// magnitude (≈1e-9…1e-3), so fixed notation is unreadable; show e.g. "3.8e-9".
+function formatSci(v) {
+  if (!Number.isFinite(v) || v === 0) return "0";
+  return v.toExponential(1);
 }
 
 // ------- DEM metadata formatters -------

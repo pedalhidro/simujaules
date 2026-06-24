@@ -123,7 +123,7 @@
        The panel itself is repositioned with `position: fixed` and animated
        on transform — cheap on the GPU, no layout reflow. */
     .drawer-toggle {
-      display: none; /* desktop hides it */
+      display: flex; /* shown on desktop (collapse) + mobile (drawer) */
       position: fixed;
       top: 8px;
       left: 8px;
@@ -296,8 +296,13 @@
     .group.loaded { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
     .group h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 5px 0; font-weight: 500; }
     /* Title row: app name + lang/help actions on one line. */
-    .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+    /* padding-left clears the fixed top-left hamburger (collapse) toggle. */
+    .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; padding-left: 40px; }
     .panel-header h1 { margin: 0; }
+    /* Desktop sidebar collapse: hamburger toggles #app.panel-collapsed. */
+    #app.panel-collapsed { grid-template-columns: 0 1fr; }
+    #app.panel-collapsed > #panel { display: none; }
+    #app.panel-collapsed #sidebar-resizer { display: none; }
     /* Collapsible groups (native <details>). The <summary> replaces the old
        <h2> and carries a rotating caret + the status colour bar. */
     details.group > summary {
@@ -1164,7 +1169,6 @@
         <button class="secondary" id="range-reset" data-i18n="btn.range_reset" style="margin-top: 4px;">Reset ranges to auto</button>
       </details>
 
-      <div class="credit" data-i18n="credit">feito por Claúdio e dirigido pelos neogeógrafos geomorfológicos</div>
       </div><!-- /.panel-cols -->
     </aside>
     <div id="sidebar-resizer" data-i18n-title="resizer.title" title="Drag to set 1–4 columns" aria-hidden="true"></div>
@@ -1237,12 +1241,24 @@
         btn.setAttribute('aria-expanded', open ? 'true' : 'false');
         btn.textContent = open ? '×' : '☰';
       }
-      btn.addEventListener('click', () => setOpen(!panel.classList.contains('open')));
+      const app = document.getElementById('app');
+      const isDesktop = () => window.innerWidth > 860;
+      btn.addEventListener('click', () => {
+        if (isDesktop()) {
+          // Desktop: collapse/expand the docked sidebar (keep the ☰ glyph).
+          const collapsed = app.classList.toggle('panel-collapsed');
+          btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+          btn.textContent = '☰';
+        } else {
+          setOpen(!panel.classList.contains('open'));
+        }
+      });
       backdrop.addEventListener('click', () => setOpen(false));
-      // If the user rotates / resizes back to desktop, reset state so the
-      // panel doesn't sit half-translated on the desktop grid.
+      // On a viewport class change, drop the other mode's state so the panel
+      // doesn't get stuck (half-translated on desktop, or collapsed on mobile).
       window.addEventListener('resize', () => {
-        if (window.innerWidth > 860) setOpen(false);
+        if (isDesktop()) { setOpen(false); }
+        else { app.classList.remove('panel-collapsed'); btn.textContent = '☰'; btn.setAttribute('aria-expanded', 'false'); }
       });
       // Expose so app.js can close the drawer after a successful map click.
       window.__simuDrawer = { close: () => setOpen(false), open: () => setOpen(true) };
@@ -1614,6 +1630,7 @@
               bundle export (GeoTIFF + JSON-LD), PT/EN, FABDEM viewport loader, PWA shell.</p>
             </div>
           </details>
+          <div class="credit" data-i18n="credit" style="margin-top: 14px; text-align: center; opacity: 0.8;">feito por Claúdio e dirigido pelos neogeógrafos geomorfológicos</div>
         </div>
       </div>
     </div>
