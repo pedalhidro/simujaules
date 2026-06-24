@@ -1352,7 +1352,8 @@ function applyBasemap(key) {
   if (baseTileLayer) { baseTileLayer.remove(); baseTileLayer = null; }
   const container = document.getElementById("map");
   if (def.url) {
-    baseTileLayer = L.tileLayer(def.url, def.options).addTo(map);
+    // zIndex 0 keeps the basemap UNDER the rmsampa hydrography overlay (z 10).
+    baseTileLayer = L.tileLayer(def.url, { ...def.options, zIndex: 0 }).addTo(map);
     if (container) container.style.background = "";
   } else if (container) {
     container.style.background = def.color;
@@ -1610,6 +1611,10 @@ const RMSAMPA_URL = "https://telhas.pedalhidrografi.co/rmsampa-v2/{z}/{x}/{y}.pn
 state.tileOverlay = L.tileLayer(RMSAMPA_URL, {
   maxZoom: 19,
   opacity: 0.85,
+  // Keep the hydrography overlay ABOVE the basemap within the tile pane,
+  // regardless of add order (the basemap is re-added on the persistence
+  // refire AFTER this layer, which would otherwise bury it until toggled).
+  zIndex: 10,
   attribution: 'pedalhidrografi.co',
 });
 
