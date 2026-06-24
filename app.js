@@ -203,6 +203,19 @@ const STRINGS = {
   "bridge.no_candidates":{ pt: "A rede carregada não tem pontes/túneis marcados (tags bridge/tunnel).", en: "The loaded network has no bridge/tunnel tags." },
   "bridge.tunnels":      { pt: "Incluir túneis (tunnel=yes)", en: "Include tunnels (tunnel=yes)" },
   "bridge.clear":        { pt: "Limpar pontes", en: "Clear bridges" },
+  "draw.barrier":        { pt: "Desenhar barreira", en: "Draw barrier" },
+  "draw.corridor":       { pt: "Desenhar corredor", en: "Draw corridor" },
+  "draw.portal":         { pt: "Desenhar portal", en: "Draw portal" },
+  "draw.erase":          { pt: "Apagar desenhos", en: "Erase drawings" },
+  "draw.need_dem":       { pt: "Carregue um DEM geográfico (lon/lat) antes de desenhar.", en: "Load a geographic (lon/lat) DEM before drawing." },
+  "draw.drawing":        { pt: "Desenhando… clique para adicionar vértices, duplo-clique para concluir.", en: "Drawing… click to add vertices, double-click to finish." },
+  "draw.barrier_added":  { pt: "Barreira adicionada ({0} no total).", en: "Barrier added ({0} total)." },
+  "draw.corridor_added": { pt: "Corredor passável adicionado ({0} no total).", en: "Passable corridor added ({0} total)." },
+  "draw.portal_added":   { pt: "Portal adicionado ({0} no total).", en: "Portal added ({0} total)." },
+  "draw.portal_invalid": { pt: "Portal inválido (extremos fora do DEM, sobre nodata ou coincidentes).", en: "Invalid portal (endpoints off-DEM, on nodata, or coincident)." },
+  "draw.cleared":        { pt: "Desenhos apagados.", en: "Drawings erased." },
+  "draw.imp_meta":       { pt: "{0} barreira(s), {1} corredor(es) desenhado(s)", en: "{0} barrier(s), {1} corridor(s) drawn" },
+  "draw.portal_meta":    { pt: "{0} portal(is) desenhado(s)", en: "{0} portal(s) drawn" },
   "bridge.show":         { pt: "Mostrar tabuleiros no mapa", en: "Show decks on map" },
   "bridge.opacity":      { pt: "opacidade do tabuleiro", en: "deck opacity" },
   "bridge.none":         { pt: "Nenhuma ponte carregada.", en: "No bridges loaded." },
@@ -677,6 +690,13 @@ function collectConfig() {
     layerOrder: layerOrder.slice(),
     maxWorkers,
     lang: currentLang,
+    // On-map drawn geometry (1C barriers/corridors as lat/lng rings, 1D portals
+    // as lat/lng polylines) so it round-trips through config + bundles.
+    drawn: {
+      impassable: state.drawnImpassable || [],
+      passable: state.drawnPassable || [],
+      portals: (state.drawnPortals || []).map((p) => ({ latlngs: p.latlngs })),
+    },
   };
 }
 
@@ -715,6 +735,13 @@ function applyConfig(cfg) {
     try { localStorage.setItem("simu-max-workers", String(cfg.maxWorkers)); } catch {}
   }
   if (cfg.lang === "en" || cfg.lang === "pt") setLang(cfg.lang);
+  // Restore on-map drawn geometry (overlays + masks + portal bridges).
+  if (cfg.drawn && typeof cfg.drawn === "object") {
+    state.drawnImpassable = Array.isArray(cfg.drawn.impassable) ? cfg.drawn.impassable : [];
+    state.drawnPassable = Array.isArray(cfg.drawn.passable) ? cfg.drawn.passable : [];
+    state.drawnPortals = Array.isArray(cfg.drawn.portals) ? cfg.drawn.portals : [];
+    if (typeof restoreDrawnGeometry === "function") restoreDrawnGeometry();
+  }
   applyColormapToLegend();
   applyLayerControls();
   savePersistedParams();
@@ -1387,6 +1414,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // handler is already wired (restore dispatches synthetic change events).
   setupParamPersistence();
   setupConfigButtons();
+  setupDrawingTools();
 });
 
 const map = L.map("map", { preferCanvas: true }).setView([-23.55, -46.63], 12);
@@ -2225,6 +2253,17 @@ async function loadDemFromArrayBuffer(buf, label) {
   setGroupOpen("pick-points-group", true);
   setGroupOpen("execution-group", true);
   estimateRunTime();
+  // Re-grid any drawn geometry against the new DEM (it may have been restored
+  // from a config import before a DEM was loaded, or the DEM just changed).
+  if ((state.drawnImpassable && state.drawnImpassable.length) ||
+      (state.drawnPassable && state.drawnPassable.length) ||
+      (state.drawnPortals && state.drawnPortals.length)) {
+    state.drawnImpassableMask = rasterizeRingsToMask(state.drawnImpassable);
+    state.drawnPassableMask = rasterizeRingsToMask(state.drawnPassable);
+    state.bridges = (state.bridges || []).filter((b) => !b.drawn);
+    reappendDrawnPortals();
+    if (typeof updateDrawMeta === "function") updateDrawMeta();
+  }
 
   // Build the cmocean.phase + slope hillshade for the new DEM. Renders
   // synchronously — for a 12 M-cell viewport (the FABDEM cap) this takes
@@ -2926,6 +2965,7 @@ function installBridgesFromWays(ways, sourceLabel) {
     return false;
   }
   state.bridges = bridges;
+  reappendDrawnPortals(); // this pull REPLACED state.bridges — keep drawn portals
   state.bridgesMeta = { source: sourceLabel, count: bridges.length, skipped };
   updateBridgeMeta();
   applyBridgeOverlay();
@@ -2937,8 +2977,10 @@ function installBridgesFromWays(ways, sourceLabel) {
 function clearBridges() {
   state.bridges = null;
   state.bridgesMeta = null;
+  state.drawnPortals = []; // 1D "Clear bridges" also drops user-drawn portals
   if (state.bridgesLayer) { state.bridgesLayer.remove(); state.bridgesLayer = null; }
   updateBridgeMeta();
+  if (typeof updateDrawMeta === "function") updateDrawMeta();
   markBridgesDirty(true);
 }
 
@@ -2970,6 +3012,170 @@ function markBridgesDirty(reprobe = false) {
   }
   estimateRunTime();
   syncLoadedHighlights(); // 1D status (loaded/applied) may have changed
+}
+
+// ------- On-map drawing tools (Leaflet-Geoman) -------
+// 1C: barrier polygons (force impassable) + passable-corridor polygons (force
+//     passable) rasterise into state.drawn{Impassable,Passable}Mask, applied in
+//     buildComputeGrid + effectivePassableAt — separate from the file/OSM mask.
+// 1D: portal lines become bridge shortcuts (drawn:true) in state.bridges, so
+//     buildPortals + applyBridgeOverlay pick them up like OSM bridges.
+// All drawn geometry persists via collectConfig/applyConfig (config + bundle).
+const DRAW_STYLE = {
+  barrier:  { color: "#d6493e", weight: 2, fillColor: "#d6493e", fillOpacity: 0.25 },
+  corridor: { color: "#3fb56a", weight: 2, fillColor: "#3fb56a", fillOpacity: 0.22 },
+  portal:   { color: "#1f6fd0", weight: 3, dashArray: "5,5" },
+};
+let drawMode = null; // 'barrier' | 'corridor' | 'portal' while a draw is armed
+
+function ensureDrawLayers() {
+  if (!state.drawLayers) {
+    state.drawLayers = { barrier: L.layerGroup().addTo(map), corridor: L.layerGroup().addTo(map) };
+  }
+  return state.drawLayers;
+}
+
+// lat/lng polygon rings → DEM-grid Uint8Array (1 inside). null if no geo DEM.
+function rasterizeRingsToMask(rings) {
+  if (!state.dem || !state.dem.isGeographic || !rings || !rings.length) return null;
+  const { W, H } = state.dem;
+  const data = new Uint8Array(W * H);
+  for (const ring of rings) fillRingsEvenOdd([ring.map(([lat, lng]) => llToGridFrac(lat, lng))], data, W, H);
+  return data;
+}
+
+function rebuildDrawnMasks() {
+  state.drawnImpassableMask = rasterizeRingsToMask(state.drawnImpassable);
+  state.drawnPassableMask = rasterizeRingsToMask(state.drawnPassable);
+  updateDrawMeta();
+  markImpassableDirty(true); // mask changed → invalidate compute + reprobe
+}
+
+function updateDrawMeta() {
+  const im = document.getElementById("draw-impassable-meta");
+  if (im) im.textContent = t("draw.imp_meta", (state.drawnImpassable || []).length, (state.drawnPassable || []).length);
+  const pm = document.getElementById("draw-portal-meta");
+  if (pm) pm.textContent = t("draw.portal_meta", (state.drawnPortals || []).length);
+}
+
+// Build a bridge object from a drawn portal polyline (mirrors the per-way logic
+// of installBridgesFromWays). Returns null if the endpoints aren't usable.
+function makePortalBridge(latlngs) {
+  if (!state.dem || !state.dem.isGeographic || !latlngs || latlngs.length < 2) return null;
+  const { H, W, dxM, dyM, mask } = state.dem;
+  const inB = (rc) => rc[0] >= 0 && rc[0] < H && rc[1] >= 0 && rc[1] < W;
+  const a = llToCell(latlngs[0][0], latlngs[0][1]);
+  const z = llToCell(latlngs[latlngs.length - 1][0], latlngs[latlngs.length - 1][1]);
+  if (!inB(a) || !inB(z)) return null;
+  const endA = a[0] * W + a[1], endB = z[0] * W + z[1];
+  if (endA === endB || !mask[endA] || !mask[endB]) return null;
+  let deckLenM = 0, prev = a;
+  for (let i = 1; i < latlngs.length; i++) {
+    const cur = llToCell(latlngs[i][0], latlngs[i][1]);
+    deckLenM += Math.hypot((cur[0] - prev[0]) * dyM, (cur[1] - prev[1]) * dxM);
+    prev = cur;
+  }
+  if (!(deckLenM > 0)) return null;
+  return { latlngs, endA, endB, deckLenM, kind: "bridge", layer: 0, name: "drawn", eleA: null, eleB: null, drawn: true };
+}
+
+// Re-append the user-drawn portals to state.bridges (called after any OSM/bundle
+// pull that REPLACES state.bridges, so drawings survive).
+function reappendDrawnPortals() {
+  if (!state.drawnPortals || !state.drawnPortals.length) return;
+  state.bridges = state.bridges || [];
+  for (const p of state.drawnPortals) { const br = makePortalBridge(p.latlngs); if (br) state.bridges.push(br); }
+}
+
+function startDraw(mode) {
+  if (!state.dem || !state.dem.isGeographic) {
+    status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("draw.need_dem"))}</span>`;
+    return;
+  }
+  if (!map.pm) return;
+  drawMode = mode;
+  const shape = mode === "portal" ? "Line" : "Polygon";
+  map.pm.enableDraw(shape, { templineStyle: DRAW_STYLE[mode], hintlineStyle: DRAW_STYLE[mode], pathOptions: DRAW_STYLE[mode] });
+  status.textContent = t("draw.drawing");
+  if (window.innerWidth <= 860 && window.__simuDrawer) window.__simuDrawer.close();
+}
+
+function onDrawCreate(e) {
+  const mode = drawMode;
+  drawMode = null;
+  if (map.pm) map.pm.disableDraw();
+  const layer = e.layer;
+  if (!mode || !layer) { if (layer && layer.remove) layer.remove(); return; }
+  const ll = layer.getLatLngs ? layer.getLatLngs() : null;
+  if (layer.remove) layer.remove(); // drop Geoman's layer; we keep our own
+  if (!ll) return;
+  if (mode === "portal") {
+    const pts = ll.map((p) => [p.lat, p.lng]);
+    const br = makePortalBridge(pts);
+    if (!br) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("draw.portal_invalid"))}</span>`; return; }
+    state.drawnPortals = state.drawnPortals || [];
+    state.drawnPortals.push({ latlngs: pts });
+    state.bridges = state.bridges || [];
+    state.bridges.push(br);
+    applyBridgeOverlay();
+    markBridgesDirty(true);
+    updateDrawMeta();
+    status.textContent = t("draw.portal_added", state.drawnPortals.length);
+  } else {
+    const ring = (Array.isArray(ll[0]) ? ll[0] : ll).map((p) => [p.lat, p.lng]);
+    if (ring.length < 3) return;
+    const key = mode === "barrier" ? "drawnImpassable" : "drawnPassable";
+    state[key] = state[key] || [];
+    state[key].push(ring);
+    L.polygon(ring, DRAW_STYLE[mode]).addTo(ensureDrawLayers()[mode]);
+    rebuildDrawnMasks();
+    status.textContent = t(mode === "barrier" ? "draw.barrier_added" : "draw.corridor_added", state[key].length);
+  }
+}
+
+function clearDrawnImpassable() {
+  state.drawnImpassable = [];
+  state.drawnPassable = [];
+  const layers = ensureDrawLayers();
+  layers.barrier.clearLayers();
+  layers.corridor.clearLayers();
+  rebuildDrawnMasks();
+  status.textContent = t("draw.cleared");
+}
+
+function clearDrawnPortals() {
+  state.drawnPortals = [];
+  state.bridges = (state.bridges || []).filter((b) => !b.drawn);
+  applyBridgeOverlay();
+  markBridgesDirty(true);
+  updateDrawMeta();
+  status.textContent = t("draw.cleared");
+}
+
+// Re-create overlays + masks + portal bridges from restored state.drawn*
+// (after a config import or bundle load).
+function restoreDrawnGeometry() {
+  const layers = ensureDrawLayers();
+  layers.barrier.clearLayers();
+  layers.corridor.clearLayers();
+  for (const ring of state.drawnImpassable || []) L.polygon(ring, DRAW_STYLE.barrier).addTo(layers.barrier);
+  for (const ring of state.drawnPassable || []) L.polygon(ring, DRAW_STYLE.corridor).addTo(layers.corridor);
+  state.bridges = (state.bridges || []).filter((b) => !b.drawn);
+  reappendDrawnPortals();
+  state.drawnImpassableMask = rasterizeRingsToMask(state.drawnImpassable);
+  state.drawnPassableMask = rasterizeRingsToMask(state.drawnPassable);
+  updateDrawMeta();
+  applyBridgeOverlay();
+}
+
+function setupDrawingTools() {
+  document.getElementById("draw-barrier")?.addEventListener("click", () => startDraw("barrier"));
+  document.getElementById("draw-corridor")?.addEventListener("click", () => startDraw("corridor"));
+  document.getElementById("draw-portal")?.addEventListener("click", () => startDraw("portal"));
+  document.getElementById("draw-impassable-clear")?.addEventListener("click", clearDrawnImpassable);
+  document.getElementById("draw-portal-clear")?.addEventListener("click", clearDrawnPortals);
+  if (map.pm) map.on("pm:create", onDrawCreate);
+  updateDrawMeta();
 }
 
 function bridgeOverlayOpacity() {
@@ -7491,6 +7697,9 @@ function bridgesEnabled() { return document.getElementById("bridge-enabled")?.ch
 // clicks/refs can't land on blocked water that the compute would silently drop.
 function effectivePassableAt(idx) {
   if (!state.dem || !state.dem.mask[idx]) return false;
+  // Drawn geometry: a passable corridor wins; a barrier blocks (mirrors buildComputeGrid).
+  if (state.drawnPassableMask && state.drawnPassableMask[idx]) return true;
+  if (state.drawnImpassableMask && state.drawnImpassableMask[idx]) return false;
   if (state.impassable && impassableEnabled() && state.impassable[idx]) {
     return !!(state.corridorSet && state.corridorSet.has(idx));
   }
@@ -7523,6 +7732,17 @@ function buildComputeGrid(opts = {}) {
         mask[i] = 1;                                  // reopen the corridor (even over nodata water)
         if (!maskOnly) height[i] = base[k] + off * ramp[k]; // smooth bridge profile
       }
+    }
+  }
+  // Drawn geometry (1C): barriers block valid cells; passable corridors reopen
+  // them (override). Applied AFTER the file/OSM mask so a drawn corridor wins.
+  const dImp = state.drawnImpassableMask, dPass = state.drawnPassableMask;
+  if (dImp || dPass) {
+    const N = mask.length;
+    for (let i = 0; i < N; i++) {
+      if (!dem.mask[i]) continue;                     // never touch true nodata
+      if (dImp && dImp[i]) mask[i] = 0;
+      if (dPass && dPass[i]) mask[i] = 1;
     }
   }
   return maskOnly

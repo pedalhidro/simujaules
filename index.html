@@ -71,10 +71,18 @@
   <meta name="apple-mobile-web-app-title" content="Simujoules" />
   <meta name="mobile-web-app-capable" content="yes" />
   <link
-    rel="stylesheet" 
+    rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
+  />
+  <!-- Leaflet-Geoman Free — on-map drawing of impassable/passable polygons (1C)
+       and portal lines (1D). SRI + crossorigin so sw.js can runtime-cache it. -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.18.3/dist/leaflet-geoman.css"
+    integrity="sha384-gSVA7ZQriVGEfOMW54uY96acRPyZy0cleKq9KVWNxYYR+GWzYmr/o51k9iA5pfQA"
+    crossorigin="anonymous"
   />
   <style>
     :root {
@@ -837,6 +845,13 @@
           <span data-i18n="imp.invert">Invert (raster marks passable cells)</span>
         </label>
         <button type="button" class="secondary" id="impassable-clear" data-i18n="imp.clear" style="margin-top: 4px;">Clear mask</button>
+        <!-- On-map drawing: barrier polygons (block) + passable corridors (open). -->
+        <div class="row" style="margin-top: 4px;">
+          <button type="button" class="secondary" id="draw-barrier" data-i18n="draw.barrier">Draw barrier</button>
+          <button type="button" class="secondary" id="draw-corridor" data-i18n="draw.corridor">Draw corridor</button>
+        </div>
+        <button type="button" class="secondary" id="draw-impassable-clear" data-i18n="draw.erase" style="margin-top: 4px;">Erase drawings</button>
+        <div class="meta" id="draw-impassable-meta" style="margin-top: 2px;"></div>
         <label id="imp-corridor-row" style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text); opacity: 0.55;">
           <input type="checkbox" id="imp-corridor" disabled />
           <span data-i18n="imp.corridor">Network carves passable corridors across the mask</span>
@@ -873,6 +888,12 @@
           <span data-i18n="bridge.tunnels">Include tunnels (tunnel=yes)</span>
         </label>
         <button type="button" class="secondary" id="bridge-clear" data-i18n="bridge.clear" style="margin-top: 4px;">Clear bridges</button>
+        <!-- On-map drawing: portal lines (a shortcut between the two endpoints). -->
+        <div class="row" style="margin-top: 4px;">
+          <button type="button" class="secondary" id="draw-portal" data-i18n="draw.portal">Draw portal</button>
+          <button type="button" class="secondary" id="draw-portal-clear" data-i18n="draw.erase">Erase drawings</button>
+        </div>
+        <div class="meta" id="draw-portal-meta" style="margin-top: 2px;"></div>
         <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
           <input type="checkbox" id="bridge-show" checked />
           <span data-i18n="bridge.show">Show decks on map</span>
@@ -1189,6 +1210,12 @@
     src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
+  ></script>
+  <!-- Leaflet-Geoman Free (loaded after Leaflet; it augments L.Map with .pm). -->
+  <script
+    src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.18.3/dist/leaflet-geoman.min.js"
+    integrity="sha384-poTDWI/tmUEt0KLQICK55no+TBavCdngfb6kTay+hdEmU0SkVrXiYpu8OBDmAHf3"
+    crossorigin="anonymous"
   ></script>
   <!-- 3.x is required for floating-point GeoTIFF writes — 2.x's writer
        silently truncates Float32/Float64 to uint8. Reader API also gained
