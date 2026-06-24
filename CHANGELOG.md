@@ -9,6 +9,23 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v30 — 2026-06-23
+
+### Fixes
+
+- **Bundles now round-trip the "Comparar com cenário sem rede" (compare) view.**
+  Export/import was unaware of the compare scenario: it saved only the constrained
+  `energy`/`passes`, and metadata never recorded the `#vec-compare` toggle — so a
+  reloaded compare bundle lost the displayed-scenario picker and the difference /
+  unconstrained views entirely. Now `downloadBundle` writes the unconstrained
+  energy + passes and the saved (network-masked, interp-filled) difference field
+  (`energy_unconstrained.tif`, `energy_difference.tif`, `passes_unconstrained.tif`),
+  `buildMetadata` records `compare` plus the previously-missing `e-max-mode`, and
+  load restores the toggle and rebuilds `energyAlt`/`passesAlt` so the scenario
+  picker and the orange/blue difference view come back without recomputing.
+  (Graph-mode "follow the vectors" compare restore remains a known follow-up —
+  graph results aren't cached in the bundle yet.)
+
 ## v29 — 2026-06-23
 
 ### Features

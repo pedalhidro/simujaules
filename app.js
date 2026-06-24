@@ -7162,6 +7162,7 @@ function buildMetadata(result, withOutputs = true) {
     beta:          parseFloat(document.getElementById("beta")?.value),
     eta:           parseFloat(document.getElementById("eta")?.value),
     eMax:          parseFloat(document.getElementById("e-max")?.value) || 0,
+    eMaxMode:      document.getElementById("e-max-mode")?.value || "leg",
     src:           state.src,
     dst:           state.dst,
     wantPasses:    !!document.getElementById("want-passes")?.checked,
@@ -7211,6 +7212,7 @@ function buildMetadata(result, withOutputs = true) {
   const network = {
     enabled:           !!state.networkMask,
     constrain:         !!document.getElementById("vec-constrain")?.checked,
+    compare:           !!document.getElementById("vec-compare")?.checked,
     graphMode:         !!document.getElementById("vec-graph-mode")?.checked,
     junctionMode:      graphJunctionMode(),
     srsId:             state.networkSrsId || null,
@@ -7306,6 +7308,21 @@ function buildMetadata(result, withOutputs = true) {
         type:   "Float64",
         shape:  [dem.H, dem.W],
         file:   "passes.tif",
+      } : null,
+      // Alternate ("compare with the unconstrained / no-network") scenario: the
+      // unconstrained energy + passes and the precomputed (network-masked, interp-
+      // filled) difference field — what the difference/unconstrained views render.
+      // Only the GRID compare path writes these (graph-mode alt lives on
+      // state.lastGraphResult, not exported yet) — gate the descriptors so the
+      // metadata never claims a file the zip omits.
+      energyUnconstrained: (!state.lastGraphResult && result.energyAlt?.unconstrained) ? {
+        format: "GeoTIFF", type: "Float32", shape: [dem.H, dem.W], file: "energy_unconstrained.tif",
+      } : null,
+      energyDifference: (!state.lastGraphResult && result.energyAlt?.difference) ? {
+        format: "GeoTIFF", type: "Float32", shape: [dem.H, dem.W], file: "energy_difference.tif",
+      } : null,
+      passesUnconstrained: (!state.lastGraphResult && result.passesAlt?.unconstrained) ? {
+        format: "GeoTIFF", type: "Float64", shape: [dem.H, dem.W], file: "passes_unconstrained.tif",
       } : null,
       network: state.networkMask ? {
         format: "GeoTIFF",
@@ -7436,6 +7453,18 @@ async function downloadBundle() {
     if (r.passes && !graphMode) {
       zip.file("passes.tif",  new Uint8Array(writeRasterAsGeoTIFF(r.passes, dem, "float64")));
     }
+    // Alternate scenario for a "Comparar com cenário sem rede" (compare) run:
+    // the unconstrained energy/passes and the saved difference field, so the
+    // difference / unconstrained views survive a reload (not just the toggle).
+    if (r.energyAlt?.unconstrained && !graphMode) {
+      zip.file("energy_unconstrained.tif", new Uint8Array(writeRasterAsGeoTIFF(r.energyAlt.unconstrained, dem, "float32")));
+    }
+    if (r.energyAlt?.difference && !graphMode) {
+      zip.file("energy_difference.tif", new Uint8Array(writeRasterAsGeoTIFF(r.energyAlt.difference, dem, "float32")));
+    }
+    if (r.passesAlt?.unconstrained && !graphMode) {
+      zip.file("passes_unconstrained.tif", new Uint8Array(writeRasterAsGeoTIFF(r.passesAlt.unconstrained, dem, "float64")));
+    }
     // The rasterised network mask reproduces the constrained compute even
     // when the source .gpkg isn't handy at reload. Stored as a 1-byte-per-
     // cell GeoTIFF (uint8) so QGIS can also display it as a raster mask.
@@ -7512,6 +7541,15 @@ async function loadBundleFile(file) {
       } else if (pBin) {
         bin.passes = new Float64Array(await pBin.async("arraybuffer"));
       }
+      // Alternate-scenario rasters (compare view): unconstrained energy/passes +
+      // the saved difference field. Held on `bin` so the pending-DEM replay picks
+      // them up too; reconstructed onto state.lastResult.energyAlt/passesAlt below.
+      const euTif = zip.file("energy_unconstrained.tif");
+      if (euTif) bin.energyUnconstrained = await readRasterFromGeoTIFF(await euTif.async("arraybuffer"), "float32");
+      const edTif = zip.file("energy_difference.tif");
+      if (edTif) bin.energyDifference = await readRasterFromGeoTIFF(await edTif.async("arraybuffer"), "float32");
+      const puTif = zip.file("passes_unconstrained.tif");
+      if (puTif) bin.passesUnconstrained = await readRasterFromGeoTIFF(await puTif.async("arraybuffer"), "float64");
       const nTif = zip.file("network.tif"), nBin = zip.file("network.bin");
       if (nTif) {
         bin.network = await readRasterFromGeoTIFF(await nTif.async("arraybuffer"), "uint8");
@@ -7574,6 +7612,7 @@ function applyMetadataToUI(md, bin = {}) {
   set("beta", p.beta);
   set("eta", p.eta);
   set("e-max", p.eMax);
+  set("e-max-mode", p.eMaxMode);
   check("want-passes", p.wantPasses);
   check("want-topn", p.wantTopN);
   set("n-routes", p.nRoutes);
@@ -7626,6 +7665,7 @@ function applyMetadataToUI(md, bin = {}) {
   set("vec-snap", net.snapRadius);
   check("net-interp", net.wantInterp);
   check("vec-constrain", net.constrain);
+  check("vec-compare", net.compare);
   check("vec-graph-mode", net.graphMode);
   if (net.junctionMode) set("vec-junction-mode", net.junctionMode);
   set("net-interp-max-dist", net.interpMaxDistance);
@@ -7799,6 +7839,14 @@ function applyMetadataToUI(md, bin = {}) {
     // over a lone path (renderResult draws one or the other, mirroring a
     // fresh compute where top-N and maximize are mutually exclusive).
     if (energyOk || passesOk || routes || path) {
+      // Rebuild the compare scenarios from the alt rasters so the displayed-
+      // scenario picker + the difference/unconstrained views come back (not just
+      // the toggle). renderResult shows #energy-source-row when these are present.
+      const eu = bin.energyUnconstrained?.length === N ? bin.energyUnconstrained : null;
+      const ed = bin.energyDifference?.length === N ? bin.energyDifference : null;
+      const pu = bin.passesUnconstrained?.length === N ? bin.passesUnconstrained : null;
+      const energyAlt = (eu || ed) ? { unconstrained: eu, difference: ed } : null;
+      const passesAlt = pu ? { unconstrained: pu } : null;
       const synth = {
         energy:      energyOk ? bin.energy : null,
         passes:      passesOk ? bin.passes : null,
@@ -7807,6 +7855,8 @@ function applyMetadataToUI(md, bin = {}) {
         pathLengthM: md.stats?.pathLengthM ?? null,
         routes,
         elapsedMs:   md.elapsedMs ?? 0,
+        energyAlt,
+        passesAlt,
       };
       renderResult(synth);
       restored = true;

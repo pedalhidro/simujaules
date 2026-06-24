@@ -245,7 +245,14 @@
 //              pair: overlap sums to white (max brightness), and the blue–yellow
 //              axis stays discriminable under red–green colour-blindness. The two
 //              passes control groups gain colour-chip labels (Network / Terrain).
-const VERSION  = "v29";
+//   v29 → v30: Bundle export/import now round-trips the "Comparar com cenário sem
+//              rede" (compare) scenario: downloadBundle writes the unconstrained
+//              energy/passes + the saved difference field (energy_unconstrained.tif,
+//              energy_difference.tif, passes_unconstrained.tif), metadata records
+//              the #vec-compare flag + e-max-mode, and load restores the toggle and
+//              rebuilds energyAlt/passesAlt so the scenario picker + difference view
+//              come back. (Graph-mode compare restore is still a follow-up.)
+const VERSION  = "v30";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
