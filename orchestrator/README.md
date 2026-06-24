@@ -1,124 +1,127 @@
-# Orquestrador do Simujoules
+# Orquestrador do Simujaules (Cloud Run)
 
-Serviço **Flask pequeno e LOCAL** — você roda na sua máquina, ele NÃO vai pra
-nuvem. Ele é o único plano de **controle + proxy** entre o applet do Simujoules
-(no navegador) e uma VM de compute no GCP:
+Serviço **Flask pequeno no Cloud Run** (escala-a-zero) que é o plano de
+**controle PÚBLICO e AUTENTICADO** da VM de cálculo no GCP. Ele liga/cria/para/
+deleta a VM sob demanda pro app servido em `https://simujaules.pedalhidrografi.co`
+— inclusive quando acessado **remotamente** (não só localhost).
 
-1. **controla a VM** (liga/desliga, lease, firewall) com as **suas próprias**
-   Application Default Credentials do `gcloud` — sem service account, sem
-   segredo, sem token; e
-2. faz **proxy transparente** (stream, sem bufferizar o corpo inteiro) das
-   requisições pesadas de compute do navegador pro backend Rust que roda na VM.
+> Versão anterior: um Flask **local** em `127.0.0.1` que também fazia **proxy**
+> do compute. Foi substituído por este modelo de nuvem porque o app agora roda
+> num domínio público e o proxy não cabe no Cloud Run (limite de 32 MiB por
+> requisição; um upload de DEM tem centenas de MB).
 
-## Por que existe
+## Arquitetura (dois planos)
 
-O applet roda em `http://localhost:8000` (ou similar). O navegador **bloqueia**
-um POST dali pra `http://IP_PUBLICO_DA_VM` (conteúdo misto / cross-origin pra um
-IP público sem TLS). Mas ele **aceita** falar com `http://127.0.0.1`. Então o
-navegador só fala com este orquestrador — que liga a VM sob demanda e repassa os
-bytes. Os caminhos de compute (`/health`, `/density`, `/single`) são um
-**pass-through opaco** que espelha o backend Rust byte a byte; o frontend nem
-sabe que tem uma VM no meio.
-
-Ele liga só em `127.0.0.1` e usa as **suas** credenciais. **Nunca exponha isto
-na rede.**
-
-## Pré-requisitos
-
-- Python 3 e as dependências:
-  ```sh
-  pip install -r requirements.txt
-  ```
-- Credenciais do GCP (ADC) com permissão pra ligar/parar a instância e editar a
-  regra de firewall:
-  ```sh
-  gcloud auth application-default login
-  ```
-- Uma **VM pré-assada e PARADA** (criada por `../vm/bake-instance.sh`) com o
-  backend Rust instalado como serviço escutando em `:8077`, e a **regra de
-  firewall** `simu-compute-allow-8077` (tcp:8077). O orquestrador aperta o
-  `source_ranges` dessa regra pro IP público de saída dele a cada start.
-
-## Como rodar
-
-Produção (controla a VM real do GCP):
-
-```sh
-python main.py
+```
+navegador (simujaules.pedalhidrografi.co, HTTPS)
+  ├─ CONTROLE: POST /cloud/start|status|stop|keepalive|create|delete   → este serviço (Cloud Run)  +Bearer token
+  │                                                                       → API do GCP: cria/liga/para/deleta a VM,
+  │                                                                         aperta o firewall pro /32 do navegador,
+  │                                                                         reescreve o DNS pro IP efêmero atual
+  └─ DADOS:    POST /density|/single, GET /health (centenas de MB)       → https://compute.simujaules.pedalhidrografi.co
+                                                                            (Caddy na VM: TLS + token + CORS) +Bearer token
+                                                                            → 127.0.0.1:8077 backend Rust (intocado)
 ```
 
-Teste local (sem GCP — não importa nem chama nada da nuvem): finja a máquina de
-estados da VM em memória e faça proxy dos computes pra um backend Rust local
-(suba `cargo run --release` em `../backend`, que escuta em `:8077`):
+O compute NÃO passa por aqui — o navegador fala **direto** com a VM por HTTPS.
+Este serviço só cuida do ciclo de vida.
 
-```sh
-DRY_RUN=1 python main.py
-```
+## Por que cada peça
 
-No `DRY_RUN` o ciclo de vida (`/cloud/start` → `provisioning` → `running` →
-`/cloud/stop`) é simulado com pequenos atrasos, e `/health`, `/density`,
-`/single` viram proxy pro `DRY_RUN_VM_URL` (default `http://127.0.0.1:8077`).
-Dá pra exercitar o fluxo inteiro do frontend sem gastar nada na nuvem.
+- **Cloud Run, escala-a-zero**: a VM grande fica PARADA entre runs, então algo
+  sempre-ligado e barato precisa ligá-la. Custo ocioso ~0.
+- **IP efêmero + DNS dinâmico**: a VM não tem IP estático (cobrado parado). A
+  cada start o orquestrador aponta o registro A de
+  `compute.simujaules.pedalhidrografi.co` (DNS-only no Cloudflare, TTL 60s) pro
+  IP atual. O cert TLS da VM é por **DNS-01** (independe do IP).
+- **Firewall pro /32 do navegador**: lido do `X-Forwarded-For` (no Cloud Run, o
+  1º item é o IP real do cliente). Só o navegador que pediu alcança a porta 443.
+- **Token compartilhado**: a barreira contra qualquer um ligar uma VM de 96
+  vCPUs. O MESMO token vale no controle (aqui) e nos dados (Caddy).
 
-## Variáveis de ambiente
+## Autenticação
 
-| Variável         | Default                  | O que é                                                            |
-|------------------|--------------------------|--------------------------------------------------------------------|
-| `ORCH_PORT`      | `8079`                   | Porta local (liga só em `127.0.0.1`).                              |
-| `GCP_PROJECT`    | `pedal-hidrografico`     | Projeto do GCP.                                                    |
-| `GCP_ZONE`       | `southamerica-east1-a`   | Zona da instância.                                                |
-| `INSTANCE_NAME`  | `simu-compute`           | Nome da VM pré-assada (a ÚNICA tocada).                            |
-| `VM_PORT`        | `8077`                   | Porta do backend Rust na VM.                                      |
-| `FIREWALL_RULE`  | `simu-compute-allow-8077`| Regra de firewall apertada pro IP de saída no start.             |
-| `LEASE_S`        | `900`                    | Duração do lease (s); cada keepalive/uso renova.                  |
-| `IDLE_MAX_S`     | `900`                    | Teto de ociosidade (s) — o lease implementa isto.                 |
-| `HARD_CAP_S`     | `7200`                   | Teto absoluto ligado (s); o lease nunca passa de `started+cap`.  |
-| `HEALTH_WAIT_S`  | `180`                    | Tempo máximo esperando a VM ficar saudável após start (s).        |
-| `DRY_RUN`        | `0`                      | `1`/`true` (ou `--dry-run`) → modo local sem GCP.                 |
-| `DRY_RUN_VM_URL` | `http://127.0.0.1:8077`  | Pra onde o proxy aponta no `DRY_RUN`.                             |
+- Todas as rotas `/cloud/*` (menos `/reap`) exigem
+  `Authorization: Bearer <CLOUD_AUTH_TOKEN>`. Sem token configurado, o serviço
+  recusa tudo (**fail-closed**).
+- `/cloud/reap` usa um token de ADMIN separado (`REAP_TOKEN`), mandado só pelo
+  Cloud Scheduler.
+- O serviço sobe com `--allow-unauthenticated` no Cloud Run **de propósito**: o
+  navegador não apresenta token OIDC do Google; a auth é em nível de app.
 
 ## Endpoints
 
-**Proxy de compute** (espelham o backend Rust byte a byte):
+- `POST /cloud/start` → `{"state","etaSeconds","dataUrl"}` — **cria se ausente**,
+  liga se parada; aperta firewall; aponta DNS. Idempotente.
+- `GET  /cloud/status` → `{"state","dataUrl","externalIp","leaseExpiresAt":null}`
+  — estado do GCP. A **saúde** é confirmada pelo navegador batendo direto em
+  `dataUrl/health` (o firewall já libera o /32 dele).
+- `POST /cloud/stop` → `{"state"}` — para a VM agora; aponta o DNS pro placeholder.
+- `POST /cloud/keepalive` → `{"ok":true}` — no-op (compat.); o custo é contido
+  pelo idle-watchdog DENTRO da VM.
+- `POST /cloud/create` / `POST /cloud/delete` → ciclo de vida explícito.
+- `POST /cloud/reap` (admin) → deleta a VM se PARADA há mais de `REAP_IDLE_DAYS`
+  (default 30), via `lastStopTimestamp`. Custo ocioso de longo prazo → ~0.
+- `GET  /healthz` → liveness do próprio serviço (sem auth).
 
-- `GET /health` — quando a VM está pronta, repassa o `/health` da VM e mescla
-  `idle_seconds`: `{"ok":true,"version":..,"cores":INT,"mem_budget_bytes":INT,"idle_seconds":INT}`.
-  Quando não está pronta, responde na hora `{"ok":false,"vmState":"stopped|provisioning|running|stopping|error"}`
-  (não dispara start — é uma sonda leve).
-- `POST /density` — stream-proxy pro `/density` da VM (auto-start + espera saúde
-  se estiver desligada).
-- `POST /single` — idem, pro `/single`.
+`STATE` ∈ `{ABSENT, STOPPED, PROVISIONING, RUNNING, STOPPING, ERROR}`.
 
-**Ciclo de vida da VM** (consumidos pela máquina de estados de nuvem do frontend):
+## Variáveis de ambiente (principais)
 
-- `POST /cloud/start` → `{"state":STATE,"etaSeconds":INT}` — idempotente (volta
-  rápido se já `RUNNING`); liga a VM parada, aperta o firewall, fixa o lease.
-- `GET /cloud/status` → `{"state":STATE,"healthy":BOOL,"cores":INT_OR_NULL,"memBudgetBytes":INT_OR_NULL,"leaseExpiresAt":UNIXSECONDS_OR_NULL,"externalIp":STRING_OR_NULL}`.
-- `POST /cloud/keepalive` → `{"leaseExpiresAt":UNIXSECONDS}` — estende o lease.
-- `POST /cloud/stop` → `{"state":STATE}` — para a instância agora.
+| Variável            | Default                                  | O que é                                   |
+|---------------------|------------------------------------------|-------------------------------------------|
+| `CLOUD_AUTH_TOKEN`  | (secret)                                 | Token compartilhado (controle + dados).   |
+| `REAP_TOKEN`        | (secret)                                 | Token de admin do `/cloud/reap`.          |
+| `CF_API_TOKEN`      | (secret)                                 | Cloudflare DNS:Edit (registro A + DNS-01).|
+| `CF_ZONE_ID`        | —                                        | Id da zona `pedalhidrografi.co`.          |
+| `DATA_HOST`         | `compute.simujaules.pedalhidrografi.co`  | Hostname do plano de dados (Caddy).       |
+| `APP_ORIGIN`        | `https://simujaules.pedalhidrografi.co`  | Origem do app (CORS).                     |
+| `GCP_PROJECT/ZONE`  | `pedal-hidrografico` / `southamerica-east1-a` | Projeto/zona da VM.                  |
+| `INSTANCE_NAME`     | `simu-compute`                           | Nome da VM (a ÚNICA tocada).              |
+| `FIREWALL_RULE`     | `simu-compute-allow-443`                 | Regra apertada pro /32 do navegador.      |
+| `STARTUP_SCRIPT_URL`| `gs://simujaules/vm/startup-script.sh`   | Startup-script (create-when-missing).     |
+| `REAP_IDLE_DAYS`    | `30`                                     | Dias parada até o reaper deletar.         |
+| `DRY_RUN`           | `0`                                      | `1` → máquina de estados fake, sem GCP.   |
 
-`STATE` ∈ `{STOPPED, PROVISIONING, RUNNING, STOPPING, ERROR}`.
+## Teste local (sem GCP, sem gastar nada)
 
-## Streaming (sem bufferizar)
+```sh
+pip install -r requirements.txt
+DRY_RUN=1 CLOUD_AUTH_TOKEN=segredo REAP_TOKEN=admin python main.py
+# noutro terminal:
+curl -s -XPOST -H 'Authorization: Bearer segredo' localhost:8079/cloud/start
+curl -s     -H 'Authorization: Bearer segredo' localhost:8079/cloud/status
+```
 
-Um campo de energia de DEM grande é volumoso (centenas de MB subindo, mais de
-1 GB descendo). O proxy **nunca** segura o corpo inteiro em memória: lê o upload
-de `request.stream` e o passa como `data=` do `requests`; abre a resposta com
-`stream=True` e devolve um `Response(iter_content(1 MiB), ...)`. O timeout de
-leitura é `None` (compute pode demorar), só o connect tem timeout.
+No `DRY_RUN` o ciclo (`ABSENT → create → PROVISIONING → RUNNING → stop →
+STOPPED → reap → ABSENT`) é simulado em memória; nada do GCP/Cloudflare é
+chamado. (Ver o smoke test em `../` durante o desenvolvimento.)
 
-## Lease / ociosidade / hard-cap
+## Deploy
 
-O estado de lease vive **em memória, num único processo** (várias threads, igual
-ao backend amora com `--workers 1`). Uma thread varredora roda a cada ~30 s e
-**para a VM** quando o lease vence (ociosidade) ou quando o tempo ligado passa
-do `HARD_CAP_S`. Cada keepalive/uso interativo renova o lease (nunca além de
-`started_at + HARD_CAP_S`). Não suba o número de workers do gunicorn — quebraria
-o controle de tempo compartilhado.
+```sh
+CF_ZONE_ID=<id-da-zona> ./deploy-orchestrator.sh
+```
+
+Pré-requisitos (uma vez): os 3 secrets no Secret Manager (`simu-cloud-token`,
+`simu-cf-dns-token`, `simu-reap-token`), a service account `simu-orchestrator`
+com o papel mínimo (start/stop/create/delete de instância, disks.create,
+firewalls.get/update, `actAs` na SA da VM, `secretAccessor` nos 3 secrets), e o
+`startup-script.sh` publicado em `gs://simujaules/vm/`. Detalhes no header do
+`deploy-orchestrator.sh` e em `vm/README.md`.
+
+## Custo
+
+- Cloud Run: ~0 ocioso (escala a zero).
+- VM parada (até 30 dias): só o disco de boot (~US$ 2/mês por 50 GB).
+- **Após 30 dias parada**: o reaper deleta a instância → ~0 (recriada sob
+  demanda no próximo `/cloud/start`).
+- Defesa de custo em camadas: SPOT + firewall-/32 + token + idle-watchdog na VM
+  (+ teto de uptime) + reaper. Recomenda-se também um **alerta de orçamento** no
+  Billing.
 
 ## Segurança
 
-- Liga **só em `127.0.0.1`** — não tem autenticação por design (acesso local
-  confiável, igual aos outros serviços self-hosted do Pedal Hidrográfico).
-- Usa **as suas** credenciais ADC. Qualquer um que alcance a porta pode ligar e
-  comandar a VM. **Não exponha na rede nem faça port-forward.**
+O SA do orquestrador pode **criar/deletar** VMs — o endpoint público é alvo de
+valor. As barreiras são o token compartilhado + firewall-/32 por requisição + o
+token de admin do reaper. Garanta os 3 antes de o serviço ficar acessível.

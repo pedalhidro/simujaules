@@ -44,9 +44,19 @@ GCP_PROJECT="${GCP_PROJECT:-pedal-hidrografico}"
 GCP_ZONE="${GCP_ZONE:-southamerica-east1-a}"
 INSTANCE_NAME="${INSTANCE_NAME:-simu-compute}"
 MACHINE_TYPE="${MACHINE_TYPE:-c4-standard-96}"
-VM_PORT="${VM_PORT:-8077}"
-FIREWALL_RULE="${FIREWALL_RULE:-simu-compute-allow-8077}"
+VM_PORT="${VM_PORT:-8077}"          # backend Rust, agora SÓ em 127.0.0.1
+DATA_PORT="${DATA_PORT:-443}"       # porta pública (Caddy/TLS), liberada no firewall
+FIREWALL_RULE="${FIREWALL_RULE:-simu-compute-allow-443}"
 NETWORK_TAG="${NETWORK_TAG:-simu-compute}"
+
+# Plano de dados (Caddy): hostname estável (TLS por DNS-01), origem do app pra
+# CORS, e os tokens (auth do plano de dados + token DNS Cloudflare). Os tokens
+# vão por metadata — passe-os no ambiente ao rodar o bake manual.
+DATA_HOST="${DATA_HOST:-compute.simujaules.pedalhidrografi.co}"
+APP_ORIGIN="${APP_ORIGIN:-https://simujaules.pedalhidrografi.co}"
+CLOUD_AUTH_TOKEN="${CLOUD_AUTH_TOKEN:-}"   # token compartilhado app↔Caddy
+CF_API_TOKEN="${CF_API_TOKEN:-}"           # token Cloudflare DNS:Edit (DNS-01)
+MAX_UPTIME_S="${MAX_UPTIME_S:-7200}"       # teto rígido de uptime no watchdog
 
 # Modelo de provisionamento: SPOT (barato, preemptável → STOP) ou STANDARD (sob
 # demanda, não preemptável). Use STANDARD se a quota PREEMPTIBLE_CPUS da região
@@ -119,10 +129,10 @@ else
     --project="$GCP_PROJECT" \
     --direction=INGRESS \
     --action=ALLOW \
-    --rules="tcp:${VM_PORT}" \
+    --rules="tcp:${DATA_PORT}" \
     --target-tags="$NETWORK_TAG" \
     --source-ranges="$FW_SOURCE_RANGE" \
-    --description="Simujoules compute backend (porta ${VM_PORT}); origem apertada pelo orquestrador"
+    --description="Simujaules plano de dados (Caddy/TLS porta ${DATA_PORT}); origem apertada pelo orquestrador pro /32 do navegador"
 fi
 echo
 
@@ -150,7 +160,7 @@ else
     --image-project="$IMAGE_PROJECT" \
     --boot-disk-size="$BOOT_DISK_SIZE" \
     --tags="$NETWORK_TAG" \
-    --metadata="vm-port=${VM_PORT},backend-binary-url=${BACKEND_BINARY_URL},max-mem-gb=${MAX_MEM_GB}" \
+    --metadata="vm-port=${VM_PORT},data-port=${DATA_PORT},data-host=${DATA_HOST},app-origin=${APP_ORIGIN},backend-binary-url=${BACKEND_BINARY_URL},max-mem-gb=${MAX_MEM_GB},max-uptime-s=${MAX_UPTIME_S},auth-token=${CLOUD_AUTH_TOKEN},cf-api-token=${CF_API_TOKEN}" \
     --metadata-from-file="startup-script=${STARTUP_SCRIPT}"
 fi
 echo
