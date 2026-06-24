@@ -262,7 +262,22 @@
 //              drops points inside them with a 2-D Sobol rejection draw. Adds
 //              the flatgeobuf CDN lib (runtime-cached, like geotiff/jszip).
 //              Brazil-only, online-only (like Overpass/FABDEM); JS-only.
-const VERSION  = "v32";
+//   v32 → v33: Big UI overhaul. Sidebar restructured into nested collapsible
+//              groups (0 Import/Export · 1 Inputs [1A-1D] · 2 Compute [2A-2C] ·
+//              3 Results [3A-3D]) with per-group status colours, auto-expand, and
+//              a draggable 1-4-column resizer; layer visibility/opacity/order +
+//              basemap (+ Esri satellite) moved to a non-blocking on-map "Controle
+//              de camadas" panel with unified per-layer rows; compute progress/log
+//              floats in a dismissable bottom pill. Full config persistence +
+//              export/import/reset (Group 0) and bundles now embed the whole UI
+//              state. On-map drawing (Leaflet-Geoman): barrier/passable-corridor
+//              polygons (1C) + portal lines (1D) feed the compute. Plus: density
+//              tweaks follow the displayed channel, passes auto-max p90-above-min,
+//              scientific-notation density bounds, desktop sidebar collapse, locate
+//              marker+accuracy circle, credit in the help modal. Adds the
+//              leaflet-geoman CDN lib (runtime-cached). JS/UI only; engine + worker
+//              + backend untouched (bit-parity preserved).
+const VERSION  = "v33";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

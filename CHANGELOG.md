@@ -9,6 +9,51 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v33 — 2026-06-24
+
+A large UI/UX overhaul. **JS/UI only — the compute engine, Web Worker and Rust
+backend are untouched and stay bit-parity; the no-op invariant holds (with no
+drawings/overrides the compute grid is byte-identical).**
+
+### Features
+
+- **Nested collapsible groups.** The sidebar is reorganised into numbered,
+  collapsible `<details>` groups: **0** Import/Export · **1** Inputs
+  (1A DEM · 1B network · 1C barrier mask · 1D bridges) · **2** Compute setup
+  (2A Parameters · 2B Points & references · 2C Execution) · **3** Results
+  (3A Statistics · 3B Energy field · 3C Trajectory density [3C.a network /
+  3C.b terrain] · 3D Legend). Everything starts collapsed except 1A; groups
+  auto-expand as you load a DEM / network / mask / run / bundle. Each group
+  shows a **status colour** (green/orange/yellow/red) reflecting its state.
+- **Layer control panel.** All layer visibility/opacity/stacking-order +
+  basemap (now including an **Esri satellite** option) + reference-marker
+  toggle moved into a **non-blocking, top-right on-map panel** ("Controle de
+  camadas"), opened from a floating map button that highlights while open.
+  Each layer is one row: reorder arrows, visibility, name, opacity.
+- **Floating compute feedback.** The progress bar + status/log messages now
+  float in a dismissable pill at the bottom of the map, so they stay visible
+  regardless of the sidebar layout.
+- **Draggable multi-column sidebar.** Drag the sidebar's right border to snap
+  it to 1–4 fixed-width columns (desktop/landscape); the hamburger also
+  collapses/expands the docked sidebar on desktop. Both are remembered.
+- **Full config persistence + portability.** Every toggle/value now persists
+  across sessions; Group 0 gains **Export / Import / Reset** config buttons,
+  and bundles embed the entire UI state (not just the parameter subset).
+- **On-map drawing tools (Leaflet-Geoman).** Draw **barrier** and **passable
+  corridor** polygons (1C) and **portal** lines (1D) directly on the map; they
+  feed the compute (barriers block, corridors reopen, portals are bridge
+  shortcuts) and round-trip through config + bundles.
+- **Smaller touches:** density tweaks follow the displayed channel (terrain vs
+  network); passes auto-max uses p90 of cells above auto-min; density bounds
+  show in scientific notation; locate drops a marker + accuracy circle; the
+  credit line moved into the help modal.
+
+### Notes
+
+- Adds the **leaflet-geoman** CDN library (SRI-pinned, runtime-cached offline
+  like the other libs). Sampling-strategy order is now Censo (default) / Sobol
+  / Uniforme (Halton dropped).
+
 ## v32 — 2026-06-24
 
 ### Features

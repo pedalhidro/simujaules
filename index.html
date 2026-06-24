@@ -1471,6 +1471,25 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v33</strong> — 2026-06-24<br/>
+              Big UI overhaul (JS/UI only — engine, worker and backend untouched,
+              bit-parity preserved). The sidebar is reorganised into nested,
+              collapsible numbered groups (<em>0</em> Import/Export · <em>1</em>
+              Inputs [1A–1D] · <em>2</em> Compute setup [2A–2C] · <em>3</em> Results
+              [3A–3D]) with per-group status colours, auto-expand, and a draggable
+              1–4-column resizer. Layer visibility/opacity/order + basemap (now with
+              an <em>Esri satellite</em> option) + reference markers moved into a
+              non-blocking on-map <em>Controle de camadas</em> panel (floating
+              button, unified per-layer rows). Compute progress/log float in a
+              dismissable bottom pill. Full config persistence + Export/Import/Reset
+              (Group 0), and bundles embed the entire UI state. On-map drawing
+              (Leaflet-Geoman): <em>barrier</em> + <em>passable corridor</em>
+              polygons (1C) and <em>portal</em> lines (1D) feed the compute and
+              round-trip through config/bundles. Smaller: density tweaks follow the
+              displayed channel (terrain vs network), passes auto-max = p90 above
+              auto-min, scientific-notation density bounds, desktop sidebar collapse,
+              locate marker + accuracy circle, credit moved here. Sampling order is
+              now Censo / Sobol / Uniforme (Halton dropped).</p>
               <p><strong>v32</strong> — 2026-06-24<br/>
               New <em>IBGE 2022 census (population density)</em> reference-sampling
               strategy. Instead of spreading references uniformly, it samples them by
