@@ -335,7 +335,9 @@ const STRINGS = {
   "blend.multiply":      { pt: "multiply", en: "multiply" },
   "blend.overlay":       { pt: "overlay", en: "overlay" },
   "blend.energy":        { pt: "cor da energia (passagens = opacidade)", en: "energy color (passes = opacity)" },
-  "help.p.passes_dual":  { pt: "Vista de diferença: o canal verde (cenário sem restrição) — deixar em branco usa o mesmo valor do vermelho (cenário com restrição).", en: "Difference view: the green channel (unconstrained scenario) — leave blank to use the same value as the red (constrained) channel." },
+  "help.p.passes_dual":  { pt: "Vista de diferença: o canal AZUL (terreno, cenário sem restrição) — deixar em branco usa o mesmo valor do canal LARANJA (rede, cenário com restrição). As duas cores são complementares aditivas (somam branco), então onde os dois cenários passam juntos o brilho é máximo; cada cor sozinha fica no eixo azul–amarelo, discriminável mesmo com daltonismo vermelho-verde.", en: "Difference view: the BLUE channel (terrain, unconstrained scenario) — leave blank to use the same value as the ORANGE channel (network, constrained). The two colours are additive complements (they sum to white), so where both scenarios route together brightness is maximal; each colour alone sits on the blue–yellow axis, discriminable even with red–green colour-blindness." },
+  "passes.chan_net":     { pt: "Rede (com restrição)", en: "Network (constrained)" },
+  "passes.chan_terrain": { pt: "Terreno (livre)", en: "Terrain (unconstrained)" },
   "help.p.passes_blend": { pt: "Mistura das passagens: rampa cinza; com modo \"soma\", células de alta passagem clareiam o campo de energia abaixo. \"Cor da energia\" pinta os corredores com o colormap do campo de energia e usa as passagens como opacidade — min/max/γ moldam a rampa de alfa. Mesmo comportamento auto/pinado da Energia.", en: 'Greyscale ramp; with "add" mode high-pass cells brighten the energy field beneath. "Energy color" paints corridors with the energy field\'s colormap and uses passes for opacity — min/max/γ shape the alpha ramp. Same auto / pinned-range behaviour as Energy.' },
   "btn.range_reset":     { pt: "Reset auto", en: "Reset ranges to auto" },
   "btn.download_bundle": { pt: "Baixar bundle (.zip)", en: "Download bundle (.zip)" },
@@ -4152,7 +4154,21 @@ runBtn.addEventListener("click", async () => {
       );
     };
     const cores = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
-    const P = Math.max(1, Math.min(cores, Math.floor(1.5e9 / (6 * N)), Math.ceil(H / 64)));
+    // Budget the interp pool against deviceMemory like densityPoolSize (GB, spec-
+    // capped at 8) with the #max-workers override, instead of a fixed 1.5 GB that
+    // pinned huge DEMs to ONE worker. Each worker holds the full grid (~6·N bytes:
+    // energy f32 + mask + networkMask) since rays read past band edges. The interp
+    // runs AFTER the Dijkstra workers are freed (and in Cloud mode the browser
+    // never ran them), so this RAM is genuinely available.
+    const devMemGB = navigator.deviceMemory || 4;
+    const memBudget = Math.max(1.5e9, devMemGB * 1e9 * 0.45);
+    const memCap = Math.max(1, Math.floor(memBudget / (6 * N)));
+    const userMax = parseInt(document.getElementById("max-workers")?.value, 10);
+    const overrideN = Number.isFinite(userMax) && userMax > 0 ? userMax : 0;
+    const bandCap = Math.ceil(H / 64);
+    const P = overrideN
+      ? Math.max(1, Math.min(bandCap, overrideN))
+      : Math.max(1, Math.min(cores, memCap, bandCap));
     if (P <= 1) {
       // Single worker — smoothing handled worker-side in the same job.
       const { mask, networkMask } = interpPayload();
@@ -4976,6 +4992,10 @@ function rerenderCachedResult() {
   const dualPasses = energySel === "difference" && r.passes && r.passesAlt?.unconstrained;
   const dualRow = document.getElementById("passes-dual-row");
   if (dualRow) dualRow.style.display = dualPasses ? "" : "none";
+  // The "Network (constrained)" label sits above the shared A-channel controls;
+  // only meaningful in the difference view (where the B/terrain channel exists).
+  const netLabel = document.getElementById("passes-net-label");
+  if (netLabel) netLabel.style.display = dualPasses ? "flex" : "none";
   const passes = (r.passesAlt && energySel === "unconstrained" && r.passesAlt.unconstrained)
     ? r.passesAlt.unconstrained
     : r.passes;
@@ -5304,18 +5324,18 @@ function renderFieldToDataURL(field, W, H, opts) {
   return { url: canvas.toDataURL(), lo, hi };
 }
 
-// Two-scenario passes render for the "difference" view: constrained passes
-// in light red, unconstrained in light green, ADDITIVELY blended on a
-// SHARED scale — overlap genuinely sums toward yellow (the bases are
-// chosen so red+green clamps to a soft yellow, not white), and the alpha
-// adds too, so coincident corridors pop. No subtraction — the user reads
-// where each scenario routes its traffic.
-// Per-channel controls: the A (red/constrained) channel uses the regular
-// passes inputs; the B (green/unconstrained) channel takes optional
-// overrides that fall back to A's RESOLVED values when blank — so by
-// default both channels share one scale (comparable), and each knob can
-// diverge independently. Auto bounds are p10/p90 over BOTH fields'
-// positive cells.
+// Two-scenario passes render for the "difference" view: constrained passes in
+// ORANGE, unconstrained in AZURE BLUE, ADDITIVELY blended on a SHARED scale.
+// The bases are additive complements (sum = white), so overlap goes to MAX
+// brightness where both scenarios route together, and the alpha adds too so
+// coincident corridors pop. The blue–orange axis stays discriminable under
+// red–green colour-blindness (unlike the old red/green). No subtraction — the
+// user reads where each scenario routes its traffic.
+// Per-channel controls: the A (orange/constrained = network) channel uses the
+// regular passes inputs; the B (blue/unconstrained = terrain) channel takes
+// optional overrides that fall back to A's RESOLVED values when blank — so by
+// default both channels share one scale (comparable), and each knob can diverge
+// independently. Auto bounds are p10/p90 over BOTH fields' positive cells.
 function renderDualPassesToDataURL(constrained, unconstrained, W, H, opts) {
   const N = W * H;
   const winA = opts.meanWindow && opts.meanWindow > 1 ? opts.meanWindow : 1;
@@ -5362,10 +5382,12 @@ function renderDualPassesToDataURL(constrained, unconstrained, W, H, opts) {
   const spanB = hiB - loB;
   const gammaExpB = Math.max(0.01, opts.gammaB ?? gammaExp);
 
-  // Light red (constrained) / light green (unconstrained). Their SUM is
-  // (255, 255, 150) — a soft yellow — which is what overlap clamps to.
-  const RA = 255, GA = 105, BA = 70;
-  const RB = 95,  GB = 225, BB = 80;
+  // Channel bases on the COLOURBLIND-SAFE blue–yellow opponent axis (survives
+  // red–green CVD, unlike the old red/green), picked as ADDITIVE COMPLEMENTS so
+  // their per-channel sum is exactly white (255,255,255) = maximum brightness
+  // where both scenarios route together; each alone is maximally discriminable.
+  const RA = 255, GA = 165, BA = 60;   // warm orange — A = constrained (network)
+  const RB = 0,   GB = 90,  BB = 195;  // azure blue  — B = unconstrained (terrain)
 
   // Stride-downsample on huge DEMs (stride=1 → byte-identical under the cap).
   const { stride, outW, outH } = overlayCanvasDims(W, H);

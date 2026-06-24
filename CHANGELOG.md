@@ -9,6 +9,32 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v29 — 2026-06-23
+
+### Features
+
+- **Difference (network-cost) passes view: colourblind-safe recolour.** The
+  two-scenario overlay went from light **red/green** (invisible to red–green
+  colour-blindness; overlap only a soft yellow) to an **orange (network,
+  constrained) / azure-blue (terrain, unconstrained)** additive-complement pair
+  that sums to **white** — so where both scenarios route together brightness is
+  maximal, while each colour alone sits on the blue–yellow opponent axis and
+  stays discriminable under the common red–green CVD. The two passes control
+  groups now carry colour-chip labels (**Network** / **Terrain**) so it's clear
+  which channel each drives.
+
+## v28 — 2026-06-23
+
+### Internal
+
+- **Network interpolation pool budgeted by `deviceMemory`.** The post-compute IDW
+  network fill sized its worker pool against a fixed 1.5 GB budget, which pinned
+  large DEMs (e.g. the 135 M-cell `sampa_geral`) to a single interp worker. It now
+  budgets against `navigator.deviceMemory` (like `densityPoolSize`) plus the
+  `#max-workers` override, so the interp parallelises across cores when the RAM is
+  free (it runs after the Dijkstra workers are released; in Cloud mode the browser
+  never ran them). Output unchanged.
+
 ## v27 — 2026-06-23
 
 ### Features

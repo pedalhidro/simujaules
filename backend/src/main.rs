@@ -47,7 +47,7 @@
 use rayon::prelude::*;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::io::Read; // Take/read_to_end on the request body reader
+use std::io::{Read, Write}; // Take/read_to_end on the request body reader; Write for gzip
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tiny_http::{Header, Method, Response, Server};
@@ -714,6 +714,53 @@ fn respond_json(req: tiny_http::Request, status: u16, body: &str) {
     let _ = req.respond(res);
 }
 
+/// True if the request opted into a gzipped response via `X-Simu-Gzip: 1` — a
+/// CUSTOM header set only by the orchestrator (Cloud path). We do NOT key off
+/// `Accept-Encoding` because browsers send it automatically, which would gzip the
+/// Localhost path (same machine → pure waste) and perturb the parity test.
+fn wants_gzip(req: &tiny_http::Request) -> bool {
+    req.headers()
+        .iter()
+        .any(|h| h.field.equiv("X-Simu-Gzip") && h.value.as_str() == "1")
+}
+
+/// True if the request body arrived gzip-compressed (`Content-Encoding: gzip`).
+fn body_is_gzip(req: &tiny_http::Request) -> bool {
+    req.headers()
+        .iter()
+        .any(|h| h.field.equiv("Content-Encoding") && h.value.as_str().eq_ignore_ascii_case("gzip"))
+}
+
+fn gzip_bytes(data: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    enc.write_all(data)?;
+    enc.finish()
+}
+
+/// Send an octet-stream payload, gzipping it (`Content-Encoding: gzip`) when the
+/// caller opted in. Level-1 (fast): on the sparse, bounded-eMax fields that
+/// dominate, it shrinks the body many-fold cheaply; it never touches the COMPUTED
+/// values (compute path stays bit-parity — the parity test never sets X-Simu-Gzip).
+fn respond_binary(req: tiny_http::Request, out: Vec<u8>, want_gz: bool) {
+    let (body, gz) = if want_gz {
+        match gzip_bytes(&out) {
+            Ok(z) => (z, true),
+            Err(_) => (out, false),
+        }
+    } else {
+        (out, false)
+    };
+    let mut res = Response::from_data(body);
+    for hd in cors_headers() {
+        res.add_header(hd);
+    }
+    res.add_header(Header::from_bytes("Content-Type", "application/octet-stream").unwrap());
+    if gz {
+        res.add_header(Header::from_bytes("Content-Encoding", "gzip").unwrap());
+    }
+    let _ = req.respond(res);
+}
+
 // Ceiling on the request body (covers the largest supported DEMs:
 // ~6 bytes/cell × ~135 M cells ≈ 0.8 GB, so 2 GiB is generous). Without it, a
 // bogus Content-Length pre-allocs an enormous Vec (abort on alloc failure) and
@@ -739,6 +786,20 @@ fn parse_grid_request(
     // fails the exact-length check below (→ 400).
     if req.as_reader().take(MAX_BODY).read_to_end(&mut body).is_err() {
         return Err((400, r#"{"error":"body read failed"}"#.to_string()));
+    }
+    // The orchestrator gzips the upload (Content-Encoding: gzip) to shrink the
+    // expensive laptop→VM hop. Decompress before parsing. The decompressed read
+    // is itself capped at MAX_BODY (anti gzip-bomb).
+    if body_is_gzip(req) {
+        let mut dec = Vec::new();
+        if flate2::read::GzDecoder::new(&body[..])
+            .take(MAX_BODY)
+            .read_to_end(&mut dec)
+            .is_err()
+        {
+            return Err((400, r#"{"error":"gzip decode failed"}"#.to_string()));
+        }
+        body = dec;
     }
     if body.len() < 4 {
         return Err((400, r#"{"error":"truncated body"}"#.to_string()));
@@ -863,12 +924,8 @@ fn handle_density(mut req: tiny_http::Request) {
         t0.elapsed().as_secs_f64() * 1000.0
     );
 
-    let mut res = Response::from_data(out);
-    for hd in cors_headers() {
-        res.add_header(hd);
-    }
-    res.add_header(Header::from_bytes("Content-Type", "application/octet-stream").unwrap());
-    let _ = req.respond(res);
+    let want_gz = wants_gzip(&req);
+    respond_binary(req, out, want_gz);
 }
 
 // POST /single — single-source energy field (the non-density modes' fast path).
@@ -920,12 +977,8 @@ fn handle_single(mut req: tiny_http::Request) {
         t0.elapsed().as_secs_f64() * 1000.0
     );
 
-    let mut res = Response::from_data(out);
-    for hd in cors_headers() {
-        res.add_header(hd);
-    }
-    res.add_header(Header::from_bytes("Content-Type", "application/octet-stream").unwrap());
-    let _ = req.respond(res);
+    let want_gz = wants_gzip(&req);
+    respond_binary(req, out, want_gz);
 }
 
 fn main() {

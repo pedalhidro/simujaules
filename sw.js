@@ -236,7 +236,16 @@
 //              run (only the first run pays the boot), and the orchestrator lease
 //              + in-VM idle-watchdog stop it after ~15 min idle. Tab-hide no
 //              longer stops the VM in keep-warm mode (only a real unload does).
-const VERSION  = "v27";
+//   v27 → v28: Network IDW interpolation pool is now budgeted against
+//              deviceMemory (like densityPoolSize) + the #max-workers override,
+//              instead of a fixed 1.5 GB that collapsed huge DEMs to a single
+//              interp worker. Perf only; output unchanged.
+//   v28 → v29: Difference (network-cost) passes view recoloured from red/green
+//              to an ORANGE (network) + AZURE-BLUE (terrain) additive-complement
+//              pair: overlap sums to white (max brightness), and the blue–yellow
+//              axis stays discriminable under red–green colour-blindness. The two
+//              passes control groups gain colour-chip labels (Network / Terrain).
+const VERSION  = "v29";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

@@ -1033,6 +1033,12 @@
             </label>
             <input type="range" id="passes-opacity" min="0" max="1" step="0.05" value="0.7" data-i18n-aria="aria.opacity_passes" />
           </div>
+          <!-- Shown only in the "difference" view: labels the A (orange =
+               constrained/network) channel that the controls below drive. -->
+          <div id="passes-net-label" style="display:none; align-items:center; gap:5px; font-size:11px; font-weight:600; margin:4px 0 2px;">
+            <span style="width:11px;height:11px;border-radius:2px;background:#ffa53c;display:inline-block;"></span>
+            <span data-i18n="passes.chan_net">Rede (com restrição)</span>
+          </div>
           <div class="row">
             <div>
               <label data-i18n="vmin.passes">min (auto = p10)</label>
@@ -1058,6 +1064,10 @@
                controls above drive the red (constrained) channel. Blank =
                inherit the red channel's resolved value. -->
           <div id="passes-dual-row" style="display: none;">
+            <div style="display:flex; align-items:center; gap:5px; font-size:11px; font-weight:600; margin:4px 0 2px;">
+              <span style="width:11px;height:11px;border-radius:2px;background:#005ac3;display:inline-block;"></span>
+              <span data-i18n="passes.chan_terrain">Terreno (livre)</span>
+            </div>
             <div class="row">
               <div>
                 <label>min</label>
@@ -1278,6 +1288,16 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v29</strong> — 2026-06-23<br/>
+              Difference (network-cost) passes view recoloured from red/green to
+              <em>orange</em> (network) + <em>azure-blue</em> (terrain) — additive
+              complements that sum to white (max brightness on overlap) and stay
+              distinguishable under red–green colour-blindness. The two passes control
+              groups now have colour-chip labels (Network / Terrain).</p>
+              <p><strong>v28</strong> — 2026-06-23<br/>
+              Faster network interpolation on large DEMs: the post-compute IDW fill now
+              sizes its worker pool by <code>deviceMemory</code> instead of a fixed budget
+              that pinned big DEMs to a single worker. Output unchanged.</p>
               <p><strong>v27</strong> — 2026-06-23<br/>
               Cloud <em>keep VM warm between runs</em> toggle: when ticked, a run leaves the
               VM up to reuse on the next run (only the first run pays the boot); the

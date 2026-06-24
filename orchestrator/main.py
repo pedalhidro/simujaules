@@ -32,6 +32,7 @@ import os
 import sys
 import threading
 import time
+import zlib
 
 import requests
 from flask import Flask, Response, jsonify, request, stream_with_context
@@ -461,6 +462,24 @@ def _preflight(_any=None):
 # ----- Proxy de compute (espelha o backend Rust byte a byte) -----------------
 
 
+def _gzip_stream(src, chunk=1 << 20):
+    """Comprime `src` (file-like com .read) em gzip, em streaming — encolhe o
+    upload do DEM (~675 MB) no caminho caro laptop→VM sem bufferizar o corpo
+    inteiro. Nível 1 (rápido); o backend Rust descomprime (Content-Encoding: gzip).
+    """
+    co = zlib.compressobj(1, zlib.DEFLATED, 16 + zlib.MAX_WBITS)  # 16+ = formato gzip
+    while True:
+        buf = src.read(chunk)
+        if not buf:
+            break
+        out = co.compress(buf)
+        if out:
+            yield out
+    tail = co.flush()
+    if tail:
+        yield tail
+
+
 def _stream_proxy(path):
     """Proxy de stream bidirecional p/ VM_IP:VM_PORT/<path>. Não bufferiza."""
     base, _ = ensure_running_and_healthy()
@@ -470,16 +489,21 @@ def _stream_proxy(path):
         return jsonify({"ok": False, "vmState": _vm_state_lower(state)}), 503
 
     try:
-        # Upload: passa request.stream direto como data= (sem ler tudo).
-        # Download: stream=True + iter_content => nada bufferizado inteiro.
-        # timeout=(connect, read): read=None pois um compute grande demora.
+        # Upload: gzip em streaming (encolhe o hop caro laptop→VM). Download:
+        # X-Simu-Gzip faz a VM gzipar a resposta; Accept-Encoding faz o requests
+        # DESCOMPRIMIR no iter_content => o navegador recebe bytes crus (sem mudar
+        # o parser). stream=True => nada bufferizado inteiro. read timeout=None
+        # pois um compute grande demora.
         upstream = requests.post(
             f"{base}{path}",
-            data=request.stream,
+            data=_gzip_stream(request.stream),
             headers={
                 "Content-Type": request.headers.get(
                     "Content-Type", "application/octet-stream"
-                )
+                ),
+                "Content-Encoding": "gzip",  # comprimimos o upload; a VM descomprime
+                "X-Simu-Gzip": "1",          # opta a VM por gzipar a resposta
+                "Accept-Encoding": "gzip",   # requests descomprime o download sozinho
             },
             stream=True,
             timeout=(10, None),
