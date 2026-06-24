@@ -193,7 +193,7 @@ const STRINGS = {
   "imp.meta.corridor":   { pt: "{0} células de corredor (pontes)", en: "{0} bridge-corridor cells" },
   "imp.cell_blocked":    { pt: "Célula intransponível (máscara de barreira) — escolha outra.", en: "Impassable cell (barrier mask) — pick another." },
   "aria.opacity_impassable": { pt: "opacidade da máscara de barreira", en: "impassable mask opacity" },
-  "help.h.impassable":   { pt: "1c · Máscara de barreira", en: "1c · Impassable mask" },
+  "help.h.impassable":   { pt: "Máscara de barreira", en: "Impassable mask" },
 
   // ---- Group: Bridges & tunnels ----------------------------------------
   "group.bridges":       { pt: "1D. Pontes e túneis opcionais (OSM)", en: "1D. Optional bridges & tunnels (OSM)" },
@@ -222,7 +222,7 @@ const STRINGS = {
   "bridge.meta.count":   { pt: "{0} tabuleiros de ponte/túnel", en: "{0} bridge/tunnel decks" },
   "bridge.meta.skipped": { pt: "{0} ignorados (fora do DEM ou apoio sem dado)", en: "{0} skipped (off-DEM or nodata abutment)" },
   "aria.opacity_bridge": { pt: "opacidade dos tabuleiros de ponte", en: "bridge deck opacity" },
-  "help.h.bridges":      { pt: "1d · Pontes e túneis", en: "1d · Bridges & tunnels" },
+  "help.h.bridges":      { pt: "Pontes e túneis", en: "Bridges & tunnels" },
   "help.p.bridges":      { pt: "Puxa pontes (bridge=*) e, opcionalmente, túneis (tunnel=yes) do OpenStreetMap sobre a extensão do DEM, ou extrai-os da rede vetorial já carregada (1b) que tenha tags bridge/tunnel (coluna ou other_tags). Cada estrutura é modelada como um tabuleiro plano entre seus dois apoios no solo: no cálculo em raster ela vira uma \"aresta-portal\" entre as células das pontas, com o custo do tabuleiro plano, sem alterar as células por baixo — então tanto a rota POR CIMA da ponte quanto a rota POR BAIXO ficam corretas. Pressupõe um DEM de terreno nu (sem o tabuleiro). No modo \"seguir os vetores\" (grafo), as pontes/túneis da própria rede (puxada do OSM) são achatadas e os cruzamentos em níveis diferentes não se conectam.", en: "Pulls bridges (bridge=*) and, optionally, tunnels (tunnel=yes) from OpenStreetMap over the DEM extent, or extracts them from the already-loaded vector network (1b) when it carries bridge/tunnel tags (a column or other_tags). Each structure is modelled as a level deck between its two ground abutments: in the raster compute it becomes a \"portal edge\" between the end cells at the flat-deck cost, without altering the cells underneath — so both the route OVER the bridge and the route UNDER it stay correct. Assumes a bare-earth DEM (deck not in the terrain). In \"follow the vectors\" (graph) mode, the network's own bridges/tunnels (pulled from OSM) are flattened and crossings at different layers don't connect." },
   "help.p.impassable":   { pt: "Suba um GeoTIFF binário (1=intransponível, p.ex. corpos d'água). É reamostrado para a grade do DEM por maioria de área (≥50% intransponível ⇒ célula barrada); fora da extensão da máscara assume-se passável. Pode estar em extensão/resolução/CRS diferentes do DEM. Opcionalmente, a rede vetorial (1b) abre corredores passáveis (pontes) sobre a máscara, com um deslocamento suave de elevação que sobe linearmente das margens até o centro da ponte.", en: "Upload a binary GeoTIFF (1=impassable, e.g. water bodies). It is resampled onto the DEM grid by area-coverage majority (≥50% impassable ⇒ blocked cell); outside the mask extent cells are assumed passable. It may have a different extent/resolution/CRS than the DEM. Optionally the vector network (1b) carves passable corridors (bridges) across the mask, with a smooth elevation offset that ramps linearly from the shores up to the bridge centre." },
 
@@ -303,6 +303,7 @@ const STRINGS = {
   "census.lib_missing":  { pt: "Biblioteca FlatGeobuf indisponível (offline?). Reconecte e recarregue.", en: "FlatGeobuf library unavailable (offline?). Reconnect and reload." },
   "ref.clear":           { pt: "Limpar referências", en: "Clear refs" },
   "ref.none":            { pt: "nenhuma referência marcada", en: "no references placed" },
+  "ref.count":           { pt: "{0} referência(s) marcada(s)", en: "{0} reference(s) placed" },
   "ref.show_markers":    { pt: "Mostrar marcadores de referência", en: "Show reference markers" },
   "ref.load_file":       { pt: "Carregar referências (GeoJSON)", en: "Load reference points (GeoJSON)" },
   "help.p.ref_file":     { pt: "Carregue um GeoJSON de pontos (Point), ex.: census/points.geojson. Cada ponto vira uma referência; pontos fora do DEM são ignorados. Substitui as referências atuais; limite de 2000.", en: "Load a GeoJSON of Point features (e.g. census/points.geojson). Each point becomes a reference; points outside the DEM are skipped. Replaces the current references; capped at 2000." },
@@ -396,19 +397,19 @@ const STRINGS = {
   // ---- Help modal -------------------------------------------------------
   "help.usage_heading":  { pt: "Como usar", en: "How to use" },
   "help.theory_heading": { pt: "O que estamos fazendo", en: "What we're doing" },
-  "help.h.load_dem":     { pt: "1 · Carregar um DEM", en: "1 · Load a DEM" },
+  "help.h.load_dem":     { pt: "Carregar um DEM", en: "Load a DEM" },
   "help.p.load_dem":     { pt: "Use o seletor para abrir um GeoTIFF local, clique num exemplo hospedado, ou aperte <em>Carregar FABDEM para a janela atual</em> (puxa tiles FABDEM 1°×1° pela extensão visível, limite de 50 MB). O DEM aparece como retângulo tracejado e o mapa centra automaticamente.", en: 'Use the file picker to open a local GeoTIFF, click a hosted example, or press <em>Load FABDEM for current viewport</em> (pulls FABDEM 1°×1° tiles for the visible extent, 50 MB cap). The DEM is shown as a dashed rectangle and the map auto-centres.' },
-  "help.h.points":       { pt: "2 · Marcar pontos", en: "2 · Pick points" },
+  "help.h.points":       { pt: "Marcar pontos", en: "Pick points" },
   "help.p.points":       { pt: "<strong>Modo padrão:</strong> clique no mapa para o ponto-fonte (<code>src</code>). Um segundo clique marca o destino (<code>dst</code>) — necessário para \"até a fonte\", \"ida e volta\" e \"top-N rotas\".", en: '<strong>Default mode:</strong> click the map for the source (<code>src</code>). A second click sets the destination (<code>dst</code>) — required for "to source point", "round trip", and "top-N routes".' },
   "help.p.density_pts":  { pt: "<strong>Densidade multi-referência:</strong> ative <em>Calcular densidade multi-referência</em>. Os cliques agora adicionam pontos numerados. Use \"Distribuir aleatórias\" ou ajuste <em>N referências</em>. Política FIFO: ao exceder N, o mais antigo é descartado.", en: '<strong>Multi-reference density:</strong> turn on <em>Compute multi-reference density</em>. Clicks now add numbered reference points. Use "Place random" or adjust <em>N references</em>. FIFO policy: above N, the oldest is dropped.' },
-  "help.h.params":       { pt: "3 · Parâmetros", en: "3 · Parameters" },
+  "help.h.params":       { pt: "Parâmetros", en: "Parameters" },
   "help.p.params":       { pt: "<code>α</code> custo por metro horizontal · <code>β</code> custo por metro de subida · <code>η</code> fração da subida recuperada na descida (0–1) · <em>Orçamento</em> para podar caminhos acima de um limiar (≤0 = sem orçamento).", en: '<code>α</code> cost per horizontal metre · <code>β</code> cost per metre uphill · <code>η</code> fraction of the climb recovered on descent (0–1) · <em>Budget</em> prunes paths above a threshold (≤0 = no budget).' },
   "help.h.maximize":     { pt: "Maximizar energia", en: "Maximize energy" },
-  "help.h.compute":      { pt: "4 · Calcular", en: "4 · Compute" },
+  "help.h.compute":      { pt: "Calcular", en: "Compute" },
   "help.p.compute":      { pt: "Aperte <em>Calcular</em>. Habilitado quando há fonte (modo padrão) ou pelo menos uma referência (modo densidade). Estimativa de tempo aparece antes; durante a execução, a barra mostra o tempo restante.", en: 'Hit <em>Compute</em>. Enabled when a source is set (default mode) or at least one reference (density mode). A time estimate appears beforehand; during the run, the bar shows time remaining.' },
-  "help.h.viz":          { pt: "5 · Visualização", en: "5 · Visualisation" },
+  "help.h.viz":          { pt: "Visualização", en: "Visualisation" },
   "help.p.viz":          { pt: "As camadas <em>Energia</em> e <em>Passagens</em> têm visibilidade, opacidade e blend independentes. Mudanças de colormap, range, gamma, filtro média e blend ficam pendentes até <em>Atualizar estilo</em> — evita re-renderizar a cada digitação em DEMs grandes.", en: 'The <em>Energy</em> and <em>Passes</em> layers have independent visibility, opacity, and blend. Changes to colormap, range, gamma, mean filter, and blend stay pending until you click <em>Refresh style</em> — saves re-rendering on every keystroke for large DEMs.' },
-  "help.h.bundle":       { pt: "6 · Salvar / restaurar", en: "6 · Save / reload" },
+  "help.h.bundle":       { pt: "Salvar / restaurar", en: "Save / reload" },
   "help.p.bundle":       { pt: "<em>Baixar bundle (.zip)</em> empacota um <code>metadata.jsonld</code> com todos os parâmetros, mais GeoTIFFs georeferenciados (energy.tif, passes.tif, network.tif, impassable.tif) que abrem direto no QGIS. Para reproduzir: carregue o mesmo DEM, depois leia o JSON-LD ou ZIP.", en: '<em>Download bundle (.zip)</em> packs a <code>metadata.jsonld</code> with every parameter, plus georeferenced GeoTIFFs (energy.tif, passes.tif, network.tif, impassable.tif) that open directly in QGIS. To reproduce: load the same DEM, then read the JSON-LD or ZIP back.' },
   "help.h.cost":         { pt: "Modelo de custo assimétrico", en: "Asymmetric cost model" },
   "help.p.cost":         { pt: "Cada movimento entre células adjacentes (4 cardeais + 4 diagonais) tem custo em \"joules normalizados\". Com <code>Δh = h_v − h_u</code>:", en: 'Each move between adjacent cells (4 cardinal + 4 diagonal) costs "normalised joules". With <code>Δh = h_v − h_u</code>:' },
@@ -702,8 +703,13 @@ function collectConfig() {
 
 // Apply a config object (from import or a bundle). Tolerates a flat params map.
 // Returns true on success. Mirrors setupParamPersistence's restore path.
-function applyConfig(cfg) {
+// opts.persist (default true): write the applied state back to localStorage and
+// adopt the config's language. A BUNDLE load passes persist:false — it applies
+// the params to the live session UI but must NOT clobber the user's saved
+// language / params / layer order / max-workers on disk.
+function applyConfig(cfg, opts = {}) {
   if (!cfg || typeof cfg !== "object") return false;
+  const persist = opts.persist !== false;
   const params = (cfg.params && typeof cfg.params === "object") ? cfg.params : cfg;
   for (const id of PERSIST_IDS) {
     if (!(id in params)) continue;
@@ -726,25 +732,32 @@ function applyConfig(cfg) {
   if (Array.isArray(cfg.layerOrder) && cfg.layerOrder.length) {
     const valid = cfg.layerOrder.filter((k) => DEFAULT_LAYER_ORDER.includes(k));
     layerOrder = valid.concat(DEFAULT_LAYER_ORDER.filter((k) => !valid.includes(k)));
-    try { localStorage.setItem("simu-layer-order", JSON.stringify(layerOrder)); } catch {}
+    if (persist) try { localStorage.setItem("simu-layer-order", JSON.stringify(layerOrder)); } catch {}
     applyLayerOrder();
   }
   if (cfg.maxWorkers != null) {
     const mw = document.getElementById("max-workers");
     if (mw) mw.value = cfg.maxWorkers;
-    try { localStorage.setItem("simu-max-workers", String(cfg.maxWorkers)); } catch {}
+    if (persist) try { localStorage.setItem("simu-max-workers", String(cfg.maxWorkers)); } catch {}
   }
-  if (cfg.lang === "en" || cfg.lang === "pt") setLang(cfg.lang);
+  // Adopt the config's language only on an explicit import — a bundle must not
+  // flip the user's UI language (setLang persists it).
+  if (persist && (cfg.lang === "en" || cfg.lang === "pt")) setLang(cfg.lang);
   // Restore on-map drawn geometry (overlays + masks + portal bridges).
   if (cfg.drawn && typeof cfg.drawn === "object") {
     state.drawnImpassable = Array.isArray(cfg.drawn.impassable) ? cfg.drawn.impassable : [];
     state.drawnPassable = Array.isArray(cfg.drawn.passable) ? cfg.drawn.passable : [];
     state.drawnPortals = Array.isArray(cfg.drawn.portals) ? cfg.drawn.portals : [];
     if (typeof restoreDrawnGeometry === "function") restoreDrawnGeometry();
+    // The grid changed — drop any stale rendered result so it doesn't linger
+    // inconsistent with the restored barriers/corridors/portals. (In the bundle
+    // path the bundle's own result is rendered immediately after, overwriting.)
+    const hasDrawn = (state.drawnImpassable.length || state.drawnPassable.length || state.drawnPortals.length);
+    if (hasDrawn) { markImpassableDirty(true); markBridgesDirty(true); }
   }
   applyColormapToLegend();
   applyLayerControls();
-  savePersistedParams();
+  if (persist) savePersistedParams();
   return true;
 }
 
@@ -1074,13 +1087,13 @@ document.addEventListener("DOMContentLoaded", () => {
         if (state.pathLine)  { state.pathLine.remove();  state.pathLine = null; }
         const srcDisp = document.getElementById("src-display");
         const dstDisp = document.getElementById("dst-display");
-        if (srcDisp) { srcDisp.textContent = "— density —"; srcDisp.classList.remove("set"); }
-        if (dstDisp) { dstDisp.textContent = "— density —"; dstDisp.classList.remove("set"); }
+        if (srcDisp) { srcDisp.textContent = t("pts.density"); srcDisp.classList.remove("set"); }
+        if (dstDisp) { dstDisp.textContent = t("pts.density"); dstDisp.classList.remove("set"); }
       } else {
         const srcDisp = document.getElementById("src-display");
         const dstDisp = document.getElementById("dst-display");
-        if (srcDisp && !state.src) srcDisp.textContent = "— click map —";
-        if (dstDisp && !state.dst) dstDisp.textContent = "— optional —";
+        if (srcDisp && !state.src) srcDisp.textContent = t("pts.click_map");
+        if (dstDisp && !state.dst) dstDisp.textContent = t("pts.optional");
       }
 
       // Energy layer stays available in density mode — when refs > 0 the
@@ -1295,13 +1308,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const orderList = document.getElementById("layer-order-list");
   // Per-layer visibility/opacity input ids the modal rows PROXY (the real
   // inputs live in a hidden store, or in groups 1B/1C for network/impassable).
-  // `opApply: true` flags a slider with no native listener (network opacity),
-  // so we call applyNetworkLinesOverlay() explicitly.
+  // Every proxied input already has its own input+change listener that applies
+  // the change, so the proxy just mirrors the value and dispatches those events.
   const LAYER_VIS = {
     relief:     { vis: "relief-visible",  op: "relief-opacity"  },
     impassable: { vis: "imp-show",        op: "imp-opacity"     },
     energy:     { vis: "energy-visible",  op: "energy-opacity"  },
-    network:    { vis: "vec-render",      op: "vec-render-opacity", opApply: true },
+    network:    { vis: "vec-render",      op: "vec-render-opacity" },
     passes:     { vis: "passes-visible",  op: "passes-opacity"  },
     routes:     { vis: null,              op: null              },
   };
@@ -1314,7 +1327,7 @@ document.addEventListener("DOMContentLoaded", () => {
     el.dispatchEvent(new Event("input",  { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
   };
-  const buildLayerRow = ({ labelKey, reorder, vis, op, opApply }) => {
+  const buildLayerRow = ({ labelKey, reorder, vis, op }) => {
     const row = document.createElement("div");
     row.style.cssText =
       "display:flex;align-items:center;gap:6px;padding:4px 6px;" +
@@ -1364,10 +1377,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const r = document.createElement("input");
       r.type = "range"; r.min = "0"; r.max = "1"; r.step = "0.05"; r.value = realOp.value;
       r.style.cssText = "flex:none;width:64px;";
-      r.addEventListener("input", () => {
-        realOp.value = r.value; fireInput(realOp);
-        if (opApply) applyNetworkLinesOverlay();
-      });
+      r.addEventListener("input", () => { realOp.value = r.value; fireInput(realOp); });
       row.appendChild(r);
     }
     return row;
@@ -1381,7 +1391,7 @@ document.addEventListener("DOMContentLoaded", () => {
       orderList.appendChild(buildLayerRow({
         labelKey: `order.${key}`,
         reorder: { key, di, last: topToBottom.length - 1 },
-        vis: v.vis, op: v.op, opApply: v.opApply,
+        vis: v.vis, op: v.op,
       }));
     });
     FIXED_ROWS.forEach((f) => orderList.appendChild(buildLayerRow({
@@ -2216,8 +2226,8 @@ async function loadDemFromArrayBuffer(buf, label) {
   if (state.bridgesLayer) { state.bridgesLayer.remove(); state.bridgesLayer = null; }
   updateBridgeMeta();
   syncRefDisplay();
-  document.getElementById("src-display").textContent = "— click map —";
-  document.getElementById("dst-display").textContent = "— optional —";
+  document.getElementById("src-display").textContent = t("pts.click_map");
+  document.getElementById("dst-display").textContent = t("pts.optional");
   document.getElementById("src-display").classList.remove("set");
   document.getElementById("dst-display").classList.remove("set");
   resultMeta.innerHTML = "—";
@@ -2262,6 +2272,7 @@ async function loadDemFromArrayBuffer(buf, label) {
     state.drawnPassableMask = rasterizeRingsToMask(state.drawnPassable);
     state.bridges = (state.bridges || []).filter((b) => !b.drawn);
     reappendDrawnPortals();
+    applyBridgeOverlay(); // the bridge layer was just cleared on DEM load — redraw drawn portal decks
     if (typeof updateDrawMeta === "function") updateDrawMeta();
   }
 
@@ -2872,7 +2883,7 @@ async function loadOsmBridges() {
   if (btn) btn.disabled = true;
   progress.classList.add("active");
   progressBar.style.width = "20%";
-  status.textContent = "Querying OSM (Overpass) for bridges…";
+  status.textContent = t("status.osm_querying");
   try {
     const bbox = `${south.toFixed(6)},${west.toFixed(6)},${north.toFixed(6)},${east.toFixed(6)}`;
     const parts = [`way["bridge"]["bridge"!="no"]["highway"](${bbox});`];
@@ -2885,9 +2896,9 @@ async function loadOsmBridges() {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: "data=" + encodeURIComponent(query),
     });
-    if (!resp.ok) throw new Error(`Overpass HTTP ${resp.status} (busy? try again in a minute)`);
+    if (!resp.ok) throw new Error(t("status.overpass_http", resp.status));
     progressBar.style.width = "60%";
-    status.textContent = "Parsing OSM response…";
+    status.textContent = t("status.osm_parsing");
     const json = await resp.json();
     // Mapped node elevations (`ele`), keyed by rounded coord — matched to way
     // vertices by position (same OSM nodes ⇒ identical coords).
@@ -4088,7 +4099,7 @@ map.on("click", (e) => {
       .addTo(map).bindTooltip("Source");
     state.dstMarker = null;
     document.getElementById("src-display").textContent = `r=${r}, c=${c}`;
-    document.getElementById("dst-display").textContent = "— click again —";
+    document.getElementById("dst-display").textContent = t("pts.click_again");
     document.getElementById("dst-display").classList.remove("set");
     status.textContent = t("status.src_replaced");
     updateRunButtonState(); // refresh 3B status (src only → orange)
@@ -4101,8 +4112,8 @@ document.getElementById("clear-points").addEventListener("click", () => {
   if (state.srcMarker) { state.srcMarker.remove(); state.srcMarker = null; }
   if (state.dstMarker) { state.dstMarker.remove(); state.dstMarker = null; }
   if (state.pathLine) { state.pathLine.remove(); state.pathLine = null; }
-  document.getElementById("src-display").textContent = "— click map —";
-  document.getElementById("dst-display").textContent = "— optional —";
+  document.getElementById("src-display").textContent = t("pts.click_map");
+  document.getElementById("dst-display").textContent = t("pts.optional");
   document.getElementById("src-display").classList.remove("set");
   document.getElementById("dst-display").classList.remove("set");
   updateRunButtonState();
@@ -4541,8 +4552,8 @@ async function loadRefPointsFromFile(file) {
 function syncRefDisplay() {
   const el = document.getElementById("ref-display");
   if (el) el.textContent = state.refPoints.length
-    ? `${state.refPoints.length} reference${state.refPoints.length === 1 ? "" : "s"} placed`
-    : "no references placed";
+    ? t("ref.count", state.refPoints.length)
+    : t("ref.none");
   updateRunButtonState();
   estimateRunTime();
 }
@@ -8250,9 +8261,12 @@ async function downloadBundle() {
     if (state.impassable) {
       zip.file("impassable.tif", new Uint8Array(writeRasterAsGeoTIFF(state.impassable, dem, "uint8")));
     }
-    // OSM bridges/tunnels as GeoJSON — re-derived into decks on reload.
-    if (state.bridges && state.bridges.length) {
-      zip.file("bridges.geojson", JSON.stringify(bridgesToFC(state.bridges), null, 2));
+    // OSM/loaded bridges/tunnels as GeoJSON — re-derived into decks on reload.
+    // EXCLUDE user-drawn portals: they round-trip via config.drawn.portals, and
+    // including them here would double-add on restore (reappend + reinstall).
+    const exportBridges = (state.bridges || []).filter((b) => !b.drawn);
+    if (exportBridges.length) {
+      zip.file("bridges.geojson", JSON.stringify(bridgesToFC(exportBridges), null, 2));
     }
     if (r.routes && r.routes.length && !graphMode) {
       zip.file("routes.geojson", JSON.stringify(routesFCFromList(r.routes, dem), null, 2));
@@ -8363,7 +8377,9 @@ function applyMetadataToUI(md, bin = {}) {
   // order, compute source, max-workers, language). The result-specific blocks
   // below (src/dst, refPoints, energy/passes ranges, DEM-gated binaries) then
   // refine on top. Older bundles without md.config fall through unchanged.
-  if (md.config) { try { applyConfig(md.config); } catch (e) { console.warn("[bundle] applyConfig failed", e); } }
+  // persist:false — a bundle restores the session UI but must not overwrite the
+  // user's saved language / params / layer order / max-workers on disk.
+  if (md.config) { try { applyConfig(md.config, { persist: false }); } catch (e) { console.warn("[bundle] applyConfig failed", e); } }
 
   // ---- DEM dimension check -----------------------------------------------
   // Binary outputs (energy/passes/network) are sized to the bundle's DEM.
