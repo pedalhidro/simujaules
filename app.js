@@ -316,6 +316,12 @@ const STRINGS = {
 
   // ---- Group: Result ----------------------------------------------------
   "group.result":        { pt: "3. Resultados", en: "3. Results" },
+  "group.result_stats":          { pt: "3A. Estatísticas", en: "3A. Statistics" },
+  "group.result_energy":         { pt: "3B. Campo de energia", en: "3B. Energy field" },
+  "group.result_density":        { pt: "3C. Densidade de trajetos", en: "3C. Trajectory density" },
+  "group.result_density_net":    { pt: "3Ca. Densidade de trajetos na rede vetorial", en: "3Ca. Trajectory density on the vector network" },
+  "group.result_density_terrain":{ pt: "3Cb. Densidade de trajetos no terreno", en: "3Cb. Trajectory density on the terrain" },
+  "group.result_legend":         { pt: "3D. Legenda", en: "3D. Legend" },
   "btn.refresh_style":   { pt: "Atualizar estilo", en: "Refresh style" },
   "result.empty":        { pt: "—", en: "—" },
   "layer.tiles":         { pt: "rmsampa-v2 tiles", en: "rmsampa-v2 tiles" },

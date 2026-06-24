@@ -315,10 +315,13 @@
     details.group-parent[open] > summary { margin-bottom: 6px; }
     details.group-parent > .group { margin-left: 8px; }
     /* Per-group status accents (style-only; set from JS). Left bar + summary tint. */
-    .group.st-green  { border-color: #3fb56a; box-shadow: inset 3px 0 0 #3fb56a; }
-    .group.st-orange { border-color: #e08a2e; box-shadow: inset 3px 0 0 #e08a2e; }
-    .group.st-yellow { border-color: #d6c12e; box-shadow: inset 3px 0 0 #d6c12e; }
-    .group.st-red    { border-color: #d6493e; box-shadow: inset 3px 0 0 #d6493e; }
+    .group.st-green,  .group-parent.st-green  { border-color: #3fb56a; box-shadow: inset 3px 0 0 #3fb56a; }
+    .group.st-orange, .group-parent.st-orange { border-color: #e08a2e; box-shadow: inset 3px 0 0 #e08a2e; }
+    .group.st-yellow, .group-parent.st-yellow { border-color: #d6c12e; box-shadow: inset 3px 0 0 #d6c12e; }
+    .group.st-red,    .group-parent.st-red    { border-color: #d6493e; box-shadow: inset 3px 0 0 #d6493e; }
+    /* group-parent has no padding, so pad the status bar away from the text. */
+    .group-parent.st-green, .group-parent.st-orange,
+    .group-parent.st-yellow, .group-parent.st-red { padding-left: 7px; }
     /* Keyboard focus ring. There was none before — custom-styled controls on
        the near-black theme relied on the faint UA outline. accent-2 (#4cc9f0)
        reads ~8.8:1 on the panel. :focus-visible keeps it off mouse clicks. */
@@ -1040,98 +1043,97 @@
       <button id="run" data-i18n="btn.compute" disabled>Compute</button>
       <div id="time-estimate" style="font-size: 10px; color: var(--muted); margin-top: 3px; text-align: center;"></div>
 
-      <details class="group" id="result-group" style="margin-top: 8px;">
+      <details class="group-parent" id="result-group" style="margin-top: 8px;">
         <summary data-i18n="group.result">3. Resultados</summary>
-        <div class="meta" id="result-meta" data-i18n="result.empty">—</div>
-        <label data-i18n="param.field_cmap">Field colormap</label>
-        <select id="colormap"></select>
 
-        <!-- Layer visibility/opacity/order + basemap live in the on-map
-             "Controle de camadas" modal (floating button top-right → see
-             #layer-order-modal). This group keeps only the style controls
-             (colormap, ranges, gamma, blend). -->
+        <!-- 3A. Statistics -->
+        <details class="group" id="result-stats-group" open>
+          <summary data-i18n="group.result_stats">3A. Estatísticas</summary>
+          <div class="meta" id="result-meta" data-i18n="result.empty">—</div>
+        </details>
 
-        <!-- Energy style controls (visibility/opacity in the layer modal) -->
-        <div class="layer-block">
-          <!-- Shown only when a compare run produced both scenarios. -->
-          <div id="energy-source-row" style="display: none;">
-            <label data-i18n="layer.energy_source">Displayed scenario (energy & passes)</label>
-            <select id="energy-source">
-              <option value="constrained"   data-i18n="esrc.constrained">network-constrained</option>
-              <option value="unconstrained" data-i18n="esrc.unconstrained">unconstrained</option>
-              <option value="difference"    data-i18n="esrc.difference">difference (network cost; passes overlaid)</option>
-            </select>
-          </div>
-          <div class="row">
-            <div>
-              <label data-i18n="vmin.label">min (auto = p1)</label>
-              <input type="number" id="vmin" placeholder="auto" step="any" />
+        <!-- 3B. Energy field (min/max here are the ENERGY field bounds). -->
+        <details class="group" id="result-energy-group" open>
+          <summary data-i18n="group.result_energy">3B. Campo de energia</summary>
+          <label data-i18n="param.field_cmap">Field colormap</label>
+          <select id="colormap"></select>
+          <div class="layer-block">
+            <!-- Shown only when a compare run produced both scenarios. -->
+            <div id="energy-source-row" style="display: none;">
+              <label data-i18n="layer.energy_source">Displayed scenario (energy &amp; passes)</label>
+              <select id="energy-source">
+                <option value="constrained"   data-i18n="esrc.constrained">network-constrained</option>
+                <option value="unconstrained" data-i18n="esrc.unconstrained">unconstrained</option>
+                <option value="difference"    data-i18n="esrc.difference">difference (network cost; passes overlaid)</option>
+              </select>
             </div>
-            <div>
-              <label data-i18n="vmax.label">max (auto = p80)</label>
-              <input type="number" id="vmax" placeholder="auto" step="any" />
+            <div class="row">
+              <div>
+                <label data-i18n="vmin.label">min (auto = p1)</label>
+                <input type="number" id="vmin" placeholder="auto" step="any" />
+              </div>
+              <div>
+                <label data-i18n="vmax.label">max (auto = p80)</label>
+                <input type="number" id="vmax" placeholder="auto" step="any" />
+              </div>
             </div>
           </div>
-        </div>
+        </details>
 
-        <!-- Passes layer controls (overlaid above energy) -->
-        <div class="layer-block" id="passes-row" style="display: none;">
-          <!-- Shown only in the "difference" view: labels the A (orange =
-               constrained/network) channel that the controls below drive. -->
-          <div id="passes-net-label" style="display:none; align-items:center; gap:5px; font-size:11px; font-weight:600; margin:4px 0 2px;">
-            <span style="width:11px;height:11px;border-radius:2px;background:#ffa53c;display:inline-block;"></span>
-            <span data-i18n="passes.chan_net">Rede (com restrição)</span>
-          </div>
-          <div class="row">
-            <div>
-              <label data-i18n="vmin.passes">min (auto = p10)</label>
-              <input type="number" id="passes-vmin" placeholder="p10" step="any" />
+        <!-- 3C. Trajectory density (min/max here are the PASSES density bounds).
+             Shown only once a run produced passes (JS toggles #passes-row). -->
+        <details class="group" id="passes-row" open style="display: none;">
+          <summary data-i18n="group.result_density">3C. Densidade de trajetos</summary>
+
+          <!-- 3Ca. Density on the vector network (the A / constrained channel;
+               in the difference view this is the orange channel). -->
+          <details class="group" id="result-density-net-group" open>
+            <summary data-i18n="group.result_density_net">3Ca. Densidade de trajetos na rede vetorial</summary>
+            <div id="passes-net-label" style="display:none; align-items:center; gap:5px; font-size:11px; font-weight:600; margin:4px 0 2px;">
+              <span style="width:11px;height:11px;border-radius:2px;background:#ffa53c;display:inline-block;"></span>
+              <span data-i18n="passes.chan_net">Rede (com restrição)</span>
             </div>
-            <div>
-              <label data-i18n="vmax.passes">max (auto = p90)</label>
-              <input type="number" id="passes-vmax" placeholder="p90" step="any" />
+            <div class="row">
+              <div>
+                <label data-i18n="vmin.passes">min (auto = p10)</label>
+                <input type="number" id="passes-vmin" placeholder="p10" step="any" />
+              </div>
+              <div>
+                <label data-i18n="vmax.passes">max (auto = p90)</label>
+                <input type="number" id="passes-vmax" placeholder="p90" step="any" />
+              </div>
             </div>
-          </div>
-          <div class="row">
-            <div>
-              <label data-i18n="passes.gamma">γ gamma (1 = no change)</label>
-              <input type="number" id="passes-gamma" value="1" min="0.01" step="0.05" />
+            <div class="row">
+              <div>
+                <label data-i18n="passes.gamma">γ gamma (1 = no change)</label>
+                <input type="number" id="passes-gamma" value="1" min="0.01" step="0.05" />
+              </div>
+              <div>
+                <label data-i18n="passes.mean_window">mean filter N</label>
+                <input type="number" id="passes-mean-window" value="5" min="1" max="200" step="1" />
+              </div>
             </div>
-            <div>
-              <label data-i18n="passes.mean_window">mean filter N</label>
-              <input type="number" id="passes-mean-window" value="5" min="1" max="200" step="1" />
-            </div>
-          </div>
-          <!-- Green-channel overrides for the dual (difference) passes view.
-               Shown only while the scenario selector is on "difference"; the
-               controls above drive the red (constrained) channel. Blank =
-               inherit the red channel's resolved value. -->
-          <div id="passes-dual-row" style="display: none;">
+          </details>
+
+          <!-- 3Cb. Density on the terrain (the B / free channel). Green-channel
+               overrides for the dual difference view; shown only in "difference"
+               (JS toggles #passes-dual-row). Blank = inherit the A value. -->
+          <details class="group" id="passes-dual-row" open style="display: none;">
+            <summary data-i18n="group.result_density_terrain">3Cb. Densidade de trajetos no terreno</summary>
             <div style="display:flex; align-items:center; gap:5px; font-size:11px; font-weight:600; margin:4px 0 2px;">
               <span style="width:11px;height:11px;border-radius:2px;background:#005ac3;display:inline-block;"></span>
               <span data-i18n="passes.chan_terrain">Terreno (livre)</span>
             </div>
             <div class="row">
-              <div>
-                <label>min</label>
-                <input type="number" id="passes-vmin-b" placeholder="=" step="any" />
-              </div>
-              <div>
-                <label>max</label>
-                <input type="number" id="passes-vmax-b" placeholder="=" step="any" />
-              </div>
+              <div><label>min</label><input type="number" id="passes-vmin-b" placeholder="=" step="any" /></div>
+              <div><label>max</label><input type="number" id="passes-vmax-b" placeholder="=" step="any" /></div>
             </div>
             <div class="row">
-              <div>
-                <label>γ</label>
-                <input type="number" id="passes-gamma-b" placeholder="=" min="0.01" step="0.05" />
-              </div>
-              <div>
-                <label>N</label>
-                <input type="number" id="passes-mean-window-b" placeholder="=" min="1" max="200" step="1" />
-              </div>
+              <div><label>γ</label><input type="number" id="passes-gamma-b" placeholder="=" min="0.01" step="0.05" /></div>
+              <div><label>N</label><input type="number" id="passes-mean-window-b" placeholder="=" min="1" max="200" step="1" /></div>
             </div>
-          </div>
+          </details>
+
           <label data-i18n="passes.blend">Blend</label>
           <select id="passes-blend">
             <option value="plus-lighter" data-i18n="blend.add">add (plus-lighter)</option>
@@ -1141,18 +1143,23 @@
             <option value="overlay"      data-i18n="blend.overlay">overlay</option>
             <option value="energy"       data-i18n="blend.energy">energy color (passes = opacity)</option>
           </select>
-        </div>
+        </details>
 
-        <button type="button" id="refresh-style" class="secondary" data-i18n="btn.refresh_style" style="margin-top: 4px;">Refresh style</button>
-        <button class="secondary" id="range-reset" data-i18n="btn.range_reset" style="margin-top: 4px;">Reset ranges to auto</button>
-        <div class="legend" style="margin-top: 8px;">
-          <div class="swatch"></div>
-          <div class="legend-ticks">
-            <span class="v" id="legend-lo">0</span>
-            <span class="v" id="legend-mid">—</span>
-            <span class="v" id="legend-hi">—</span>
+        <!-- 3D. Legend -->
+        <details class="group" id="result-legend-group" open>
+          <summary data-i18n="group.result_legend">3D. Legenda</summary>
+          <div class="legend" style="margin-top: 4px;">
+            <div class="swatch"></div>
+            <div class="legend-ticks">
+              <span class="v" id="legend-lo">0</span>
+              <span class="v" id="legend-mid">—</span>
+              <span class="v" id="legend-hi">—</span>
+            </div>
           </div>
-        </div>
+        </details>
+
+        <button type="button" id="refresh-style" class="secondary" data-i18n="btn.refresh_style" style="margin-top: 6px;">Refresh style</button>
+        <button class="secondary" id="range-reset" data-i18n="btn.range_reset" style="margin-top: 4px;">Reset ranges to auto</button>
       </details>
 
       <div class="credit" data-i18n="credit">feito por Claúdio e dirigido pelos neogeógrafos geomorfológicos</div>
