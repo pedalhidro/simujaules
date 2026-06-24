@@ -129,8 +129,8 @@ const STRINGS = {
   // ---- Group: Load DEM --------------------------------------------------
   "group.io":            { pt: "0. Importar / Exportar dados", en: "0. Import / Export data" },
   "group.inputs":        { pt: "1. Dados de entrada", en: "1. Input data" },
-  "group.compute":       { pt: "3. Configuração do cálculo", en: "3. Compute setup" },
-  "group.execution":     { pt: "3C. Execução", en: "3C. Execution" },
+  "group.compute":       { pt: "2. Configuração do cálculo", en: "2. Compute setup" },
+  "group.execution":     { pt: "2C. Execução", en: "2C. Execution" },
   "config.hint":         { pt: "Configuração (todos os controles):", en: "Settings (all toggles & values):" },
   "config.export":       { pt: "Exportar config", en: "Export config" },
   "config.import":       { pt: "Importar config", en: "Import config" },
@@ -211,7 +211,7 @@ const STRINGS = {
   "help.p.impassable":   { pt: "Suba um GeoTIFF binário (1=intransponível, p.ex. corpos d'água). É reamostrado para a grade do DEM por maioria de área (≥50% intransponível ⇒ célula barrada); fora da extensão da máscara assume-se passável. Pode estar em extensão/resolução/CRS diferentes do DEM. Opcionalmente, a rede vetorial (1b) abre corredores passáveis (pontes) sobre a máscara, com um deslocamento suave de elevação que sobe linearmente das margens até o centro da ponte.", en: "Upload a binary GeoTIFF (1=impassable, e.g. water bodies). It is resampled onto the DEM grid by area-coverage majority (≥50% impassable ⇒ blocked cell); outside the mask extent cells are assumed passable. It may have a different extent/resolution/CRS than the DEM. Optionally the vector network (1b) carves passable corridors (bridges) across the mask, with a smooth elevation offset that ramps linearly from the shores up to the bridge centre." },
 
   // ---- Group: Pick points ----------------------------------------------
-  "group.pick_points":   { pt: "3B. Pontos e referências", en: "3B. Points & references" },
+  "group.pick_points":   { pt: "2B. Pontos e referências", en: "2B. Points & references" },
   "pts.click_map":       { pt: "— clicar mapa —", en: "— click map —" },
   "pts.optional":        { pt: "— opcional —",  en: "— optional —" },
   "pts.click_again":     { pt: "— clicar novamente —", en: "— click again —" },
@@ -219,7 +219,7 @@ const STRINGS = {
   "pts.clear":           { pt: "Limpar pontos", en: "Clear points" },
 
   // ---- Group: Parameters -----------------------------------------------
-  "group.parameters":    { pt: "3A. Parâmetros", en: "3A. Parameters" },
+  "group.parameters":    { pt: "2A. Parâmetros", en: "2A. Parameters" },
   "param.mode":          { pt: "Modo", en: "Mode" },
   "mode.from":           { pt: "Saindo da fonte",     en: "From source" },
   "mode.to":             { pt: "Vindo até a fonte",  en: "To source point" },
@@ -315,7 +315,7 @@ const STRINGS = {
   "btn.compute":         { pt: "Calcular", en: "Compute" },
 
   // ---- Group: Result ----------------------------------------------------
-  "group.result":        { pt: "4. Resultados", en: "4. Results" },
+  "group.result":        { pt: "3. Resultados", en: "3. Results" },
   "btn.refresh_style":   { pt: "Atualizar estilo", en: "Refresh style" },
   "result.empty":        { pt: "—", en: "—" },
   "layer.tiles":         { pt: "rmsampa-v2 tiles", en: "rmsampa-v2 tiles" },
@@ -340,6 +340,8 @@ const STRINGS = {
   "order.open":          { pt: "Controle de camadas…", en: "Layer control…" },
   "order.title":         { pt: "Controle de camadas", en: "Layer control" },
   "layer.ctrl_open":     { pt: "Controle de camadas", en: "Layer control" },
+  "resizer.title":       { pt: "Arraste para 1–4 colunas", en: "Drag to set 1–4 columns" },
+  "status.dismiss":      { pt: "Dispensar", en: "Dismiss" },
   "order.hint":          { pt: "O topo da lista é desenhado por cima. Marcadores e tooltips ficam sempre acima. Aplicado na hora; lembrado neste dispositivo.", en: "Top of the list is drawn on top. Markers and tooltips always stay above. Applied immediately; remembered on this device." },
   "order.reset":         { pt: "Restaurar padrão", en: "Reset to default" },
   "order.relief":        { pt: "Relevo (DEM)", en: "Relief (DEM)" },
@@ -1146,30 +1148,43 @@ document.addEventListener("DOMContentLoaded", () => {
   // persisted. Rebuilt on every open so labels follow the language toggle.
   const orderModal = document.getElementById("layer-order-modal");
   const orderList = document.getElementById("layer-order-list");
-  const renderOrderList = () => {
-    if (!orderList) return;
-    orderList.innerHTML = "";
-    const topToBottom = layerOrder.slice().reverse();
-    topToBottom.forEach((key, di) => {
-      const row = document.createElement("div");
-      row.style.cssText =
-        "display:flex;align-items:center;gap:6px;padding:4px 8px;" +
-        "border:1px solid var(--border);border-radius:4px;margin-top:4px;";
-      const name = document.createElement("span");
-      name.style.flex = "1";
-      name.textContent = t(`order.${key}`);
-      row.appendChild(name);
+  // Per-layer visibility/opacity input ids the modal rows PROXY (the real
+  // inputs live in a hidden store, or in groups 1B/1C for network/impassable).
+  // `opApply: true` flags a slider with no native listener (network opacity),
+  // so we call applyNetworkLinesOverlay() explicitly.
+  const LAYER_VIS = {
+    relief:     { vis: "relief-visible",  op: "relief-opacity"  },
+    impassable: { vis: "imp-show",        op: "imp-opacity"     },
+    energy:     { vis: "energy-visible",  op: "energy-opacity"  },
+    network:    { vis: "vec-render",      op: "vec-render-opacity", opApply: true },
+    passes:     { vis: "passes-visible",  op: "passes-opacity"  },
+    routes:     { vis: null,              op: null              },
+  };
+  // Fixed (non-reorderable) layers shown after the stacking list.
+  const FIXED_ROWS = [
+    { labelKey: "layer.tiles",      vis: "tile-visible", op: "tile-opacity" },
+    { labelKey: "ref.show_markers", vis: "refs-visible", op: null },
+  ];
+  const fireInput = (el) => {
+    el.dispatchEvent(new Event("input",  { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const buildLayerRow = ({ labelKey, reorder, vis, op, opApply }) => {
+    const row = document.createElement("div");
+    row.style.cssText =
+      "display:flex;align-items:center;gap:6px;padding:4px 6px;" +
+      "border:1px solid var(--border);border-radius:4px;margin-top:4px;";
+    // Ordering arrows on the LEFT (or a same-width spacer for fixed rows).
+    const arrows = document.createElement("div");
+    arrows.style.cssText = "display:flex;gap:2px;flex:none;width:50px;";
+    if (reorder) {
       const mkBtn = (label, disabled, delta) => {
         const b = document.createElement("button");
-        b.type = "button";
-        b.className = "secondary";
-        b.textContent = label;
-        b.disabled = disabled;
-        b.style.cssText = "width:30px;padding:2px 0;margin:0;";
+        b.type = "button"; b.className = "secondary"; b.textContent = label;
+        b.disabled = disabled; b.style.cssText = "width:23px;padding:2px 0;margin:0;";
         b.addEventListener("click", () => {
-          // Visually "up" = drawn on top of more layers = later in the
-          // bottom→top layerOrder array.
-          const i = layerOrder.indexOf(key);
+          // Visually "up" = drawn on top = later in the bottom→top layerOrder.
+          const i = layerOrder.indexOf(reorder.key);
           const j = i + delta;
           if (j < 0 || j >= layerOrder.length) return;
           [layerOrder[i], layerOrder[j]] = [layerOrder[j], layerOrder[i]];
@@ -1178,15 +1193,64 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         return b;
       };
-      row.appendChild(mkBtn("↑", di === 0, +1));
-      row.appendChild(mkBtn("↓", di === topToBottom.length - 1, -1));
-      orderList.appendChild(row);
-    });
+      arrows.appendChild(mkBtn("↑", reorder.di === 0, +1));
+      arrows.appendChild(mkBtn("↓", reorder.di === reorder.last, -1));
+    }
+    row.appendChild(arrows);
+    // Visibility checkbox (proxies the real input).
+    const realVis = vis ? document.getElementById(vis) : null;
+    if (realVis) {
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.style.flex = "none";
+      cb.checked = realVis.checked;
+      cb.addEventListener("change", () => { realVis.checked = cb.checked; fireInput(realVis); });
+      row.appendChild(cb);
+    } else {
+      const sp = document.createElement("span"); sp.style.cssText = "width:13px;flex:none;";
+      row.appendChild(sp);
+    }
+    // Name.
+    const name = document.createElement("span");
+    name.style.cssText = "flex:1;font-size:12px;"; name.textContent = t(labelKey);
+    row.appendChild(name);
+    // Opacity slider (proxies the real input).
+    const realOp = op ? document.getElementById(op) : null;
+    if (realOp) {
+      const r = document.createElement("input");
+      r.type = "range"; r.min = "0"; r.max = "1"; r.step = "0.05"; r.value = realOp.value;
+      r.style.cssText = "flex:none;width:64px;";
+      r.addEventListener("input", () => {
+        realOp.value = r.value; fireInput(realOp);
+        if (opApply) applyNetworkLinesOverlay();
+      });
+      row.appendChild(r);
+    }
+    return row;
   };
-  const openOrder = () => { renderOrderList(); orderModal?.classList.add("active"); };
-  const closeOrder = () => orderModal?.classList.remove("active");
-  document.getElementById("layer-ctrl-open")?.addEventListener("click", openOrder);
-  document.getElementById("layer-ctrl-btn")?.addEventListener("click", openOrder);
+  const renderOrderList = () => {
+    if (!orderList) return;
+    orderList.innerHTML = "";
+    const topToBottom = layerOrder.slice().reverse();
+    topToBottom.forEach((key, di) => {
+      const v = LAYER_VIS[key] || {};
+      orderList.appendChild(buildLayerRow({
+        labelKey: `order.${key}`,
+        reorder: { key, di, last: topToBottom.length - 1 },
+        vis: v.vis, op: v.op, opApply: v.opApply,
+      }));
+    });
+    FIXED_ROWS.forEach((f) => orderList.appendChild(buildLayerRow({
+      labelKey: f.labelKey, reorder: null, vis: f.vis, op: f.op,
+    })));
+  };
+  const layerCtrlBtns = ["layer-ctrl-open", "layer-ctrl-btn"]
+    .map((id) => document.getElementById(id)).filter(Boolean);
+  const markLayerBtns = (on) => layerCtrlBtns.forEach((b) => b.classList.toggle("active", on));
+  const openOrder = () => { renderOrderList(); orderModal?.classList.add("active"); markLayerBtns(true); };
+  const closeOrder = () => { orderModal?.classList.remove("active"); markLayerBtns(false); };
+  // Non-blocking corner panel: the buttons TOGGLE it (re-click to dismiss).
+  const toggleOrder = () => orderModal?.classList.contains("active") ? closeOrder() : openOrder();
+  layerCtrlBtns.forEach((b) => b.addEventListener("click", toggleOrder));
   document.getElementById("layer-order-close")?.addEventListener("click", closeOrder);
   orderModal?.addEventListener("click", (e) => {
     if (e.target === orderModal) closeOrder();

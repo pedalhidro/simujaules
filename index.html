@@ -90,7 +90,7 @@
     html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
     /* Use 100dvh (dynamic viewport) where supported so the layout doesn't
        jump under the iOS Safari URL bar. Falls back to 100vh elsewhere. */
-    #app { display: grid; grid-template-columns: 320px 1fr; height: 100vh; height: 100dvh; }
+    #app { display: grid; grid-template-columns: calc(var(--sidebar-cols, 1) * 320px) 1fr; height: 100vh; height: 100dvh; }
     #panel {
       background: var(--panel);
       border-right: 1px solid var(--border);
@@ -99,6 +99,18 @@
       /* iOS momentum scrolling — without this the panel feels stuck on touch. */
       -webkit-overflow-scrolling: touch;
     }
+    /* Multi-column sidebar (desktop/landscape): the groups flow into N fixed-
+       width (320px) columns; the right-border resizer snaps N between 1 and 4
+       (discrete — column width is fixed, only the count changes). */
+    .panel-cols { column-count: var(--sidebar-cols, 1); column-gap: 14px; }
+    .panel-cols > * { break-inside: avoid; }
+    #sidebar-resizer {
+      position: fixed; top: 0; bottom: 0;
+      left: calc(var(--sidebar-cols, 1) * 320px - 3px);
+      width: 6px; cursor: col-resize; z-index: 905;
+      background: transparent; transition: background 0.12s ease;
+    }
+    #sidebar-resizer:hover, #sidebar-resizer.dragging { background: var(--accent-2); opacity: 0.45; }
     #map { height: 100vh; height: 100dvh; }
 
     /* ---- Mobile drawer ----------------------------------------------------
@@ -182,6 +194,9 @@
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3); cursor: pointer; font-size: 18px;
     }
     .layer-ctrl-button:hover { color: var(--accent-2); border-color: var(--accent-2); }
+    /* Active (modal open): clearly highlight the toggle(s). */
+    .layer-ctrl-button.active { color: #0d0f12; background: var(--accent-2); border-color: var(--accent-2); }
+    #layer-ctrl-open.active { color: var(--accent-2); border-color: var(--accent-2); box-shadow: inset 0 0 0 1px var(--accent-2); }
     /* SVG and its children must not intercept clicks — without this,
        Safari/iOS sometimes routes the click to the inner <circle> or
        <line> instead of bubbling up to the <button>. */
@@ -193,6 +208,9 @@
          remaining child (#map) would auto-place into column 1 (0 px wide)
          and render as a black void. One column → map fills the only cell. */
       #app { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+      /* Drawer mode: force a single column and hide the resizer. */
+      .panel-cols { column-count: 1; }
+      #sidebar-resizer { display: none; }
       #panel {
         position: fixed;
         top: 0; left: 0;
@@ -356,6 +374,27 @@
     }
     .point-display.set { color: var(--accent-2); }
     #status { font-size: 11px; color: var(--muted); margin-top: 5px; min-height: 1.3em; }
+    /* Floating compute-feedback pill (progress + status) over the map. */
+    #status-float {
+      position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+      z-index: 906; max-width: min(620px, 92vw); width: max-content; min-width: 160px;
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45); padding: 7px 8px 7px 14px;
+      display: flex; align-items: center; gap: 8px;
+      pointer-events: none; opacity: 0; visibility: hidden; transition: opacity 0.15s ease;
+    }
+    #status-float.show { opacity: 1; visibility: visible; }
+    #status-float .sf-body { flex: 1 1 auto; min-width: 0; text-align: center; }
+    #status-float #status { margin: 0; min-height: 0; color: var(--text); }
+    #status-float .progress { margin: 0 0 5px; }
+    .status-float-close {
+      flex: none; pointer-events: auto; width: 18px; height: 18px; padding: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: transparent; border: none; color: var(--muted);
+      font-size: 14px; line-height: 1; cursor: pointer; border-radius: 4px;
+    }
+    .status-float-close:hover { color: var(--text); background: var(--border); }
     .legend { margin-top: 5px; }
     .swatch {
       display: block;
@@ -523,6 +562,19 @@
       padding: 24px;
     }
     .modal-backdrop.active { display: flex; }
+    /* The layer-control modal is a NON-BLOCKING floating panel anchored top-
+       right (dropdown from the on-map layer button): the map and sidebar stay
+       interactive while it's open. pointer-events:none on the container (auto
+       on the panel) lets clicks pass through everywhere except the panel. */
+    #layer-order-modal {
+      inset: auto; top: 104px; right: 8px; left: auto; bottom: auto;
+      background: transparent; padding: 0; display: none; pointer-events: none;
+    }
+    #layer-order-modal.active { display: block; }
+    #layer-order-modal > .modal {
+      pointer-events: auto; width: min(320px, calc(100vw - 16px));
+      max-height: calc(100vh - 116px); padding: 14px 16px; margin: 0;
+    }
     .modal {
       background: var(--panel);
       border: 1px solid var(--border);
@@ -653,7 +705,8 @@
         machine-readable description.</p>
       </noscript>
 
-      <details class="group" id="io-group" open>
+      <div class="panel-cols">
+      <details class="group" id="io-group">
         <summary data-i18n="group.io">0. Importar / Exportar dados</summary>
         <div class="hint" data-i18n="bundle.reload_hint" style="margin-bottom: 3px;">Reload a saved bundle (.zip) or .jsonld:</div>
         <input type="file" id="bundle-file" accept=".zip,.jsonld,.json" />
@@ -827,10 +880,10 @@
       </details>
 
       <details class="group-parent" id="group-3">
-        <summary data-i18n="group.compute">3. Configuração do cálculo</summary>
+        <summary data-i18n="group.compute">2. Configuração do cálculo</summary>
 
       <details class="group" id="params-group">
-        <summary data-i18n="group.parameters">3A. Parâmetros</summary>
+        <summary data-i18n="group.parameters">2A. Parâmetros</summary>
         <label data-i18n="param.mode">Mode</label>
         <select id="mode">
           <option value="from"  data-i18n="mode.from">From source</option>
@@ -907,7 +960,7 @@
       </details>
 
       <details class="group" id="pick-points-group">
-        <summary data-i18n="group.pick_points">3B. Pontos e referências</summary>
+        <summary data-i18n="group.pick_points">2B. Pontos e referências</summary>
         <div id="pick-points-srcdst">
           <div class="point-row-inline">
             <span class="point-cell"><span class="point-label">src</span><span class="point-display" id="src-display" data-i18n="pts.click_map">— click map —</span></span>
@@ -947,7 +1000,7 @@
       </details>
 
       <details class="group" id="execution-group">
-        <summary data-i18n="group.execution">3C. Execução</summary>
+        <summary data-i18n="group.execution">2C. Execução</summary>
         <label data-i18n="param.max_workers">Max compute workers (0 = auto)</label>
         <input type="number" id="max-workers" value="0" min="0" max="64" step="1" />
         <!-- Compute source: Browser (default), Localhost (native Rust),
@@ -986,14 +1039,9 @@
 
       <button id="run" data-i18n="btn.compute" disabled>Compute</button>
       <div id="time-estimate" style="font-size: 10px; color: var(--muted); margin-top: 3px; text-align: center;"></div>
-      <div class="progress" id="progress"><div class="bar"></div></div>
-      <!-- Primary feedback channel (load / compute / done / errors / point
-           picking). role=status + aria-live=polite so assistive tech
-           announces each update; aria-atomic re-reads the whole line. -->
-      <div id="status" role="status" aria-live="polite" aria-atomic="true"></div>
 
       <details class="group" id="result-group" style="margin-top: 8px;">
-        <summary data-i18n="group.result">4. Resultados</summary>
+        <summary data-i18n="group.result">3. Resultados</summary>
         <div class="meta" id="result-meta" data-i18n="result.empty">—</div>
         <label data-i18n="param.field_cmap">Field colormap</label>
         <select id="colormap"></select>
@@ -1108,8 +1156,20 @@
       </details>
 
       <div class="credit" data-i18n="credit">feito por Claúdio e dirigido pelos neogeógrafos geomorfológicos</div>
+      </div><!-- /.panel-cols -->
     </aside>
+    <div id="sidebar-resizer" data-i18n-title="resizer.title" title="Drag to set 1–4 columns" aria-hidden="true"></div>
     <div id="map"></div>
+    <!-- Floating compute feedback (progress bar + status/log) over the map, so
+         it stays visible regardless of the sidebar column layout / collapse.
+         Shown only while there's a message or active progress (see inline JS). -->
+    <div id="status-float" aria-hidden="true">
+      <div class="sf-body">
+        <div class="progress" id="progress"><div class="bar"></div></div>
+        <div id="status" role="status" aria-live="polite" aria-atomic="true"></div>
+      </div>
+      <button type="button" id="status-float-close" class="status-float-close" aria-label="Close" data-i18n-title="status.dismiss" title="Dismiss">×</button>
+    </div>
   </div>
 
   <script
@@ -1177,6 +1237,65 @@
       });
       // Expose so app.js can close the drawer after a successful map click.
       window.__simuDrawer = { close: () => setOpen(false), open: () => setOpen(true) };
+
+      // ---- Sidebar column resizer (desktop / landscape) ------------------
+      // Drag the right border to snap the sidebar to 1-4 fixed-width (320px)
+      // columns. Discrete: column WIDTH is fixed, only the COUNT changes.
+      // Persisted per device; ignored in the mobile drawer (forced 1 column).
+      const resizer = document.getElementById('sidebar-resizer');
+      const COL = 320, MAXC = 4;
+      let cols = 1;
+      try { const s = parseInt(localStorage.getItem('simu-sidebar-cols'), 10); if (s >= 1 && s <= MAXC) cols = s; } catch {}
+      function applyCols(n) {
+        cols = Math.max(1, Math.min(MAXC, n));
+        document.documentElement.style.setProperty('--sidebar-cols', cols);
+        try { localStorage.setItem('simu-sidebar-cols', String(cols)); } catch {}
+      }
+      applyCols(cols);
+      if (resizer) {
+        let dragging = false;
+        resizer.addEventListener('pointerdown', (e) => {
+          if (window.innerWidth <= 860) return;
+          dragging = true; resizer.classList.add('dragging');
+          try { resizer.setPointerCapture(e.pointerId); } catch {}
+          e.preventDefault();
+        });
+        resizer.addEventListener('pointermove', (e) => {
+          if (!dragging) return;
+          applyCols(Math.round(e.clientX / COL)); // pointer x ≈ target right edge
+        });
+        const end = (e) => {
+          if (!dragging) return;
+          dragging = false; resizer.classList.remove('dragging');
+          try { resizer.releasePointerCapture(e.pointerId); } catch {}
+        };
+        resizer.addEventListener('pointerup', end);
+        resizer.addEventListener('pointercancel', end);
+        // Double-click cycles 1→2→3→4→1 (no-drag affordance).
+        resizer.addEventListener('dblclick', () => applyCols(cols >= MAXC ? 1 : cols + 1));
+      }
+
+      // ---- Floating compute feedback visibility --------------------------
+      // app.js writes #status / toggles #progress.active as before; we just
+      // show the bottom pill while either has content (no writer changes).
+      const floatEl = document.getElementById('status-float');
+      const statusEl = document.getElementById('status');
+      const progEl = document.getElementById('progress');
+      if (floatEl && statusEl && progEl) {
+        let dismissed = false; // manual close stays hidden until the next message
+        const syncFloat = () => {
+          const on = statusEl.textContent.trim().length > 0 || progEl.classList.contains('active');
+          floatEl.classList.toggle('show', on && !dismissed);
+          floatEl.setAttribute('aria-hidden', (on && !dismissed) ? 'false' : 'true');
+        };
+        const onContent = () => { dismissed = false; syncFloat(); }; // new content un-dismisses
+        new MutationObserver(onContent).observe(statusEl, { childList: true, characterData: true, subtree: true });
+        new MutationObserver(onContent).observe(progEl, { attributes: true, attributeFilter: ['class'] });
+        document.getElementById('status-float-close')?.addEventListener('click', () => {
+          dismissed = true; floatEl.classList.remove('show'); floatEl.setAttribute('aria-hidden', 'true');
+        });
+        syncFloat();
+      }
     })();
   </script>
 
@@ -1509,31 +1628,19 @@
         <option value="none-gray"      data-i18n="basemap.gray">no basemap (all gray)</option>
       </select>
 
-      <div class="layer-block" style="margin-top: 8px;">
-        <div class="layer-head">
-          <label class="layer-toggle"><input type="checkbox" id="tile-visible" checked /><span data-i18n="layer.tiles">rmsampa-v2 tiles</span></label>
-          <input type="range" id="tile-opacity" min="0" max="1" step="0.05" value="0.85" data-i18n-aria="aria.opacity_tiles" />
-        </div>
+      <!-- Real per-layer inputs (hidden). The unified list below PROXIES these
+           by id so applyLayerControls() / persistence keep reading them. -->
+      <div id="layer-inputs-store" style="display: none;" aria-hidden="true">
+        <input type="checkbox" id="tile-visible"   checked />
+        <input type="range"    id="tile-opacity"   min="0" max="1" step="0.05" value="0.85" />
+        <input type="checkbox" id="relief-visible" />
+        <input type="range"    id="relief-opacity" min="0" max="1" step="0.05" value="0.85" />
+        <input type="checkbox" id="energy-visible" checked />
+        <input type="range"    id="energy-opacity" min="0" max="1" step="0.05" value="0.85" />
+        <input type="checkbox" id="passes-visible" checked />
+        <input type="range"    id="passes-opacity" min="0" max="1" step="0.05" value="0.7" />
+        <input type="checkbox" id="refs-visible"   checked />
       </div>
-      <div class="layer-block" id="relief-row" style="display: none;">
-        <div class="layer-head">
-          <label class="layer-toggle"><input type="checkbox" id="relief-visible" /><span data-i18n="layer.relief">Relief (DEM)</span></label>
-          <input type="range" id="relief-opacity" min="0" max="1" step="0.05" value="0.85" data-i18n-aria="aria.opacity_relief" />
-        </div>
-      </div>
-      <div class="layer-block">
-        <div class="layer-head">
-          <label class="layer-toggle"><input type="checkbox" id="energy-visible" checked /><span data-i18n="layer.energy">Energy</span></label>
-          <input type="range" id="energy-opacity" min="0" max="1" step="0.05" value="0.85" data-i18n-aria="aria.opacity_energy" />
-        </div>
-      </div>
-      <div class="layer-block" id="passes-vis-row" style="display: none;">
-        <div class="layer-head">
-          <label class="layer-toggle"><input type="checkbox" id="passes-visible" checked /><span data-i18n="layer.passes">Passes (overlay)</span></label>
-          <input type="range" id="passes-opacity" min="0" max="1" step="0.05" value="0.7" data-i18n-aria="aria.opacity_passes" />
-        </div>
-      </div>
-      <label class="layer-toggle" style="margin-top: 6px;"><input type="checkbox" id="refs-visible" checked /><span data-i18n="ref.show_markers">Show reference markers</span></label>
 
       <hr style="border: none; border-top: 1px solid var(--border); margin: 10px 0 6px;" />
       <div class="hint" data-i18n="order.hint" style="margin-bottom: 6px;">Top of the list is drawn on top. Markers and tooltips always stay above. Applied immediately; remembered on this device.</div>
