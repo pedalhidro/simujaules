@@ -922,7 +922,9 @@
         </div>
         <div id="cloud-extra" style="display: none;">
           <label data-i18n="param.orchestrator_url">Orchestrator URL</label>
-          <input type="text" id="orchestrator-url" value="http://127.0.0.1:8079" spellcheck="false" />
+          <input type="text" id="orchestrator-url" value="https://orch.simujaules.pedalhidrografi.co" spellcheck="false" />
+          <label data-i18n="param.cloud_token" style="margin-top: 6px;">Cloud password</label>
+          <input type="password" id="cloud-token" autocomplete="off" spellcheck="false" />
           <label style="display: flex; align-items: center; gap: 6px; margin-top: 6px;">
             <input type="checkbox" id="cloud-keep-warm" />
             <span data-i18n="cloud.keep_warm">Manter VM ligada entre cálculos</span>
@@ -1299,6 +1301,14 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v34</strong> — 2026-06-24<br/>
+              Cloud compute (<em>Nuvem — VM orquestrada</em>) now works when the app is
+              accessed remotely, not just from localhost. The orchestrator is a public,
+              password-gated Cloud Run service that creates/starts/stops/deletes the GCP
+              VM on demand; the browser sends the big compute payloads directly to the VM
+              over HTTPS. Fill in the Orchestrator URL and the new Cloud password to use
+              it. The VM uses an ephemeral IP and is deleted after 30 days idle (cost → 0).
+              No engine changes.</p>
               <p><strong>v33</strong> — 2026-06-24<br/>
               App moved to its own domain: now served from the root of
               <code>simujaules.pedalhidrografi.co</code> (dedicated bucket) instead of

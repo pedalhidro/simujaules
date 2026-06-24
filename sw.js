@@ -271,7 +271,15 @@
 //              telhas (stable identifier) and resolves via a redirect. Shared
 //              raster assets (rmsampa-v2, FABDEM tiles) stay on telhas. No engine
 //              changes.
-const VERSION  = "v33";
+//   v33 → v34: Cloud compute now works when the app is accessed REMOTELY (not
+//              just localhost). The orchestrator is a public, password-gated
+//              Cloud Run service that creates/starts/stops/deletes the VM; the
+//              browser sends the big compute payloads DIRECT to the VM over
+//              HTTPS (Caddy, TLS via DNS-01). New "Cloud password" field; the
+//              same token gates control + data planes. The VM uses an ephemeral
+//              IP (DNS rewritten on each start) and is deleted after 30 days
+//              idle (cost → 0). No engine changes.
+const VERSION  = "v34";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

@@ -9,6 +9,28 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v34 — 2026-06-24
+
+### Features
+
+- **Cloud compute now works when the app is accessed remotely**, not just from
+  localhost. The "Nuvem (VM orquestrada)" option is available from
+  `simujaules.pedalhidrografi.co`; fill in the **Orchestrator URL** and the new
+  **Cloud password** to use it.
+  - The orchestrator is now a public, **password-gated Cloud Run** service. It
+    creates / starts / stops / **deletes** the GCP spot VM on demand. The
+    browser sends the large compute payloads **directly to the VM over HTTPS**
+    (Caddy on the VM, TLS via Cloudflare DNS-01) — they don't fit through Cloud
+    Run, so only the lifecycle calls go to the orchestrator.
+  - The same password gates both the control plane (orchestrator) and the data
+    plane (the VM). On a wrong password / unreachable orchestrator / boot
+    failure, the run falls back to the in-browser worker pool.
+  - The VM uses an **ephemeral IP** (no idle-billed static address); the
+    orchestrator rewrites the `compute.simujaules.pedalhidrografi.co` DNS record
+    to it on each start. After **30 days idle** the VM is **deleted** (rebuilt
+    on demand on next use), so long-term idle cost is ~0.
+- No engine / numeric changes; all compute output is identical.
+
 ## v33 — 2026-06-24
 
 ### Changed

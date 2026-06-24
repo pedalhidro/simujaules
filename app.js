@@ -235,6 +235,7 @@ const STRINGS = {
   "cs.localhost":          { pt: "Localhost (Rust nativo)", en: "Localhost (native Rust)" },
   "cs.cloud":              { pt: "Nuvem (VM orquestrada)", en: "Cloud (orchestrated VM)" },
   "param.orchestrator_url":{ pt: "URL do orquestrador", en: "Orchestrator URL" },
+  "param.cloud_token":     { pt: "Senha da nuvem", en: "Cloud password" },
   "cloud.local_only":      { pt: "A nuvem só está disponível quando o app é servido localmente (o orquestrador escuta em loopback).", en: "Cloud is only available when the app is served locally (the orchestrator listens on loopback)." },
   "cloud.idle":            { pt: "VM da nuvem parada.", en: "Cloud VM stopped." },
   "cloud.starting":        { pt: "Iniciando a VM da nuvem… (~{0})", en: "Starting cloud VM… (~{0})" },
@@ -246,8 +247,11 @@ const STRINGS = {
   "cloud.preempted":       { pt: "VM da nuvem interrompida — recalculando no navegador…", en: "Cloud VM dropped — recomputing in the browser…" },
   "cloud.transfer":        { pt: "Transferência: ↑ {0} · ↓ {1} · ~{2}", en: "Transfer: ↑ {0} up · ↓ {1} down · ~{2}" },
   "cloud.need_orch_url":   { pt: "Informe a URL do orquestrador para usar a nuvem.", en: "Enter the orchestrator URL to use Cloud." },
+  "cloud.need_password":   { pt: "Informe a senha da nuvem para usar a nuvem.", en: "Enter the cloud password to use Cloud." },
+  "cloud.auth_failed":     { pt: "Senha da nuvem incorreta — usando workers do navegador…", en: "Wrong cloud password — using browser workers…" },
+  "cloud.creating":        { pt: "Criando a VM da nuvem… (~{0})", en: "Creating cloud VM… (~{0})" },
   "cloud.keep_warm":       { pt: "Manter VM ligada entre cálculos", en: "Keep VM warm between runs" },
-  "cloud.warm":            { pt: "VM ligada — esfria após ~15 min de ócio (lease + watchdog).", en: "VM kept warm — auto-stops after ~15 min idle (lease + watchdog)." },
+  "cloud.warm":            { pt: "VM ligada — esfria após ~15 min de ócio (watchdog na VM).", en: "VM kept warm — auto-stops after ~15 min idle (in-VM watchdog)." },
   "help.p.backend":      { pt: "Servidor local opcional (backend/ no repositório, cargo run --release). Acelera tanto a densidade multi-referência (uma Dijkstra por referência, em todos os núcleos) quanto o campo de energia de fonte única (de/para/ida-e-volta). Rotas (top-N), caminho até o destino e \"maximizar\" continuam no navegador (o backend não produz rotas). Se inacessível, o app volta silenciosamente para os workers do navegador.", en: "Optional local server (backend/ in the repo, cargo run --release). Accelerates both multi-reference density (one Dijkstra per reference, across all cores) AND the single-source energy field (from/to/round). Top-N routes, the destination path, and \"maximize\" stay in the browser (the backend produces no routes). If unreachable, the app silently falls back to the in-browser workers." },
   "param.max_workers":   { pt: "Máx. de workers de cálculo (0 = auto)", en: "Max compute workers (0 = auto)" },
   "help.p.workers":      { pt: "Avançado: paraleliza a densidade entre este número de Web Workers. 0 = auto (dimensionado pelos núcleos e memória disponível). Só aumente se sua máquina tiver mais RAM do que o navegador reporta — cada worker usa cerca de 5 GB em um DEM grande, então exceder pode travar a aba.", en: "Advanced: parallelise density across this many Web Workers. 0 = auto (sized to cores and available memory). Only raise it if your machine has more RAM than the browser reports — each worker needs roughly 5 GB on a large DEM, so over-committing can crash the tab." },
@@ -932,6 +936,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const el = document.getElementById(id);
     if (el) { el.addEventListener("change", onComputeSourceChange); el.addEventListener("input", estimateRunTime); }
   }
+  // Cloud password: persisted in sessionStorage (a secret — NOT localStorage,
+  // where the URL fields live). Restore on load, save on input.
+  {
+    const tokEl = document.getElementById("cloud-token");
+    if (tokEl) {
+      try { tokEl.value = sessionStorage.getItem("cloud-token") || ""; } catch { /* private mode */ }
+      tokEl.addEventListener("input", () => {
+        try { sessionStorage.setItem("cloud-token", tokEl.value); } catch { /* private mode */ }
+      });
+    }
+  }
   // Example DEM loader links — populated declaratively in HTML, wired here.
   for (const ex of DEM_EXAMPLES) {
     const a = document.getElementById(ex.id);
@@ -1259,7 +1274,9 @@ const state = {
   //   keepaliveTimer — interval extending the VM lease while a compute runs
   //   pollTimer      — interval polling /cloud/status while booting (unused as a
   //                    stored handle; the boot loop awaits inline, kept for clarity)
-  cloud: { mode: "browser", orchestratorUrl: "", vmState: "STOPPED", keepaliveTimer: null, pollTimer: null },
+  //   dataUrl        — VM's HTTPS data-plane base, learned from the orchestrator
+  //                    (/cloud/start|status); where /density,/single,/health go
+  cloud: { mode: "browser", orchestratorUrl: "", dataUrl: "", vmState: "STOPPED", keepaliveTimer: null, pollTimer: null },
   // Stacked overlays — z-order from bottom up:
   //   OSM basemap → tileOverlay (rmsampa-v2) → energyOverlay → passesOverlay
   tileOverlay: null,
@@ -1386,13 +1403,38 @@ function effectiveBackendUrl() {
   const val = (!cloud && !raw) ? "http://127.0.0.1:8077" : raw;
   return val.replace(/\/+$/, "");
 }
-// Cloud is only meaningful when the orchestrator (loopback-only) is reachable —
-// i.e. the applet itself is served locally. Same-origin fetches to 127.0.0.1
-// from a public-origin page would be blocked anyway.
+// Kept for reference; Cloud now works from ANY origin (the orchestrator is a
+// public Cloud Run service, not loopback), so this no longer gates the radio.
 function isLocalOrigin() {
   if (location.protocol === "file:") return true;
   const h = location.hostname;
   return h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "::1";
+}
+
+// Cloud splits into TWO planes: the CONTROL plane is the orchestrator URL
+// (effectiveBackendUrl, Cloud Run) — start/stop/status; the DATA plane is the
+// VM's HTTPS host (state.cloud.dataUrl, learned from the orchestrator) — where
+// the big /density,/single,/health requests go DIRECT (Cloud Run can't proxy
+// them: 32 MiB limit). Localhost uses one URL for both. computeDataUrl() is
+// what the compute fetches target.
+function computeDataUrl() {
+  if (computeMode() === "cloud" && state.cloud.dataUrl) return state.cloud.dataUrl;
+  return effectiveBackendUrl();
+}
+// The shared cloud password (Bearer token), from the #cloud-token field. The
+// SAME token gates the orchestrator (control) and Caddy on the VM (data).
+function cloudToken() {
+  return (document.getElementById("cloud-token")?.value || "").trim();
+}
+// Headers for a Cloud data-plane compute request: the Bearer token + an opt-in
+// asking the backend to gzip its (large) response (the browser auto-inflates).
+// Empty for Localhost (the native backend has no auth).
+function cloudComputeHeaders() {
+  if (computeMode() !== "cloud") return {};
+  const h = { "X-Simu-Gzip": "1" };
+  const tok = cloudToken();
+  if (tok) h["Authorization"] = `Bearer ${tok}`;
+  return h;
 }
 
 // Terminate every in-flight compute worker and invalidate their pending
@@ -4589,7 +4631,7 @@ runBtn.addEventListener("click", async () => {
         ...(useNetwork ? [state.networkMask] : []),
         ...(portals ? [portals.u, portals.v, portals.lenM, portals.hu, portals.hv] : []),
       ]);
-      const resp = await fetch(`${baseUrl}/density`, { method: "POST", body });
+      const resp = await fetch(`${baseUrl}/density`, { method: "POST", body, headers: cloudComputeHeaders() });
       if (!resp.ok) throw new Error(`backend HTTP ${resp.status}`);
       const buf = await resp.arrayBuffer();
       if (gen !== state.computeGen) return new Promise(() => {});
@@ -4665,7 +4707,7 @@ runBtn.addEventListener("click", async () => {
         ...(constrainNet ? [state.networkMask] : []),
         ...(portals ? [portals.u, portals.v, portals.lenM, portals.hu, portals.hv] : []),
       ]);
-      const resp = await fetch(`${baseUrl}/single`, { method: "POST", body });
+      const resp = await fetch(`${baseUrl}/single`, { method: "POST", body, headers: cloudComputeHeaders() });
       if (!resp.ok) throw new Error(`backend HTTP ${resp.status}`);
       const buf = await resp.arrayBuffer();
       if (gen !== state.computeGen) return new Promise(() => {});
@@ -4699,7 +4741,7 @@ runBtn.addEventListener("click", async () => {
   const densityField = async (opts) => {
     if (runUseBackend) {
       try {
-        return await startDensityBackend(backendUrl, opts);
+        return await startDensityBackend(computeDataUrl(), opts);
       } catch (err) {
         if (gen !== state.computeGen) return new Promise(() => {});
         console.warn("[backend] falling back to in-browser workers:", err);
@@ -5023,7 +5065,7 @@ runBtn.addEventListener("click", async () => {
         const t0 = performance.now();
         let r;
         try {
-          r = await startSingleBackend(backendUrl);
+          r = await startSingleBackend(computeDataUrl());
         } catch (err) {
           if (gen !== state.computeGen) return;
           console.warn("[backend] falling back to in-browser workers:", err);
@@ -5075,6 +5117,11 @@ runBtn.addEventListener("click", async () => {
     cancelActiveCompute();
     runBtn.disabled = false;
     progress.classList.remove("active");
+  } else if (!cloudToken()) {
+    status.innerHTML = `<span style="color:#ff6b6b">${t("cloud.need_password")}</span>`;
+    cancelActiveCompute();
+    runBtn.disabled = false;
+    progress.classList.remove("active");
   } else {
     state.cloud.mode = "cloud";
     state.cloud.orchestratorUrl = backendUrl;
@@ -5085,11 +5132,14 @@ runBtn.addEventListener("click", async () => {
       } catch (err) {
         if (gen !== state.computeGen) return;
         console.warn("[cloud] VM unavailable, falling back to browser:", err);
-        const bootFailed = err && err.reason === "boot_failed";
-        status.textContent = t(bootFailed ? "cloud.boot_failed" : "cloud.orch_unreachable");
+        const reason = err && err.reason;
+        const bootFailed = reason === "boot_failed";
+        status.textContent = t(reason === "auth_failed" ? "cloud.auth_failed"
+                              : bootFailed ? "cloud.boot_failed"
+                              : "cloud.orch_unreachable");
         if (state.lastRun) state.lastRun.backend = false;
         // A boot_failed VM may have actually started before going unhealthy —
-        // best-effort stop it so it doesn't linger (the lease is the backstop).
+        // best-effort stop it so it doesn't linger (the in-VM watchdog backstops).
         if (bootFailed) stopCloudVm(backendUrl);
         state.cloud.mode = "browser"; // computeDone must not try to stop a VM that never started
         dispatchCompute(false);
@@ -6056,7 +6106,10 @@ async function refreshBackendCores() {
   // returns {ok:false,vmState:…} when it isn't — Number.isFinite gates below
   // tolerate the missing cores, so a stopped VM just leaves the estimate on its
   // fallback parallelism cap until the run boots it.
-  if (computeMode() === "browser") { state.backendCores = null; estimateRunTime(); return; }
+  // Only Localhost probes /health on idle. Browser has no backend; Cloud's VM is
+  // off between runs (and the orchestrator has no /health) — ensureCloudVm fills
+  // state.backendCores at run time instead.
+  if (computeMode() !== "localhost") { state.backendCores = null; estimateRunTime(); return; }
   const url = effectiveBackendUrl();
   if (!url) { state.backendCores = null; estimateRunTime(); return; }
   try {
@@ -6087,49 +6140,15 @@ function syncComputeSourceUI() {
   const cl = document.getElementById("cloud-extra");
   if (lh) lh.style.display = mode === "localhost" ? "" : "none";
   if (cl) cl.style.display = mode === "cloud" ? "" : "none";
-  // Origin gating: Cloud is only usable when the orchestrator (loopback-only)
-  // is reachable — i.e. the applet is served locally. Disable the radio and
-  // show a note when it isn't; if Cloud was somehow selected, snap to Browser.
-  const cloudRadio = document.getElementById("cs-cloud");
-  if (cloudRadio && !isLocalOrigin()) {
-    cloudRadio.disabled = true;
-    if (mode === "cloud") {
-      const browserRadio = document.getElementById("cs-browser");
-      if (browserRadio) { browserRadio.checked = true; }
-      if (cl) cl.style.display = "none";
-    }
-    const note = ensureCloudLocalOnlyNote();
-    if (note) note.style.display = "";
-  } else {
-    if (cloudRadio) cloudRadio.disabled = false;
-    const note = document.getElementById("cloud-local-only-note");
-    if (note) note.style.display = "none";
-  }
-  // Seed the VM-status hint when Cloud is freshly shown (no VM up yet); clear it
-  // otherwise. A live boot/stop sequence overwrites it via setCloudHint.
-  if (mode === "cloud" && !cloudRadio?.disabled) {
+  // Cloud now works from ANY origin (the orchestrator is a public Cloud Run
+  // service, not loopback), so there's no origin gating — the run path requires
+  // the orchestrator URL + password instead. Seed the VM-status hint when Cloud
+  // is freshly shown (no VM up yet); a live boot/stop overwrites it via setCloudHint.
+  if (mode === "cloud") {
     if (!state.cloud.keepaliveTimer && state.cloud.vmState !== "RUNNING") setCloudHint("cloud.idle");
   } else {
     setCloudHint(null);
   }
-}
-
-// Lazily create (once) the "cloud only works locally" note placed right after
-// the #cloud-extra block. Text is set through t() so it follows the language.
-function ensureCloudLocalOnlyNote() {
-  let note = document.getElementById("cloud-local-only-note");
-  if (note) { note.textContent = t("cloud.local_only"); return note; }
-  const cloudExtra = document.getElementById("cloud-extra");
-  if (!cloudExtra || !cloudExtra.parentNode) return null;
-  note = document.createElement("div");
-  note.id = "cloud-local-only-note";
-  // data-i18n lets the standard applyTranslations() walk re-translate the note
-  // on a language switch (it's created after the initial walk).
-  note.setAttribute("data-i18n", "cloud.local_only");
-  note.style.cssText = "font-size: 10px; color: var(--muted); margin-top: 3px;";
-  note.textContent = t("cloud.local_only");
-  cloudExtra.parentNode.insertBefore(note, cloudExtra.nextSibling);
-  return note;
 }
 
 // ---- Cloud VM state machine ---------------------------------------------
@@ -6151,59 +6170,85 @@ function setCloudHint(key, ...args) {
 // POST/GET helpers with a short timeout. Throw on transport failure (caller
 // maps that to a fallback); a non-ok HTTP status throws too.
 async function cloudFetchJson(url, { method = "GET", timeoutMs = 8000 } = {}) {
-  const resp = await fetch(url, { method, signal: AbortSignal.timeout(timeoutMs) });
-  if (!resp.ok) throw new Error(`orchestrator HTTP ${resp.status}`);
+  const headers = {};
+  const tok = cloudToken();
+  if (tok) headers["Authorization"] = `Bearer ${tok}`;
+  const resp = await fetch(url, { method, headers, signal: AbortSignal.timeout(timeoutMs) });
+  if (!resp.ok) {
+    const e = new Error(`cloud HTTP ${resp.status}`);
+    e.status = resp.status;          // lets callers distinguish 401 (bad password)
+    throw e;
+  }
   return resp.json();
 }
 
-// Ensure the cloud VM is RUNNING && healthy, then refresh the backend core
-// cache against the orchestrator. Resolves true on ready; throws on
-// orchestrator-unreachable / boot failure (the caller falls back to browser).
-// `gen`/`isStale` let a superseded run bail out of the poll loop.
+// Ensure the cloud VM is up, then cache its core count from the data-plane
+// /health. Resolves true on ready; throws (reason: orch_unreachable /
+// auth_failed / boot_failed) so the caller falls back to the browser.
+// `isStale` lets a superseded run bail out of the poll loop.
 async function ensureCloudVm(orchUrl, isStale) {
-  // Kick the (idempotent) start — returns fast if already RUNNING.
+  // Kick the (idempotent) start/create on the CONTROL plane (orchestrator).
   let started;
   try {
-    started = await cloudFetchJson(`${orchUrl}/cloud/start`, { method: "POST", timeoutMs: 10000 });
+    started = await cloudFetchJson(`${orchUrl}/cloud/start`, { method: "POST", timeoutMs: 15000 });
   } catch (err) {
     state.cloud.vmState = "ERROR";
+    if (err.status === 401) throw Object.assign(new Error("auth_failed"), { reason: "auth_failed", cause: err });
     throw Object.assign(new Error("orch_unreachable"), { reason: "orch_unreachable", cause: err });
   }
   state.cloud.vmState = started.state || "PROVISIONING";
-  const etaS = Number.isFinite(started.etaSeconds) ? started.etaSeconds : 60;
-  setCloudHint("cloud.starting", formatDuration(etaS * 1000));
-  status.textContent = t("cloud.starting", formatDuration(etaS * 1000));
+  // Data plane: the VM's HTTPS host — compute + health go DIRECT here.
+  const dataUrl = (started.dataUrl || "").replace(/\/+$/, "");
+  state.cloud.dataUrl = dataUrl;
+  if (!dataUrl) throw Object.assign(new Error("boot_failed"), { reason: "boot_failed" });
 
-  // Poll /cloud/status until RUNNING && healthy (or timeout / cancel).
-  const deadline = performance.now() + CLOUD_BOOT_TIMEOUT_MS;
+  const etaS = Number.isFinite(started.etaSeconds) ? started.etaSeconds : 60;
+  // A from-scratch CREATE (no instance yet → ETA ≥ 3 min: startup-script + a
+  // fresh DNS-01 cert) reads differently from a warm start, and needs a timeout
+  // bigger than the 5-min default.
+  const hint = etaS >= 180 ? "cloud.creating" : "cloud.starting";
+  setCloudHint(hint, formatDuration(etaS * 1000));
+  status.textContent = t(hint, formatDuration(etaS * 1000));
+  const deadline = performance.now() + Math.max(CLOUD_BOOT_TIMEOUT_MS, etaS * 2 * 1000);
+
+  // Poll the DATA-plane /health directly: the orchestrator opened the firewall
+  // to our IP and pointed DNS at the VM, so once it answers 200+ok the VM is
+  // RUNNING, the backend is up, and the TLS cert is ready. A transport error
+  // means not-ready-yet (DNS propagating / cert issuing / boot) — keep waiting.
   for (;;) {
     if (isStale && isStale()) return false;
-    let st;
+    let h = null;
     try {
-      st = await cloudFetchJson(`${orchUrl}/cloud/status`, { method: "GET", timeoutMs: 8000 });
+      h = await cloudFetchJson(`${dataUrl}/health`, { method: "GET", timeoutMs: 8000 });
     } catch (err) {
-      state.cloud.vmState = "ERROR";
-      throw Object.assign(new Error("orch_unreachable"), { reason: "orch_unreachable", cause: err });
+      if (err.status === 401) throw Object.assign(new Error("auth_failed"), { reason: "auth_failed", cause: err });
+      h = null; // not reachable yet — keep polling
     }
-    state.cloud.vmState = st.state || state.cloud.vmState;
-    if (st.state === "ERROR") {
-      throw Object.assign(new Error("boot_failed"), { reason: "boot_failed" });
-    }
-    if (st.state === "RUNNING" && st.healthy === true) {
-      // Cache cores/mem from the status payload (camelCase here) so the
-      // estimate's slice model reflects the just-booted VM immediately.
-      if (Number.isFinite(st.cores)) {
+    if (h && h.ok) {
+      state.cloud.vmState = "RUNNING";
+      // cores/mem_budget_bytes (snake_case from the Rust /health) feed the
+      // estimate's slice model immediately.
+      if (Number.isFinite(h.cores)) {
         state.backendCores = {
-          url: orchUrl, cores: st.cores,
-          memBudgetBytes: Number.isFinite(st.memBudgetBytes) ? st.memBudgetBytes : null,
+          url: dataUrl, cores: h.cores,
+          memBudgetBytes: Number.isFinite(h.mem_budget_bytes) ? h.mem_budget_bytes : null,
         };
       }
-      setCloudHint("cloud.ready", Number.isFinite(st.cores) ? st.cores : "?");
+      setCloudHint("cloud.ready", Number.isFinite(h.cores) ? h.cores : "?");
       return true;
     }
-    if (performance.now() > deadline) {
-      throw Object.assign(new Error("boot_failed"), { reason: "boot_failed" });
+    // Occasionally check the control plane for a hard ERROR (don't fail on a
+    // transient status hiccup — the /health poll above is the real readiness gate).
+    try {
+      const st = await cloudFetchJson(`${orchUrl}/cloud/status`, { method: "GET", timeoutMs: 8000 });
+      state.cloud.vmState = st.state || state.cloud.vmState;
+      if (st.state === "ERROR") throw Object.assign(new Error("boot_failed"), { reason: "boot_failed" });
+    } catch (err) {
+      if (err.reason === "boot_failed") throw err;
+      if (err.status === 401) throw Object.assign(new Error("auth_failed"), { reason: "auth_failed", cause: err });
+      /* transient orchestrator hiccup — keep waiting */
     }
+    if (performance.now() > deadline) throw Object.assign(new Error("boot_failed"), { reason: "boot_failed" });
     await new Promise((r) => setTimeout(r, CLOUD_POLL_MS));
   }
 }
@@ -6212,9 +6257,11 @@ async function ensureCloudVm(orchUrl, isStale) {
 // the orchestrator doesn't reap it mid-run. Cleared by stopCloudKeepalive().
 function startCloudKeepalive(orchUrl) {
   stopCloudKeepalive();
+  const tok = cloudToken();
+  const headers = tok ? { "Authorization": `Bearer ${tok}` } : {};
   state.cloud.keepaliveTimer = setInterval(() => {
-    fetch(`${orchUrl}/cloud/keepalive`, { method: "POST", signal: AbortSignal.timeout(8000) })
-      .catch(() => { /* best-effort — a missed keepalive just risks an early reap */ });
+    fetch(`${orchUrl}/cloud/keepalive`, { method: "POST", headers, signal: AbortSignal.timeout(8000) })
+      .catch(() => { /* best-effort — keepalive is a no-op; the in-VM watchdog reaps */ });
   }, CLOUD_KEEPALIVE_MS);
 }
 function stopCloudKeepalive() {
@@ -6227,16 +6274,22 @@ function stopCloudKeepalive() {
 function stopCloudVm(orchUrl, { beacon = false } = {}) {
   stopCloudKeepalive();
   if (!orchUrl) return;
-  if (beacon && navigator.sendBeacon) {
-    try { navigator.sendBeacon(`${orchUrl}/cloud/stop`); } catch { /* best-effort */ }
+  const tok = cloudToken();
+  const headers = tok ? { "Authorization": `Bearer ${tok}` } : {};
+  if (beacon) {
+    // On page-hide we can't await; fetch({keepalive:true}) survives the unload
+    // AND carries the Authorization header (sendBeacon CAN'T set headers, so the
+    // orchestrator would 401 it). Best-effort.
+    try { fetch(`${orchUrl}/cloud/stop`, { method: "POST", headers, keepalive: true }); }
+    catch { /* best-effort */ }
     state.cloud.vmState = "STOPPING";
     return;
   }
   setCloudHint("cloud.stopping");
   state.cloud.vmState = "STOPPING";
-  fetch(`${orchUrl}/cloud/stop`, { method: "POST", signal: AbortSignal.timeout(8000) })
+  fetch(`${orchUrl}/cloud/stop`, { method: "POST", headers, signal: AbortSignal.timeout(8000) })
     .then(() => { state.cloud.vmState = "STOPPED"; setCloudHint("cloud.stopped_after"); })
-    .catch(() => { /* best-effort — the orchestrator's lease will reap it anyway */ });
+    .catch(() => { /* best-effort — the in-VM watchdog reaps it anyway */ });
 }
 
 // Calibration probe: each ref runs an UNBUDGETED search stopped after
