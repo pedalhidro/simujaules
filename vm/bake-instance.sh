@@ -14,9 +14,11 @@
 #      antes de ligar a VM (e reaperta se o IP mudar). A regra fica escopada
 #      nesse /32 mesmo com a VM parada — mais seguro que reabrir, e a VM parada
 #      nem escuta na porta.
-#   2. Cria a instância como SPOT (--provisioning-model=SPOT) com
+#   2. Cria a instância no modo PROVISIONING_MODEL (default SPOT). Em SPOT usa
 #      --instance-termination-action=STOP — preempção/“shutdown -h” PARAM a VM
-#      (não destroem), então o disco e a configuração sobrevivem. A
+#      (não destroem), então o disco e a configuração sobrevivem. Use
+#      PROVISIONING_MODEL=STANDARD (sob demanda) se a quota PREEMPTIBLE_CPUS da
+#      região for 0 e o Spot for recusado. A
 #      startup-script.sh é injetada via --metadata-from-file.
 #   3. Espera a instância existir e PARA ela (`gcloud compute instances stop`),
 #      deixando-a STOPPED — o orquestrador é quem dá o START quando precisa
@@ -45,6 +47,17 @@ MACHINE_TYPE="${MACHINE_TYPE:-c4-standard-96}"
 VM_PORT="${VM_PORT:-8077}"
 FIREWALL_RULE="${FIREWALL_RULE:-simu-compute-allow-8077}"
 NETWORK_TAG="${NETWORK_TAG:-simu-compute}"
+
+# Modelo de provisionamento: SPOT (barato, preemptável → STOP) ou STANDARD (sob
+# demanda, não preemptável). Use STANDARD se a quota PREEMPTIBLE_CPUS da região
+# for 0 e o Spot for recusado na criação.
+PROVISIONING_MODEL="${PROVISIONING_MODEL:-SPOT}"
+
+# Teto de memória do backend (--max-mem-gb), repassado à VM via metadata. Vazio
+# = usa o default da startup-script (320). Dimensione p/ ~0,8× a RAM caber em
+# slices sem OOM (n2-standard-128 = 512 GB → 320 é seguro/conservador, ~34
+# slices; ~480 usa mais núcleos). Cada slice round = 55·N bytes.
+MAX_MEM_GB="${MAX_MEM_GB:-}"
 
 # Imagem base e disco. Debian 12 traz ferramentas recentes; o disco precisa de
 # folga pra toolchain do Rust + build (a VM de cálculo não guarda estado).
@@ -113,25 +126,31 @@ else
 fi
 echo
 
-# --- 2) Instância SPOT (idempotente) ----------------------------------------
-echo "-- [2/3] instância ($INSTANCE_NAME, $MACHINE_TYPE, SPOT) --"
+# --- 2) Instância (idempotente) ---------------------------------------------
+echo "-- [2/3] instância ($INSTANCE_NAME, $MACHINE_TYPE, $PROVISIONING_MODEL) --"
 if gcloud compute instances describe "$INSTANCE_NAME" \
     --project="$GCP_PROJECT" --zone="$GCP_ZONE" >/dev/null 2>&1; then
   echo "  já existe — pulando criação."
 else
-  # --metadata também leva backend-binary-url (vazio = compila na boot) e a
-  # porta, que a startup-script lê pra montar o systemd unit.
+  # --provisioning-model aceita SPOT ou STANDARD; --instance-termination-action
+  # só é válido p/ SPOT (preempção/shutdown PARAM a VM, não a deletam).
+  TERMINATION_FLAG=""
+  if [ "$PROVISIONING_MODEL" = "SPOT" ]; then
+    TERMINATION_FLAG="--instance-termination-action=STOP"
+  fi
+  # --metadata leva porta, backend-binary-url (vazio = compila na boot) e
+  # max-mem-gb (vazio = default 320 na startup-script), lidos pra montar o unit.
   run gcloud compute instances create "$INSTANCE_NAME" \
     --project="$GCP_PROJECT" \
     --zone="$GCP_ZONE" \
     --machine-type="$MACHINE_TYPE" \
-    --provisioning-model=SPOT \
-    --instance-termination-action=STOP \
+    --provisioning-model="$PROVISIONING_MODEL" \
+    $TERMINATION_FLAG \
     --image-family="$IMAGE_FAMILY" \
     --image-project="$IMAGE_PROJECT" \
     --boot-disk-size="$BOOT_DISK_SIZE" \
     --tags="$NETWORK_TAG" \
-    --metadata="vm-port=${VM_PORT},backend-binary-url=${BACKEND_BINARY_URL}" \
+    --metadata="vm-port=${VM_PORT},backend-binary-url=${BACKEND_BINARY_URL},max-mem-gb=${MAX_MEM_GB}" \
     --metadata-from-file="startup-script=${STARTUP_SCRIPT}"
 fi
 echo

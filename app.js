@@ -246,6 +246,8 @@ const STRINGS = {
   "cloud.preempted":       { pt: "VM da nuvem interrompida — recalculando no navegador…", en: "Cloud VM dropped — recomputing in the browser…" },
   "cloud.transfer":        { pt: "Transferência: ↑ {0} · ↓ {1} · ~{2}", en: "Transfer: ↑ {0} up · ↓ {1} down · ~{2}" },
   "cloud.need_orch_url":   { pt: "Informe a URL do orquestrador para usar a nuvem.", en: "Enter the orchestrator URL to use Cloud." },
+  "cloud.keep_warm":       { pt: "Manter VM ligada entre cálculos", en: "Keep VM warm between runs" },
+  "cloud.warm":            { pt: "VM ligada — esfria após ~15 min de ócio (lease + watchdog).", en: "VM kept warm — auto-stops after ~15 min idle (lease + watchdog)." },
   "help.p.backend":      { pt: "Servidor local opcional (backend/ no repositório, cargo run --release). Acelera tanto a densidade multi-referência (uma Dijkstra por referência, em todos os núcleos) quanto o campo de energia de fonte única (de/para/ida-e-volta). Rotas (top-N), caminho até o destino e \"maximizar\" continuam no navegador (o backend não produz rotas). Se inacessível, o app volta silenciosamente para os workers do navegador.", en: "Optional local server (backend/ in the repo, cargo run --release). Accelerates both multi-reference density (one Dijkstra per reference, across all cores) AND the single-source energy field (from/to/round). Top-N routes, the destination path, and \"maximize\" stay in the browser (the backend produces no routes). If unreachable, the app silently falls back to the in-browser workers." },
   "param.max_workers":   { pt: "Máx. de workers de cálculo (0 = auto)", en: "Max compute workers (0 = auto)" },
   "help.p.workers":      { pt: "Avançado: paraleliza a densidade entre este número de Web Workers. 0 = auto (dimensionado pelos núcleos e memória disponível). Só aumente se sua máquina tiver mais RAM do que o navegador reporta — cada worker usa cerca de 5 GB em um DEM grande, então exceder pode travar a aba.", en: "Advanced: parallelise density across this many Web Workers. 0 = auto (sized to cores and available memory). Only raise it if your machine has more RAM than the browser reports — each worker needs roughly 5 GB on a large DEM, so over-committing can crash the tab." },
@@ -476,7 +478,7 @@ const PERSIST_IDS = [
   "mode", "alpha", "beta", "eta", "e-max", "e-max-mode",
   "want-passes", "want-topn", "want-density", "maximize", "maximize-length",
   "n-refs", "ref-source", "ref-sampling", "refs-visible",
-  "backend-url", "orchestrator-url", "n-routes", "penalty", "repulsion-mode",
+  "backend-url", "orchestrator-url", "cloud-keep-warm", "n-routes", "penalty", "repulsion-mode",
   "routes-colormap", "colormap",
   // Vector network
   "vec-width", "vec-snap", "vec-constrain", "vec-graph-mode", "vec-junction-mode",
@@ -1433,7 +1435,14 @@ function beaconStopCloudVm() {
   }
 }
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") beaconStopCloudVm();
+  // Em modo "manter VM ligada", trocar/esconder a aba NÃO desliga a VM (o lease
+  // do orquestrador + o idle-watchdog cuidam do ócio); só um unload real
+  // (pagehide) desliga. Sem keep-warm, esconder a aba desliga a VM ociosa
+  // (economia padrão).
+  if (document.visibilityState === "hidden"
+      && !document.getElementById("cloud-keep-warm")?.checked) {
+    beaconStopCloudVm();
+  }
 });
 window.addEventListener("pagehide", beaconStopCloudVm);
 
@@ -4022,9 +4031,17 @@ runBtn.addEventListener("click", async () => {
     // still has no calibration, run it now that the cores are free.
     if (!state.calibration) startCalibrationProbe();
     // Cloud: stop the VM after each run (default-ON), releasing the lease so it
-    // doesn't bill idle. The keepalive is cleared inside stopCloudVm.
+    // doesn't bill idle. With "keep warm" ticked, leave the VM up to reuse on the
+    // next run — just drop the keepalive so the orchestrator lease + in-VM
+    // idle-watchdog reap it after ~15 min idle (the keepalive is also cleared
+    // inside stopCloudVm).
     if (state.cloud.mode === "cloud" && state.cloud.orchestratorUrl) {
-      stopCloudVm(state.cloud.orchestratorUrl);
+      if (document.getElementById("cloud-keep-warm")?.checked) {
+        stopCloudKeepalive();
+        setCloudHint("cloud.warm");
+      } else {
+        stopCloudVm(state.cloud.orchestratorUrl);
+      }
     }
   };
 

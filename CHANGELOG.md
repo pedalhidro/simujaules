@@ -9,6 +9,17 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v27 — 2026-06-23
+
+### Features
+
+- **Cloud "keep VM warm between runs" toggle.** With it ticked, a run no longer
+  stops the cloud VM when it finishes — the VM stays up so the next run reuses it
+  instantly (only the first run of a session pays the ~1–2 min boot). The
+  orchestrator lease + the in-VM idle-watchdog stop it after ~15 min idle (hard
+  cap 2 h). In keep-warm mode, hiding/switching the tab no longer stops the VM;
+  only a real page unload does. Default stays "stop after each run" (cost-safe).
+
 ## v26 — 2026-06-23
 
 ### Features

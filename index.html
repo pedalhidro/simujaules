@@ -922,6 +922,10 @@
         <div id="cloud-extra" style="display: none;">
           <label data-i18n="param.orchestrator_url">Orchestrator URL</label>
           <input type="text" id="orchestrator-url" value="http://127.0.0.1:8079" spellcheck="false" />
+          <label style="display: flex; align-items: center; gap: 6px; margin-top: 6px;">
+            <input type="checkbox" id="cloud-keep-warm" />
+            <span data-i18n="cloud.keep_warm">Manter VM ligada entre cálculos</span>
+          </label>
           <div id="cloud-vm-status" style="font-size: 10px; color: var(--muted); margin-top: 3px;"></div>
           <div id="cloud-transfer" style="font-size: 10px; color: var(--muted); margin-top: 3px;"></div>
         </div>
@@ -1274,6 +1278,12 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v27</strong> — 2026-06-23<br/>
+              Cloud <em>keep VM warm between runs</em> toggle: when ticked, a run leaves the
+              VM up to reuse on the next run (only the first run pays the boot); the
+              orchestrator lease + in-VM idle-watchdog stop it after ~15&nbsp;min idle.
+              Tab-hide no longer stops the VM in keep-warm mode. Default stays
+              stop-after-each-run.</p>
               <p><strong>v26</strong> — 2026-06-23<br/>
               Cloud compute source. The "Use native backend (Rust)" checkbox is now a
               three-way <em>Compute source</em> selector: <em>Browser</em> (in-page worker

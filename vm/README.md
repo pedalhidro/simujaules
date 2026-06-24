@@ -111,7 +111,7 @@ fazendo.
 | `BACKEND_BINARY_URL` | *(vazio → compila)*      | bake→startup    | binário pré-compilado opcional |
 | `MAX_MEM_GB`         | `320`                    | startup         | `--max-mem-gb` do backend (ver abaixo) |
 | `IDLE_MAX_S`         | `900`                    | startup→watchdog| ociosidade máx. antes de desligar |
-| `SIMU_REPO`/`SIMU_REF` | repo `pedalhidro/sampasimu` @ `main` | startup | fonte pra compilar |
+| `SIMU_REPO`/`SIMU_REF` | repo `pedalhidro/simujaules` @ `main` | startup | fonte pra compilar |
 
 ### Por que `--max-mem-gb 320`
 

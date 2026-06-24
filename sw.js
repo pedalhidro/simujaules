@@ -231,7 +231,12 @@
 //              estimate. Cloud is only offered when the applet is served locally.
 //              On orchestrator/boot failure the run falls back to the browser
 //              pool. No new served files; compute path / bit-parity unchanged.
-const VERSION  = "v26";
+//   v26 → v27: Cloud "keep VM warm between runs" toggle. When ticked, a run no
+//              longer stops the VM at the end — it stays up to reuse on the next
+//              run (only the first run pays the boot), and the orchestrator lease
+//              + in-VM idle-watchdog stop it after ~15 min idle. Tab-hide no
+//              longer stops the VM in keep-warm mode (only a real unload does).
+const VERSION  = "v27";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
