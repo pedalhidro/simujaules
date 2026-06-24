@@ -135,6 +135,9 @@ const STRINGS = {
   "config.export":       { pt: "Exportar config", en: "Export config" },
   "config.import":       { pt: "Importar config", en: "Import config" },
   "config.reset":        { pt: "Restaurar padrões", en: "Reset to defaults" },
+  "config.imported":     { pt: "Configuração importada.", en: "Config imported." },
+  "config.import_error": { pt: "Falha ao importar a configuração", en: "Failed to import config" },
+  "config.reset_confirm":{ pt: "Restaurar todas as configurações para os padrões? A página será recarregada.", en: "Reset all settings to defaults? The page will reload." },
   "group.load_dem":      { pt: "1A. Carregar DEM", en: "1A. Load DEM" },
   "examples.heading":    { pt: "ou baixar (localmente) um exemplo:", en: "or download (locally) an example:" },
   "ex.aguapreta":        { pt: "Entorno da Água Preta", en: "Água Preta surroundings" },
@@ -567,9 +570,13 @@ const PERSIST_IDS = [
   "vec-width", "vec-snap", "vec-constrain", "vec-graph-mode", "vec-junction-mode",
   "vec-compare", "vec-render", "vec-render-width", "vec-render-opacity",
   "net-interp", "net-interp-max-dist", "net-interp-smoothing",
+  // Impassable mask (1C) + bridges (1D) — apply toggles, render + generation knobs
+  "imp-enabled", "imp-show", "imp-opacity", "imp-rivers", "imp-corridor", "imp-offset",
+  "impassable-invert",
+  "bridge-enabled", "bridge-show", "bridge-opacity", "bridge-tunnels",
   // Visualization
   "basemap-select", "tile-visible", "tile-opacity", "relief-visible", "relief-opacity",
-  "energy-visible", "energy-opacity", "vmin", "vmax",
+  "energy-visible", "energy-opacity", "energy-source", "vmin", "vmax",
   "passes-visible", "passes-opacity", "passes-vmin", "passes-vmax",
   "passes-gamma", "passes-mean-window", "passes-blend",
   "passes-vmin-b", "passes-vmax-b", "passes-gamma-b", "passes-mean-window-b",
@@ -645,6 +652,108 @@ function setupParamPersistence() {
   // their change to persist too.
   document.querySelectorAll('input[name="compute-source"]').forEach((el) => {
     el.addEventListener("change", savePersistedParams);
+  });
+}
+
+// ------- Full config: export / import / reset (Group 0) -------
+// One portable object capturing EVERY persisted control + the separately-stored
+// bits (compute source, layer order, max-workers, language). Shared by the
+// Group-0 buttons AND bundle embedding (buildMetadata/applyMetadataToUI).
+function collectConfig() {
+  const params = {};
+  for (const id of PERSIST_IDS) {
+    const el = document.getElementById(id);
+    if (el) params[id] = el.type === "checkbox" ? !!el.checked : el.value;
+  }
+  let maxWorkers = "";
+  try { maxWorkers = localStorage.getItem("simu-max-workers") || ""; } catch {}
+  return {
+    kind: "simujoules-config",
+    version: 1,
+    params,
+    computeSource: computeMode(),
+    layerOrder: layerOrder.slice(),
+    maxWorkers,
+    lang: currentLang,
+  };
+}
+
+// Apply a config object (from import or a bundle). Tolerates a flat params map.
+// Returns true on success. Mirrors setupParamPersistence's restore path.
+function applyConfig(cfg) {
+  if (!cfg || typeof cfg !== "object") return false;
+  const params = (cfg.params && typeof cfg.params === "object") ? cfg.params : cfg;
+  for (const id of PERSIST_IDS) {
+    if (!(id in params)) continue;
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (el.type === "checkbox") el.checked = !!params[id];
+    else {
+      el.value = params[id];
+      if (id === "colormap" && COLORMAPS[params[id]]) activeColormap = params[id];
+    }
+  }
+  for (const id of PERSIST_REFIRE) document.getElementById(id)?.dispatchEvent(new Event("change"));
+  const cs = cfg.computeSource;
+  if (cs === "browser" || cs === "localhost" || cs === "cloud") {
+    const radio = document.getElementById(
+      cs === "localhost" ? "cs-localhost" : cs === "cloud" ? "cs-cloud" : "cs-browser");
+    if (radio && !radio.disabled) radio.checked = true;
+  }
+  syncComputeSourceUI();
+  if (Array.isArray(cfg.layerOrder) && cfg.layerOrder.length) {
+    const valid = cfg.layerOrder.filter((k) => DEFAULT_LAYER_ORDER.includes(k));
+    layerOrder = valid.concat(DEFAULT_LAYER_ORDER.filter((k) => !valid.includes(k)));
+    try { localStorage.setItem("simu-layer-order", JSON.stringify(layerOrder)); } catch {}
+    applyLayerOrder();
+  }
+  if (cfg.maxWorkers != null) {
+    const mw = document.getElementById("max-workers");
+    if (mw) mw.value = cfg.maxWorkers;
+    try { localStorage.setItem("simu-max-workers", String(cfg.maxWorkers)); } catch {}
+  }
+  if (cfg.lang === "en" || cfg.lang === "pt") setLang(cfg.lang);
+  applyColormapToLegend();
+  applyLayerControls();
+  savePersistedParams();
+  return true;
+}
+
+// Wire the Group-0 export/import/reset buttons. Called from init.
+function setupConfigButtons() {
+  document.getElementById("config-export")?.addEventListener("click", () => {
+    const blob = new Blob([JSON.stringify(collectConfig(), null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "simujoules-config.json";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+  document.getElementById("config-import-btn")?.addEventListener("click", () => {
+    document.getElementById("config-file")?.click();
+  });
+  document.getElementById("config-file")?.addEventListener("change", (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const cfg = JSON.parse(reader.result);
+        if (applyConfig(cfg)) status.textContent = t("config.imported");
+        else status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("config.import_error"))}</span>`;
+      } catch (e) {
+        status.innerHTML = `<span style="color:#ff6b6b">${t("config.import_error")}: ${escapeHtml(e.message)}</span>`;
+      }
+    };
+    reader.readAsText(f);
+  });
+  document.getElementById("config-reset")?.addEventListener("click", () => {
+    if (!window.confirm(t("config.reset_confirm"))) return;
+    for (const k of ["simu-params", "simu-layer-order", "simu-max-workers", "simu-lang", "simu-sidebar-cols"]) {
+      try { localStorage.removeItem(k); } catch {}
+    }
+    location.reload();
   });
 }
 
@@ -1274,6 +1383,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Last so the colormap selects are populated and every sub-panel sync
   // handler is already wired (restore dispatches synthetic change events).
   setupParamPersistence();
+  setupConfigButtons();
 });
 
 const map = L.map("map", { preferCanvas: true }).setView([-23.55, -46.63], 12);
@@ -7648,6 +7758,10 @@ function buildMetadata(result, withOutputs = true) {
     // engine is always "js" now (wasm removed). Kept in the metadata for
     // round-trip compatibility with older bundle readers.
     engine:               "js",
+    // Full control state (every persisted toggle/value + layer order, compute
+    // source, max-workers, language) so a bundle round-trips the WHOLE UI, not
+    // just the params/viz subset below. applyMetadataToUI applies it first.
+    config:               collectConfig(),
     elapsedMs:            result?.elapsedMs ?? null,
     dem: {
       label:        state.demLabel || null,
@@ -7968,6 +8082,12 @@ function applyMetadataToUI(md, bin = {}) {
   const p = md.params || {};
   const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
   const check = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.checked = !!v; };
+
+  // Restore the FULL control state first (every persisted toggle/value + layer
+  // order, compute source, max-workers, language). The result-specific blocks
+  // below (src/dst, refPoints, energy/passes ranges, DEM-gated binaries) then
+  // refine on top. Older bundles without md.config fall through unchanged.
+  if (md.config) { try { applyConfig(md.config); } catch (e) { console.warn("[bundle] applyConfig failed", e); } }
 
   // ---- DEM dimension check -----------------------------------------------
   // Binary outputs (energy/passes/network) are sized to the bundle's DEM.
