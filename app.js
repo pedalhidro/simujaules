@@ -127,7 +127,15 @@ const STRINGS = {
   "help.title":          { pt: "Como funciona", en: "How it works" },
 
   // ---- Group: Load DEM --------------------------------------------------
-  "group.load_dem":      { pt: "1. Carregar DEM", en: "1. Load DEM" },
+  "group.io":            { pt: "0. Importar / Exportar dados", en: "0. Import / Export data" },
+  "group.inputs":        { pt: "1. Dados de entrada", en: "1. Input data" },
+  "group.compute":       { pt: "3. Configuração do cálculo", en: "3. Compute setup" },
+  "group.execution":     { pt: "3C. Execução", en: "3C. Execution" },
+  "config.hint":         { pt: "Configuração (todos os controles):", en: "Settings (all toggles & values):" },
+  "config.export":       { pt: "Exportar config", en: "Export config" },
+  "config.import":       { pt: "Importar config", en: "Import config" },
+  "config.reset":        { pt: "Restaurar padrões", en: "Reset to defaults" },
+  "group.load_dem":      { pt: "1A. Carregar DEM", en: "1A. Load DEM" },
   "examples.heading":    { pt: "ou baixar (localmente) um exemplo:", en: "or download (locally) an example:" },
   "ex.aguapreta":        { pt: "Entorno da Água Preta", en: "Água Preta surroundings" },
   "ex.centro":           { pt: "Sampa Centro Expandido", en: "São Paulo central area" },
@@ -141,7 +149,7 @@ const STRINGS = {
   "bundle.reload_hint":  { pt: "Restaurar bundle (.zip) ou .jsonld:", en: "Reload a saved bundle (.zip) or .jsonld:" },
 
   // ---- Group: Vector network -------------------------------------------
-  "group.network":       { pt: "1b. Rede vetorial opcional (.gpkg)", en: "1b. Optional vector network (.gpkg)" },
+  "group.network":       { pt: "1B. Rede vetorial opcional (.gpkg)", en: "1B. Optional vector network (.gpkg)" },
   "net.line_width":      { pt: "largura da linha (células)", en: "line width (cells)" },
   "net.snap_radius":     { pt: "raio de snap (células)", en: "snap radius (cells)" },
   "net.clear":           { pt: "Limpar rede",  en: "Clear network" },
@@ -167,7 +175,7 @@ const STRINGS = {
   "net.no_network":      { pt: "Nenhuma rede carregada.", en: "No network loaded." },
 
   // ---- Group: Impassable mask ------------------------------------------
-  "group.impassable":    { pt: "1c. Máscara de barreira opcional (água, GeoTIFF)", en: "1c. Optional impassable mask (water, GeoTIFF)" },
+  "group.impassable":    { pt: "1C. Máscara de barreira opcional (água)", en: "1C. Optional impassable mask (water)" },
   "imp.enabled":         { pt: "Aplicar ao cálculo", en: "Apply to compute" },
   "imp.invert":          { pt: "Inverter (raster marca células passáveis)", en: "Invert (raster marks passable cells)" },
   "imp.clear":           { pt: "Limpar máscara", en: "Clear mask" },
@@ -185,7 +193,7 @@ const STRINGS = {
   "help.h.impassable":   { pt: "1c · Máscara de barreira", en: "1c · Impassable mask" },
 
   // ---- Group: Bridges & tunnels ----------------------------------------
-  "group.bridges":       { pt: "1d. Pontes e túneis opcionais (OSM)", en: "1d. Optional bridges & tunnels (OSM)" },
+  "group.bridges":       { pt: "1D. Pontes e túneis opcionais (OSM)", en: "1D. Optional bridges & tunnels (OSM)" },
   "bridge.enabled":      { pt: "Aplicar ao cálculo", en: "Apply to compute" },
   "bridge.osm":          { pt: "Puxar pontes e túneis do OSM", en: "Pull bridges & tunnels from OSM" },
   "bridge.from_network": { pt: "Extrair da rede carregada", en: "Extract from loaded network" },
@@ -203,7 +211,7 @@ const STRINGS = {
   "help.p.impassable":   { pt: "Suba um GeoTIFF binário (1=intransponível, p.ex. corpos d'água). É reamostrado para a grade do DEM por maioria de área (≥50% intransponível ⇒ célula barrada); fora da extensão da máscara assume-se passável. Pode estar em extensão/resolução/CRS diferentes do DEM. Opcionalmente, a rede vetorial (1b) abre corredores passáveis (pontes) sobre a máscara, com um deslocamento suave de elevação que sobe linearmente das margens até o centro da ponte.", en: "Upload a binary GeoTIFF (1=impassable, e.g. water bodies). It is resampled onto the DEM grid by area-coverage majority (≥50% impassable ⇒ blocked cell); outside the mask extent cells are assumed passable. It may have a different extent/resolution/CRS than the DEM. Optionally the vector network (1b) carves passable corridors (bridges) across the mask, with a smooth elevation offset that ramps linearly from the shores up to the bridge centre." },
 
   // ---- Group: Pick points ----------------------------------------------
-  "group.pick_points":   { pt: "2. Marcar pontos", en: "2. Pick points" },
+  "group.pick_points":   { pt: "3B. Pontos e referências", en: "3B. Points & references" },
   "pts.click_map":       { pt: "— clicar mapa —", en: "— click map —" },
   "pts.optional":        { pt: "— opcional —",  en: "— optional —" },
   "pts.click_again":     { pt: "— clicar novamente —", en: "— click again —" },
@@ -211,7 +219,7 @@ const STRINGS = {
   "pts.clear":           { pt: "Limpar pontos", en: "Clear points" },
 
   // ---- Group: Parameters -----------------------------------------------
-  "group.parameters":    { pt: "3. Parâmetros", en: "3. Parameters" },
+  "group.parameters":    { pt: "3A. Parâmetros", en: "3A. Parameters" },
   "param.mode":          { pt: "Modo", en: "Mode" },
   "mode.from":           { pt: "Saindo da fonte",     en: "From source" },
   "mode.to":             { pt: "Vindo até a fonte",  en: "To source point" },
@@ -262,6 +270,7 @@ const STRINGS = {
   "ref.place_random":    { pt: "Distribuir aleatórias", en: "Place random" },
   "param.sampling":      { pt: "Estratégia de amostragem", en: "Sampling strategy" },
   "sampling.random":     { pt: "pseudoaleatória", en: "pseudo-random" },
+  "sampling.uniform":    { pt: "uniforme (pseudoaleatória)", en: "uniform (pseudo-random)" },
   "sampling.sobol":      { pt: "Sobol (quase-aleatória)", en: "Sobol (quasi-random)" },
   "sampling.halton":     { pt: "Halton (quase-aleatória)", en: "Halton (quasi-random)" },
   "sampling.census":     { pt: "Censo IBGE 2022 (densidade populacional)", en: "IBGE 2022 census (population density)" },
@@ -306,7 +315,7 @@ const STRINGS = {
   "btn.compute":         { pt: "Calcular", en: "Compute" },
 
   // ---- Group: Result ----------------------------------------------------
-  "group.result":        { pt: "Resultado", en: "Result" },
+  "group.result":        { pt: "4. Resultados", en: "4. Results" },
   "btn.refresh_style":   { pt: "Atualizar estilo", en: "Refresh style" },
   "result.empty":        { pt: "—", en: "—" },
   "layer.tiles":         { pt: "rmsampa-v2 tiles", en: "rmsampa-v2 tiles" },
@@ -327,8 +336,10 @@ const STRINGS = {
   "basemap.black":       { pt: "sem mapa base (tudo preto)", en: "no basemap (all black)" },
   "basemap.white":       { pt: "sem mapa base (tudo branco)", en: "no basemap (all white)" },
   "basemap.gray":        { pt: "sem mapa base (tudo cinza)", en: "no basemap (all gray)" },
-  "order.open":          { pt: "Ordem de empilhamento das camadas…", en: "Layer stacking order…" },
-  "order.title":         { pt: "Ordem de empilhamento", en: "Layer stacking order" },
+  "basemap.satellite":   { pt: "Satélite (Esri)", en: "Satellite (Esri)" },
+  "order.open":          { pt: "Controle de camadas…", en: "Layer control…" },
+  "order.title":         { pt: "Controle de camadas", en: "Layer control" },
+  "layer.ctrl_open":     { pt: "Controle de camadas", en: "Layer control" },
   "order.hint":          { pt: "O topo da lista é desenhado por cima. Marcadores e tooltips ficam sempre acima. Aplicado na hora; lembrado neste dispositivo.", en: "Top of the list is drawn on top. Markers and tooltips always stay above. Applied immediately; remembered on this device." },
   "order.reset":         { pt: "Restaurar padrão", en: "Reset to default" },
   "order.relief":        { pt: "Relevo (DEM)", en: "Relief (DEM)" },
@@ -353,6 +364,7 @@ const STRINGS = {
   "btn.range_reset":     { pt: "Reset auto", en: "Reset ranges to auto" },
   "btn.download_bundle": { pt: "Baixar bundle (.zip)", en: "Download bundle (.zip)" },
   "btn.export_rendered": { pt: "Exportar imagens renderizadas (.zip)", en: "Export rendered images (.zip)" },
+  "btn.export_refs":     { pt: "Exportar referências (GeoJSON)", en: "Export references (GeoJSON)" },
   "credit":              { pt: "feito por Cláudio e dirigido pelos neogeógrafos geomorfológicos", en: "made by Cláudio, directed by the geomorphological neo-geographers" },
 
   // ---- Help modal -------------------------------------------------------
@@ -456,11 +468,61 @@ function setLang(lang) {
 // present. There is no central state-change event in this app — DOM is
 // driven off polled state — so this is called at every DEM/network load and
 // clear site. `.toggle(..., bool)` makes the clear paths self-heal.
+// Set exactly one status colour (or none) on a group's <details>/<summary>.
+function setGroupStatus(id, status) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove("st-green", "st-orange", "st-yellow", "st-red", "loaded");
+  if (status) el.classList.add("st-" + status);
+}
+
+// Open/expand a collapsible group (and any ancestor <details>) so a nested
+// group becomes visible. Used by the auto-expand hooks (DEM/network/mask/
+// compute/bundle). Collapse state is not persisted — it follows these rules.
+function setGroupOpen(id, open) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.open = !!open;
+  if (open) {
+    let p = el.parentElement;
+    while (p) { if (p.tagName === "DETAILS") p.open = true; p = p.parentElement; }
+  }
+}
+
+// Per-group status colours (style-only). Loaded inputs (1A-1D) go green when
+// applied-to-compute, orange when loaded-but-not-applied. 3B/3C/4 reflect
+// whether there are enough points, the run state, and a ready result.
 function syncLoadedHighlights() {
-  document.getElementById("load-dem-group")?.classList.toggle("loaded", !!state.dem);
-  document.getElementById("network-group")?.classList.toggle("loaded", !!state.networkMask);
-  document.getElementById("impassable-group")?.classList.toggle("loaded", !!state.impassable);
-  document.getElementById("bridges-group")?.classList.toggle("loaded", !!(state.bridges && state.bridges.length));
+  setGroupStatus("load-dem-group", state.dem ? "green" : "");
+  const apply = (loaded, id) => loaded ? (document.getElementById(id)?.checked ? "green" : "orange") : "";
+  setGroupStatus("network-group", apply(!!state.networkMask, "vec-constrain"));
+  setGroupStatus("impassable-group", apply(!!state.impassable, "imp-enabled"));
+  setGroupStatus("bridges-group", apply(!!(state.bridges && state.bridges.length), "bridge-enabled"));
+
+  // 3B — points & references: red = can't compute, orange = partial, green = complete.
+  let pts = "";
+  if (state.dem) {
+    if (document.getElementById("want-density")?.checked) {
+      const n = state.refPoints ? state.refPoints.length : 0;
+      const target = Math.max(1, parseInt(document.getElementById("n-refs")?.value, 10) || 1);
+      pts = n <= 0 ? "red" : (n >= target ? "green" : "orange");
+    } else {
+      pts = !state.src ? "red" : (state.dst ? "green" : "orange");
+    }
+  }
+  setGroupStatus("pick-points-group", pts);
+
+  // 3C — execution: orange running, green succeeded, yellow runnable-idle.
+  const runBtnEl = document.getElementById("run");
+  let exec = "";
+  if (state.computeStartedAt) exec = "orange";
+  else if (state.lastResult) exec = "green";
+  else if (state.dem && runBtnEl && !runBtnEl.disabled) exec = "yellow";
+  setGroupStatus("execution-group", exec);
+
+  // 4 — results: orange if a result is ready.
+  // 4 — results: orange while a compute is running, green once it finished.
+  setGroupStatus("result-group", state.computeStartedAt ? "orange" : (state.lastResult ? "green" : ""));
 }
 
 // ---- Accessible names for standalone labels -----------------------------
@@ -988,6 +1050,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("impassable-osm")?.addEventListener("click", loadOsmWater);
   document.getElementById("imp-rivers")?.addEventListener("change", rebuildOsmWaterMask);
   document.getElementById("imp-enabled")?.addEventListener("change", () => markImpassableDirty(true));
+  // 1B "Aplicar ao cálculo" toggle updates its green/orange status.
+  document.getElementById("vec-constrain")?.addEventListener("change", syncLoadedHighlights);
   document.getElementById("impassable-invert")?.addEventListener("change", () => {
     // Re-resample the cached source with the flipped convention (no re-upload).
     if (state.impassableRaster) applyImpassableRaster(state.impassableRaster, state.impassableMeta?.name);
@@ -1121,7 +1185,8 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   const openOrder = () => { renderOrderList(); orderModal?.classList.add("active"); };
   const closeOrder = () => orderModal?.classList.remove("active");
-  document.getElementById("layer-order-btn")?.addEventListener("click", openOrder);
+  document.getElementById("layer-ctrl-open")?.addEventListener("click", openOrder);
+  document.getElementById("layer-ctrl-btn")?.addEventListener("click", openOrder);
   document.getElementById("layer-order-close")?.addEventListener("click", closeOrder);
   orderModal?.addEventListener("click", (e) => {
     if (e.target === orderModal) closeOrder();
@@ -1207,6 +1272,10 @@ const BASEMAPS = {
       subdomains: "abcd",
       maxZoom: 20,
     },
+  },
+  "esri-satellite": {
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    options: { attribution: "© Esri, Maxar, Earthstar Geographics", maxZoom: 19 },
   },
   "none-black": { color: "#000000" },
   "none-white": { color: "#ffffff" },
@@ -1949,6 +2018,12 @@ async function loadDemFromArrayBuffer(buf, label) {
   }
   updateRunButtonState();
   syncLoadedHighlights(); // light up group 1A (and 1B was just cleared above)
+  // Auto-expand: a fresh DEM opens the next input step (1B) + the compute setup.
+  setGroupOpen("network-group", true);
+  setGroupOpen("group-3", true);
+  setGroupOpen("params-group", true);
+  setGroupOpen("pick-points-group", true);
+  setGroupOpen("execution-group", true);
   estimateRunTime();
 
   // Build the cmocean.phase + slope hillshade for the new DEM. Renders
@@ -2383,6 +2458,7 @@ async function loadVectorNetwork(file) {
     state.networkBridgeCandidates = bridgeCandidates.length ? bridgeCandidates : null;
     applyNetworkLinesOverlay();
     syncLoadedHighlights(); // light up group 1B
+    setGroupOpen("impassable-group", true); // network loaded → next input step
     onNetworkCorridorsChanged(); // a new network may carve corridors over the mask
   } finally {
     db.close();
@@ -2448,6 +2524,7 @@ function installNetworkFromLines(lines, srsId, sourceLabel, meta = null) {
   state.networkLinesMeta = keptMeta;
   applyNetworkLinesOverlay();
   syncLoadedHighlights(); // light up group 1B
+  setGroupOpen("impassable-group", true); // network loaded → next input step
   onNetworkCorridorsChanged(); // a new network may carve corridors over the mask
   return true;
 }
@@ -2692,6 +2769,7 @@ function markBridgesDirty(reprobe = false) {
     startCalibrationProbe();
   }
   estimateRunTime();
+  syncLoadedHighlights(); // 1D status (loaded/applied) may have changed
 }
 
 function bridgeOverlayOpacity() {
@@ -2773,6 +2851,7 @@ function markImpassableDirty(reprobe = false) {
     startCalibrationProbe();
   }
   estimateRunTime();
+  syncLoadedHighlights(); // 1C status (loaded/applied) may have changed
 }
 
 // ---- OSM water → impassable mask (group 1c) ------------------------------
@@ -3064,6 +3143,7 @@ function applyImpassableRaster(raster, name) {
   updateImpassableMeta();
   updateCorridorAvailability();
   markImpassableDirty(true);
+  setGroupOpen("bridges-group", true); // mask loaded → next input step
 }
 
 function updateImpassableMeta() {
@@ -3520,6 +3600,8 @@ function renderGraphOverlay() {
 
   const passesRow = document.getElementById("passes-row");
   if (passesRow) passesRow.style.display = hasPasses ? "" : "none";
+  const passesVisRow = document.getElementById("passes-vis-row"); // modal vis/opacity row
+  if (passesVisRow) passesVisRow.style.display = hasPasses ? "" : "none";
 
   applyLayerControls();   // drive visibility + opacity from the Energy/Passes controls
   updateLegendTicks();
@@ -3589,6 +3671,7 @@ map.on("click", (e) => {
     document.getElementById("dst-display").textContent = `r=${r}, c=${c}`;
     document.getElementById("dst-display").classList.add("set");
     status.textContent = t("status.both_set");
+    updateRunButtonState(); // refresh 3B status (now src + dst → green)
   } else {
     // Reset and start over
     state.src = px;
@@ -3602,6 +3685,7 @@ map.on("click", (e) => {
     document.getElementById("dst-display").textContent = "— click again —";
     document.getElementById("dst-display").classList.remove("set");
     status.textContent = t("status.src_replaced");
+    updateRunButtonState(); // refresh 3B status (src only → orange)
   }
 });
 
@@ -4037,13 +4121,15 @@ function syncRefDisplay() {
 // Unified gate for the Compute button. In density mode it unlocks once at
 // least one reference point exists; otherwise it follows the src/dst rules.
 function updateRunButtonState() {
-  if (!state.dem) { runBtn.disabled = true; return; }
-  const densityOn = !!document.getElementById("want-density")?.checked;
-  if (densityOn) {
-    runBtn.disabled = !(state.refPoints && state.refPoints.length > 0);
+  if (!state.dem) {
+    runBtn.disabled = true;
   } else {
-    runBtn.disabled = !state.src;
+    const densityOn = !!document.getElementById("want-density")?.checked;
+    runBtn.disabled = densityOn
+      ? !(state.refPoints && state.refPoints.length > 0)
+      : !state.src;
   }
+  syncLoadedHighlights(); // refresh 3B/3C/4 status colours
 }
 
 // ------- Run -------
@@ -4188,6 +4274,7 @@ runBtn.addEventListener("click", async () => {
   // gives a usable ETA after the first few percent.
   state.computeStartedAt = performance.now();
   state.estimatedTotalMs = 0;
+  syncLoadedHighlights(); // 3C → running (orange)
   // Cache density's expected ref count so the progress text reads
   // "ref X/N" while the workers are iterating.
   state.computeRefTotal = wantDensity ? state.refPoints.length : 0;
@@ -4225,6 +4312,8 @@ runBtn.addEventListener("click", async () => {
     stampBridgeDeckPasses(m.passes); // deck cells carry the bridge flow (portals skip them)
     renderResult(m);
     status.textContent = t("status.done_ms", m.elapsedMs.toFixed(0));
+    setGroupOpen("result-group", true); // compute done → reveal results
+    syncLoadedHighlights();              // 3C → done (green), 4 → ready (orange)
     // Learn from this run: nudge the estimate toward reality (single runs
     // only — compare runs carry energyAlt and time ~2 scenarios). Compute and
     // interp phases are corrected separately (m.computeMs/m.interpMs when the
@@ -5131,6 +5220,8 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
   // Show/hide the passes layer controls based on whether passes was computed
   const passesRow = document.getElementById("passes-row");
   if (passesRow) passesRow.style.display = passes ? "" : "none";
+  const passesVisRow = document.getElementById("passes-vis-row"); // modal vis/opacity row
+  if (passesVisRow) passesVisRow.style.display = passes ? "" : "none";
 
   rerenderCachedResult();
 
@@ -8064,6 +8155,7 @@ function applyMetadataToUI(md, bin = {}) {
         passesAlt,
       };
       renderResult(synth);
+      setGroupOpen("result-group", true); // bundle loaded a result → reveal it
       restored = true;
     }
   }

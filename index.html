@@ -173,6 +173,15 @@
     }
     .locate-button:hover { color: var(--accent-2); border-color: var(--accent-2); }
     .locate-button:disabled { opacity: 0.5; cursor: progress; }
+    /* On-map layer-control button — sits just below the locate button. */
+    .layer-ctrl-button {
+      position: fixed; top: 56px; right: 8px; z-index: 950; pointer-events: auto;
+      width: 40px; height: 40px; padding: 0; display: flex; align-items: center;
+      justify-content: center; background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3); cursor: pointer; font-size: 18px;
+    }
+    .layer-ctrl-button:hover { color: var(--accent-2); border-color: var(--accent-2); }
     /* SVG and its children must not intercept clicks — without this,
        Safari/iOS sometimes routes the click to the inner <circle> or
        <line> instead of bubbling up to the <button>. */
@@ -268,6 +277,30 @@
        (see syncLoadedHighlights). Style-only — never affects compute. */
     .group.loaded { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
     .group h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 5px 0; font-weight: 500; }
+    /* Title row: app name + lang/help actions on one line. */
+    .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+    .panel-header h1 { margin: 0; }
+    /* Collapsible groups (native <details>). The <summary> replaces the old
+       <h2> and carries a rotating caret + the status colour bar. */
+    details.group > summary {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+      color: var(--muted); font-weight: 500; cursor: pointer; list-style: none;
+      display: flex; align-items: center; gap: 6px; user-select: none; margin: 0;
+    }
+    details.group > summary::-webkit-details-marker { display: none; }
+    details.group > summary::before { content: "▸"; font-size: 9px; transition: transform 0.15s ease; opacity: 0.7; }
+    details.group[open] > summary::before { transform: rotate(90deg); }
+    details.group[open] > summary { margin-bottom: 6px; }
+    /* Parent group-of-groups: a thin section wrapper holding child groups. */
+    details.group-parent { border: none; padding: 0; margin-bottom: 8px; }
+    details.group-parent > summary { font-size: 12px; color: var(--text); font-weight: 600; padding: 4px 2px; }
+    details.group-parent[open] > summary { margin-bottom: 6px; }
+    details.group-parent > .group { margin-left: 8px; }
+    /* Per-group status accents (style-only; set from JS). Left bar + summary tint. */
+    .group.st-green  { border-color: #3fb56a; box-shadow: inset 3px 0 0 #3fb56a; }
+    .group.st-orange { border-color: #e08a2e; box-shadow: inset 3px 0 0 #e08a2e; }
+    .group.st-yellow { border-color: #d6c12e; box-shadow: inset 3px 0 0 #d6c12e; }
+    .group.st-red    { border-color: #d6493e; box-shadow: inset 3px 0 0 #d6493e; }
     /* Keyboard focus ring. There was none before — custom-styled controls on
        the near-black theme relied on the faint UA outline. accent-2 (#4cc9f0)
        reads ~8.8:1 on the panel. :focus-visible keeps it off mouse clicks. */
@@ -589,9 +622,25 @@
     </svg>
   </button>
 
+  <!-- On-map layer-control button (opens the #layer-order-modal). -->
+  <button type="button" class="layer-ctrl-button" id="layer-ctrl-btn"
+          data-i18n-title="layer.ctrl_open" title="Layer control" aria-label="Layer control">
+    <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M10 2 18 6 10 10 2 6 Z"/>
+      <path d="M2 10 10 14 18 10"/>
+      <path d="M2 14 10 18 18 14"/>
+    </svg>
+  </button>
+
   <div id="app">
     <aside id="panel">
-      <h1 data-i18n="title">Simulador bici-geo-energético</h1>
+      <div class="panel-header">
+        <h1 data-i18n="title">Simulador bici-geo-energético</h1>
+        <div class="header-actions">
+          <button type="button" class="engine-tag" id="lang-tag" data-i18n-title="lang.toggle.title" title="Language — click to switch">EN</button>
+          <button type="button" class="help-button" id="help-btn" aria-label="Help" data-i18n-title="help.title" title="How it works">?</button>
+        </div>
+      </div>
       <noscript>
         <p>Simulador de campos de energia para ciclismo sobre modelos digitais
         de elevação (DEM). Calcula campos de custo assimétrico subida/descida
@@ -603,13 +652,27 @@
         JavaScript. See <a href="./llms.txt">llms.txt</a> for a full
         machine-readable description.</p>
       </noscript>
-      <div class="header-actions">
-        <button type="button" class="engine-tag" id="lang-tag" data-i18n-title="lang.toggle.title" title="Language — click to switch">EN</button>
-        <button type="button" class="help-button" id="help-btn" aria-label="Help" data-i18n-title="help.title" title="How it works">?</button>
-      </div>
 
-      <div class="group" id="load-dem-group">
-        <h2 data-i18n="group.load_dem">1. Load DEM</h2>
+      <details class="group" id="io-group" open>
+        <summary data-i18n="group.io">0. Importar / Exportar dados</summary>
+        <div class="hint" data-i18n="bundle.reload_hint" style="margin-bottom: 3px;">Reload a saved bundle (.zip) or .jsonld:</div>
+        <input type="file" id="bundle-file" accept=".zip,.jsonld,.json" />
+        <button type="button" id="download-bundle" data-i18n="btn.download_bundle" style="margin-top: 5px;">Download bundle (.zip)</button>
+        <button type="button" class="secondary" id="export-rendered" data-i18n="btn.export_rendered" style="margin-top: 4px;">Export rendered images (.zip)</button>
+        <div class="hint" data-i18n="config.hint" style="margin-top: 8px;">Settings (all toggles &amp; values):</div>
+        <div class="row" style="margin-top: 3px;">
+          <button type="button" class="secondary" id="config-export" data-i18n="config.export">Export config</button>
+          <button type="button" class="secondary" id="config-import-btn" data-i18n="config.import">Import config</button>
+        </div>
+        <input type="file" id="config-file" accept=".json,.jsonld" style="display: none;" />
+        <button type="button" class="secondary" id="config-reset" data-i18n="config.reset" style="margin-top: 4px;">Reset to defaults</button>
+      </details>
+
+      <details class="group-parent" id="group-1" open>
+        <summary data-i18n="group.inputs">1. Dados de entrada</summary>
+
+      <details class="group" id="load-dem-group" open>
+        <summary data-i18n="group.load_dem">1A. Carregar DEM</summary>
         <input type="file" id="dem-file" accept=".tif,.tiff" />
         <div class="examples">
           <div class="hint" data-i18n="examples.heading" style="margin-bottom: 4px;">or download (locally) an example:</div>
@@ -627,14 +690,10 @@
           </button>
         </div>
         <div class="meta" id="dem-meta" data-i18n="dem.no_dem">No DEM loaded.</div>
-        <div class="hint" data-i18n="bundle.reload_hint" style="margin-top: 6px;">
-          Reload a saved bundle (.zip) or .jsonld:
-        </div>
-        <input type="file" id="bundle-file" accept=".zip,.jsonld,.json" style="margin-top: 3px;" />
-      </div>
+      </details>
 
-      <div class="group" id="network-group">
-        <h2 data-i18n="group.network">1b. Optional vector network (.gpkg)</h2>
+      <details class="group" id="network-group">
+        <summary data-i18n="group.network">1B. Rede vetorial opcional (.gpkg)</summary>
         <input type="file" id="vector-file" accept=".gpkg" />
         <button type="button" class="secondary" id="vec-osm" data-i18n="net.osm" style="margin-top: 4px;">Pull streets from OSM (highway=*)</button>
         <div class="row" style="margin-top: 5px;">
@@ -698,10 +757,10 @@
           </div>
         </div>
         <div class="meta" id="vec-meta" data-i18n="net.no_network">No network loaded.</div>
-      </div>
+      </details>
 
-      <div class="group" id="impassable-group">
-        <h2 data-i18n="group.impassable">1c. Optional impassable mask (water, GeoTIFF)</h2>
+      <details class="group" id="impassable-group">
+        <summary data-i18n="group.impassable">1C. Máscara de barreira opcional (água)</summary>
         <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 11px; color: var(--text);">
           <input type="checkbox" id="imp-enabled" checked />
           <span data-i18n="imp.enabled">Apply to compute</span>
@@ -738,10 +797,10 @@
           </div>
         </div>
         <div class="meta" id="imp-meta" data-i18n="imp.none">No impassable mask loaded.</div>
-      </div>
+      </details>
 
-      <div class="group" id="bridges-group">
-        <h2 data-i18n="group.bridges">1d. Optional bridges &amp; tunnels (OSM)</h2>
+      <details class="group" id="bridges-group">
+        <summary data-i18n="group.bridges">1D. Pontes e túneis opcionais (OSM)</summary>
         <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 11px; color: var(--text);">
           <input type="checkbox" id="bridge-enabled" checked />
           <span data-i18n="bridge.enabled">Apply to compute</span>
@@ -764,32 +823,14 @@
           </div>
         </div>
         <div class="meta" id="bridge-meta" data-i18n="bridge.none">No bridges loaded.</div>
-      </div>
+      </details>
+      </details>
 
-      <div class="group" id="pick-points-group">
-        <h2 data-i18n="group.pick_points">2. Pick points</h2>
-        <!-- src/dst picking. Faded out in density mode (references replace the
-             single src/dst there). Wrapped so the fade targets only this
-             block — the reference-action buttons below stay usable. -->
-        <div id="pick-points-srcdst">
-          <div class="point-row-inline">
-            <span class="point-cell"><span class="point-label">src</span><span class="point-display" id="src-display" data-i18n="pts.click_map">— click map —</span></span>
-            <span class="point-cell"><span class="point-label">dst</span><span class="point-display" id="dst-display" data-i18n="pts.optional">— optional —</span></span>
-          </div>
-          <button class="secondary" id="clear-points" data-i18n="pts.clear" style="margin-top: 5px;">Clear points</button>
-        </div>
-        <!-- Reference-point actions (density mode only). Moved up from the
-             density panel so the three point/reference buttons cluster
-             together with "Clear points" on top. Shown/hidden by the density
-             toggle's sync(). -->
-        <div class="row" id="ref-actions-row" style="display: none; margin-top: 5px;">
-          <button type="button" class="secondary" id="ref-place-random" data-i18n="ref.place_random">Place random</button>
-          <button type="button" class="secondary" id="ref-clear" data-i18n="ref.clear">Clear refs</button>
-        </div>
-      </div>
+      <details class="group-parent" id="group-3">
+        <summary data-i18n="group.compute">3. Configuração do cálculo</summary>
 
-      <div class="group">
-        <h2 data-i18n="group.parameters">3. Parameters</h2>
+      <details class="group" id="params-group">
+        <summary data-i18n="group.parameters">3A. Parâmetros</summary>
         <label data-i18n="param.mode">Mode</label>
         <select id="mode">
           <option value="from"  data-i18n="mode.from">From source</option>
@@ -843,37 +884,6 @@
           <label data-i18n="param.max_length">Path length L (edges, 0 = unconstrained)</label>
           <input type="number" id="maximize-length" value="0" min="0" max="5000" step="1" />
         </div>
-        <div id="density-extra" style="display: none;">
-          <div class="row">
-            <div>
-              <label data-i18n="param.n_refs">N references</label>
-              <input type="number" id="n-refs" value="10" min="1" max="2000" step="1" />
-            </div>
-            <div>
-              <label data-i18n="param.ref_source">Reference source</label>
-              <select id="ref-source">
-                <option value="click"  data-i18n="ref.click">click on map</option>
-                <option value="random" data-i18n="ref.random">random</option>
-              </select>
-            </div>
-          </div>
-          <label data-i18n="param.sampling" style="margin-top: 4px;">Sampling strategy</label>
-          <select id="ref-sampling">
-            <option value="random" data-i18n="sampling.random">pseudo-random</option>
-            <option value="sobol"  data-i18n="sampling.sobol">Sobol (quasi-random)</option>
-            <option value="halton" data-i18n="sampling.halton">Halton (quasi-random)</option>
-            <option value="census" data-i18n="sampling.census">IBGE 2022 census (population density)</option>
-          </select>
-          <div class="hint" id="ref-display" data-i18n="ref.none" style="margin-top: 3px;">no references placed</div>
-          <label style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
-            <input type="checkbox" id="refs-visible" checked />
-            <span data-i18n="ref.show_markers">Show reference markers</span>
-          </label>
-          <label data-i18n="ref.load_file" style="margin-top: 6px;">Load reference points (GeoJSON)</label>
-          <input type="file" id="ref-file" accept=".geojson,.json" />
-          <label data-i18n="param.max_workers" style="margin-top: 6px;">Max compute workers (0 = auto)</label>
-          <input type="number" id="max-workers" value="0" min="0" max="64" step="1" />
-        </div>
         <div id="topn-extra" style="display: none;">
           <div class="row">
             <div>
@@ -894,13 +904,54 @@
           <label data-i18n="param.routes_cmap">Routes colormap</label>
           <select id="routes-colormap"></select>
         </div>
+      </details>
 
-        <!-- Compute source (a general compute-engine option, not density-
-             specific — it accelerates multi-reference density AND single-source
-             energy fields). Three-way: Browser (in-page worker pool, default),
-             Localhost (native Rust backend), Cloud (a local orchestrator that
-             boots a pre-baked VM). Cloud is only offered when the applet is
-             served locally (the orchestrator listens on loopback). -->
+      <details class="group" id="pick-points-group">
+        <summary data-i18n="group.pick_points">3B. Pontos e referências</summary>
+        <div id="pick-points-srcdst">
+          <div class="point-row-inline">
+            <span class="point-cell"><span class="point-label">src</span><span class="point-display" id="src-display" data-i18n="pts.click_map">— click map —</span></span>
+            <span class="point-cell"><span class="point-label">dst</span><span class="point-display" id="dst-display" data-i18n="pts.optional">— optional —</span></span>
+          </div>
+          <button class="secondary" id="clear-points" data-i18n="pts.clear" style="margin-top: 5px;">Clear points</button>
+        </div>
+        <div class="row" id="ref-actions-row" style="display: none; margin-top: 5px;">
+          <button type="button" class="secondary" id="ref-place-random" data-i18n="ref.place_random">Place random</button>
+          <button type="button" class="secondary" id="ref-clear" data-i18n="ref.clear">Clear refs</button>
+        </div>
+        <div id="density-extra" style="display: none;">
+          <div class="row">
+            <div>
+              <label data-i18n="param.n_refs">N references</label>
+              <input type="number" id="n-refs" value="10" min="1" max="2000" step="1" />
+            </div>
+            <div>
+              <label data-i18n="param.ref_source">Reference source</label>
+              <select id="ref-source">
+                <option value="click"  data-i18n="ref.click">click on map</option>
+                <option value="random" data-i18n="ref.random">random</option>
+              </select>
+            </div>
+          </div>
+          <label data-i18n="param.sampling" style="margin-top: 4px;">Sampling strategy</label>
+          <select id="ref-sampling">
+            <option value="census" data-i18n="sampling.census" selected>IBGE 2022 census (population density)</option>
+            <option value="sobol"  data-i18n="sampling.sobol">Sobol (quasi-random)</option>
+            <option value="random" data-i18n="sampling.uniform">uniform (pseudo-random)</option>
+          </select>
+          <div class="hint" id="ref-display" data-i18n="ref.none" style="margin-top: 3px;">no references placed</div>
+          <label data-i18n="ref.load_file" style="margin-top: 6px;">Load reference points (GeoJSON)</label>
+          <input type="file" id="ref-file" accept=".geojson,.json" />
+          <button type="button" class="secondary" id="ref-export" data-i18n="btn.export_refs" style="margin-top: 4px;">Export references (GeoJSON)</button>
+        </div>
+      </details>
+
+      <details class="group" id="execution-group">
+        <summary data-i18n="group.execution">3C. Execução</summary>
+        <label data-i18n="param.max_workers">Max compute workers (0 = auto)</label>
+        <input type="number" id="max-workers" value="0" min="0" max="64" step="1" />
+        <!-- Compute source: Browser (default), Localhost (native Rust),
+             Cloud (local orchestrator boots a VM; offered only when served locally). -->
         <label id="compute-source-label" data-i18n="param.compute_source" style="margin-top: 8px;">Compute source</label>
         <div id="compute-source" role="radiogroup" aria-labelledby="compute-source-label">
           <label style="display: flex; align-items: center; gap: 6px;">
@@ -930,10 +981,8 @@
           <div id="cloud-vm-status" style="font-size: 10px; color: var(--muted); margin-top: 3px;"></div>
           <div id="cloud-transfer" style="font-size: 10px; color: var(--muted); margin-top: 3px;"></div>
         </div>
-
-        <label data-i18n="param.field_cmap">Field colormap</label>
-        <select id="colormap"></select>
-      </div>
+      </details>
+      </details>
 
       <button id="run" data-i18n="btn.compute" disabled>Compute</button>
       <div id="time-estimate" style="font-size: 10px; color: var(--muted); margin-top: 3px; text-align: center;"></div>
@@ -943,67 +992,19 @@
            announces each update; aria-atomic re-reads the whole line. -->
       <div id="status" role="status" aria-live="polite" aria-atomic="true"></div>
 
-      <div class="group" style="margin-top: 8px;">
-        <h2 data-i18n="group.result">Result</h2>
-        <button type="button" id="refresh-style" class="secondary" data-i18n="btn.refresh_style" style="margin-bottom: 5px;">Refresh style</button>
+      <details class="group" id="result-group" style="margin-top: 8px;">
+        <summary data-i18n="group.result">4. Resultados</summary>
         <div class="meta" id="result-meta" data-i18n="result.empty">—</div>
-        <div class="legend">
-          <div class="swatch"></div>
-          <div class="legend-ticks">
-            <span class="v" id="legend-lo">0</span>
-            <span class="v" id="legend-mid">—</span>
-            <span class="v" id="legend-hi">—</span>
-          </div>
-        </div>
+        <label data-i18n="param.field_cmap">Field colormap</label>
+        <select id="colormap"></select>
 
-        <!-- Basemap selector: OSM, minimalist Carto styles, or a solid
-             colour with no tiles at all. -->
+        <!-- Layer visibility/opacity/order + basemap live in the on-map
+             "Controle de camadas" modal now (see #layer-order-modal). Group 4
+             keeps only the style controls (colormap, ranges, gamma, blend). -->
+        <button type="button" class="secondary" id="layer-ctrl-open" data-i18n="order.open" style="margin: 4px 0;">Layer control…</button>
+
+        <!-- Energy style controls (visibility/opacity in the layer modal) -->
         <div class="layer-block">
-          <label data-i18n="layer.basemap">Basemap</label>
-          <select id="basemap-select">
-            <option value="osm"         data-i18n="basemap.osm">OSM (default)</option>
-            <option value="carto-dark"  data-i18n="basemap.dark">OSM minimalist black</option>
-            <option value="carto-light" data-i18n="basemap.light">OSM minimalist white</option>
-            <option value="none-black"  data-i18n="basemap.black">no basemap (all black)</option>
-            <option value="none-white"  data-i18n="basemap.white">no basemap (all white)</option>
-            <option value="none-gray"   data-i18n="basemap.gray">no basemap (all gray)</option>
-          </select>
-          <button type="button" class="secondary" id="layer-order-btn" data-i18n="order.open" style="margin-top: 5px;">Layer stacking order…</button>
-        </div>
-
-        <!-- rmsampa-v2 tilemap (XYZ tiles from telhas.pedalhidrografi.co) -->
-        <div class="layer-block">
-          <div class="layer-head">
-            <label class="layer-toggle">
-              <input type="checkbox" id="tile-visible" checked />
-              <span data-i18n="layer.tiles">rmsampa-v2 tiles</span>
-            </label>
-            <input type="range" id="tile-opacity" min="0" max="1" step="0.05" value="0.85" data-i18n-aria="aria.opacity_tiles" />
-          </div>
-        </div>
-
-        <!-- DEM relief (cmo.phase elevation + B/W slope, fixed style).
-             Hidden until a DEM is loaded; loadDemFromArrayBuffer flips
-             the display and renders the PNG. -->
-        <div class="layer-block" id="relief-row" style="display: none;">
-          <div class="layer-head">
-            <label class="layer-toggle">
-              <input type="checkbox" id="relief-visible" />
-              <span data-i18n="layer.relief">Relief (DEM)</span>
-            </label>
-            <input type="range" id="relief-opacity" min="0" max="1" step="0.05" value="0.85" data-i18n-aria="aria.opacity_relief" />
-          </div>
-        </div>
-
-        <!-- Energy layer controls -->
-        <div class="layer-block">
-          <div class="layer-head">
-            <label class="layer-toggle">
-              <input type="checkbox" id="energy-visible" checked />
-              <span data-i18n="layer.energy">Energy</span>
-            </label>
-            <input type="range" id="energy-opacity" min="0" max="1" step="0.05" value="0.85" data-i18n-aria="aria.opacity_energy" />
-          </div>
           <!-- Shown only when a compare run produced both scenarios. -->
           <div id="energy-source-row" style="display: none;">
             <label data-i18n="layer.energy_source">Displayed scenario (energy & passes)</label>
@@ -1027,13 +1028,6 @@
 
         <!-- Passes layer controls (overlaid above energy) -->
         <div class="layer-block" id="passes-row" style="display: none;">
-          <div class="layer-head">
-            <label class="layer-toggle">
-              <input type="checkbox" id="passes-visible" checked />
-              <span data-i18n="layer.passes">Passes (overlay)</span>
-            </label>
-            <input type="range" id="passes-opacity" min="0" max="1" step="0.05" value="0.7" data-i18n-aria="aria.opacity_passes" />
-          </div>
           <!-- Shown only in the "difference" view: labels the A (orange =
                constrained/network) channel that the controls below drive. -->
           <div id="passes-net-label" style="display:none; align-items:center; gap:5px; font-size:11px; font-weight:600; margin:4px 0 2px;">
@@ -1101,10 +1095,17 @@
           </select>
         </div>
 
+        <button type="button" id="refresh-style" class="secondary" data-i18n="btn.refresh_style" style="margin-top: 4px;">Refresh style</button>
         <button class="secondary" id="range-reset" data-i18n="btn.range_reset" style="margin-top: 4px;">Reset ranges to auto</button>
-        <button type="button" id="download-bundle" data-i18n="btn.download_bundle" style="margin-top: 4px;">Download bundle (.zip)</button>
-        <button type="button" class="secondary" id="export-rendered" data-i18n="btn.export_rendered" style="margin-top: 4px;">Export rendered images (.zip)</button>
-      </div>
+        <div class="legend" style="margin-top: 8px;">
+          <div class="swatch"></div>
+          <div class="legend-ticks">
+            <span class="v" id="legend-lo">0</span>
+            <span class="v" id="legend-mid">—</span>
+            <span class="v" id="legend-hi">—</span>
+          </div>
+        </div>
+      </details>
 
       <div class="credit" data-i18n="credit">feito por Claúdio e dirigido pelos neogeógrafos geomorfológicos</div>
     </aside>
@@ -1493,9 +1494,48 @@
   <!-- Layer stacking-order modal. Rows are rendered by app.js (top of the
        list = drawn on top); ↑/↓ apply immediately and persist. -->
   <div class="modal-backdrop" id="layer-order-modal" role="dialog" aria-modal="true" aria-labelledby="layer-order-title">
-    <div class="modal" style="max-width: 320px;">
+    <div class="modal" style="max-width: 340px;">
       <button type="button" class="modal-close" id="layer-order-close" aria-label="Close">×</button>
-      <h2 id="layer-order-title" data-i18n="order.title" style="margin: 0 0 6px; font-size: 15px;">Layer stacking order</h2>
+      <h2 id="layer-order-title" data-i18n="order.title" style="margin: 0 0 8px; font-size: 15px;">Controle de camadas</h2>
+
+      <label data-i18n="layer.basemap">Basemap</label>
+      <select id="basemap-select">
+        <option value="osm"            data-i18n="basemap.osm">OSM (default)</option>
+        <option value="carto-dark"     data-i18n="basemap.dark">OSM minimalist black</option>
+        <option value="carto-light"    data-i18n="basemap.light">OSM minimalist white</option>
+        <option value="esri-satellite" data-i18n="basemap.satellite">Satellite (Esri)</option>
+        <option value="none-black"     data-i18n="basemap.black">no basemap (all black)</option>
+        <option value="none-white"     data-i18n="basemap.white">no basemap (all white)</option>
+        <option value="none-gray"      data-i18n="basemap.gray">no basemap (all gray)</option>
+      </select>
+
+      <div class="layer-block" style="margin-top: 8px;">
+        <div class="layer-head">
+          <label class="layer-toggle"><input type="checkbox" id="tile-visible" checked /><span data-i18n="layer.tiles">rmsampa-v2 tiles</span></label>
+          <input type="range" id="tile-opacity" min="0" max="1" step="0.05" value="0.85" data-i18n-aria="aria.opacity_tiles" />
+        </div>
+      </div>
+      <div class="layer-block" id="relief-row" style="display: none;">
+        <div class="layer-head">
+          <label class="layer-toggle"><input type="checkbox" id="relief-visible" /><span data-i18n="layer.relief">Relief (DEM)</span></label>
+          <input type="range" id="relief-opacity" min="0" max="1" step="0.05" value="0.85" data-i18n-aria="aria.opacity_relief" />
+        </div>
+      </div>
+      <div class="layer-block">
+        <div class="layer-head">
+          <label class="layer-toggle"><input type="checkbox" id="energy-visible" checked /><span data-i18n="layer.energy">Energy</span></label>
+          <input type="range" id="energy-opacity" min="0" max="1" step="0.05" value="0.85" data-i18n-aria="aria.opacity_energy" />
+        </div>
+      </div>
+      <div class="layer-block" id="passes-vis-row" style="display: none;">
+        <div class="layer-head">
+          <label class="layer-toggle"><input type="checkbox" id="passes-visible" checked /><span data-i18n="layer.passes">Passes (overlay)</span></label>
+          <input type="range" id="passes-opacity" min="0" max="1" step="0.05" value="0.7" data-i18n-aria="aria.opacity_passes" />
+        </div>
+      </div>
+      <label class="layer-toggle" style="margin-top: 6px;"><input type="checkbox" id="refs-visible" checked /><span data-i18n="ref.show_markers">Show reference markers</span></label>
+
+      <hr style="border: none; border-top: 1px solid var(--border); margin: 10px 0 6px;" />
       <div class="hint" data-i18n="order.hint" style="margin-bottom: 6px;">Top of the list is drawn on top. Markers and tooltips always stay above. Applied immediately; remembered on this device.</div>
       <div id="layer-order-list"></div>
       <button type="button" class="secondary" id="layer-order-reset" data-i18n="order.reset" style="margin-top: 8px;">Reset to default</button>
