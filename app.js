@@ -485,9 +485,36 @@ function setLang(lang) {
   currentLang = lang;
   try { localStorage.setItem("simu-lang", lang); } catch {}
   applyTranslations();
+  // applyTranslations() blindly re-applies each [data-i18n] element's EMPTY-state
+  // string, which clobbers any live dynamic content. Re-render the dynamic metas
+  // from state in the new language so loaded data / counts / picked points
+  // survive a language toggle. (dem/vec/result metas drop their data-i18n on
+  // write, so applyTranslations already leaves those alone.)
+  if (typeof updateBridgeMeta === "function") updateBridgeMeta();
+  if (typeof updateImpassableMeta === "function") updateImpassableMeta();
+  if (typeof syncRefDisplay === "function") syncRefDisplay();
+  if (typeof syncPointDisplays === "function") syncPointDisplays();
   // The cloud transfer line is set imperatively via t() (no data-i18n), so
   // re-render it after a language switch.
   if (typeof estimateRunTime === "function") estimateRunTime();
+}
+
+// Re-derive the src/dst point displays from state (density mode / src / dst), in
+// the current language. Called on language toggle so picked coordinates and the
+// correct prompt survive (applyTranslations would otherwise reset them).
+function syncPointDisplays() {
+  const srcDisp = document.getElementById("src-display");
+  const dstDisp = document.getElementById("dst-display");
+  if (!srcDisp || !dstDisp) return;
+  if (document.getElementById("want-density")?.checked) {
+    srcDisp.textContent = t("pts.density"); srcDisp.classList.remove("set");
+    dstDisp.textContent = t("pts.density"); dstDisp.classList.remove("set");
+    return;
+  }
+  if (state.src) { srcDisp.textContent = `r=${state.src[0]}, c=${state.src[1]}`; srcDisp.classList.add("set"); }
+  else { srcDisp.textContent = t("pts.click_map"); srcDisp.classList.remove("set"); }
+  if (state.dst) { dstDisp.textContent = `r=${state.dst[0]}, c=${state.dst[1]}`; dstDisp.classList.add("set"); }
+  else { dstDisp.textContent = state.src ? t("pts.click_again") : t("pts.optional"); dstDisp.classList.remove("set"); }
 }
 
 // ---- Loaded-group highlight (style only — never affects compute) --------
@@ -2246,6 +2273,7 @@ async function loadDemFromArrayBuffer(buf, label) {
     origin <span class="v">${originLabel}</span><br/>
     ${coverLabel}
   `;
+  demMeta.removeAttribute("data-i18n"); // live content — don't let a lang toggle wipe it
   if (state.dem.isGeographic) {
     status.textContent = t("status.dem_loaded", label);
   } else {
@@ -2691,6 +2719,7 @@ async function loadVectorNetwork(file) {
       // unusable. Say so loudly instead.
       document.getElementById("vec-meta").innerHTML =
         t("status.net_meta_zero", srsId, scanned, rasterised);
+      document.getElementById("vec-meta").removeAttribute("data-i18n");
       status.innerHTML = `<span style="color:#ff6b6b">${t("status.net_zero_cells")}</span>`;
       return;
     }
@@ -2700,6 +2729,7 @@ async function loadVectorNetwork(file) {
     state.networkFeatureCount = rasterised;
     document.getElementById("vec-meta").innerHTML =
       `EPSG:${srsId} · ` + t("status.net_meta_drawn", rasterised, networkCells.toLocaleString(), (100 * networkCells / (W * H)).toFixed(1));
+    document.getElementById("vec-meta").removeAttribute("data-i18n");
     status.textContent = t("status.network_loaded");
     state.lastResult = null; // previous compute used the un-constrained mask
     cancelActiveCompute();   // …and so would an in-flight one
@@ -2754,6 +2784,7 @@ function installNetworkFromLines(lines, srsId, sourceLabel, meta = null) {
   state.networkFeatureCount = rasterised;
   document.getElementById("vec-meta").innerHTML =
     `${escapeHtml(sourceLabel)} · ` + t("status.net_meta_drawn", rasterised, networkCells.toLocaleString(), (100 * networkCells / (W * H)).toFixed(1));
+  document.getElementById("vec-meta").removeAttribute("data-i18n");
   status.textContent = t("status.network_loaded");
   state.lastResult = null;
   cancelActiveCompute();
@@ -3239,7 +3270,9 @@ function clearVectorNetwork() {
   state.lastGraphResult = null;
   state.graphEnergyRaster = null;
   const meta = document.getElementById("vec-meta");
-  if (meta) meta.innerHTML = "No network loaded.";
+  // Back to the empty state: translated text + restore data-i18n so a later
+  // language toggle re-translates it (the live-load path removed the attribute).
+  if (meta) { meta.textContent = t("net.no_network"); meta.setAttribute("data-i18n", "net.no_network"); }
   const inp = document.getElementById("vector-file");
   if (inp) inp.value = "";
   syncLoadedHighlights(); // group 1B no longer "loaded"
@@ -5699,6 +5732,7 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
     meta.push(`length: <span class="v">${(pathLengthM / 1000).toFixed(2)} km</span>`);
   }
   resultMeta.innerHTML = meta.join("<br/>");
+  resultMeta.removeAttribute("data-i18n"); // live stats — don't let a lang toggle reset to "—"
 }
 
 // Re-render the cached energy + passes overlays with the currently-selected
