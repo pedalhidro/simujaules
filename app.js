@@ -319,8 +319,8 @@ const STRINGS = {
   "group.result_stats":          { pt: "3A. Estatísticas", en: "3A. Statistics" },
   "group.result_energy":         { pt: "3B. Campo de energia", en: "3B. Energy field" },
   "group.result_density":        { pt: "3C. Densidade de trajetos", en: "3C. Trajectory density" },
-  "group.result_density_net":    { pt: "3Ca. Densidade de trajetos na rede vetorial", en: "3Ca. Trajectory density on the vector network" },
-  "group.result_density_terrain":{ pt: "3Cb. Densidade de trajetos no terreno", en: "3Cb. Trajectory density on the terrain" },
+  "group.result_density_net":    { pt: "3C.a. Densidade de trajetos na rede vetorial", en: "3C.a. Trajectory density on the vector network" },
+  "group.result_density_terrain":{ pt: "3C.b. Densidade de trajetos no terreno", en: "3C.b. Trajectory density on the terrain" },
   "group.result_legend":         { pt: "3D. Legenda", en: "3D. Legend" },
   "btn.refresh_style":   { pt: "Atualizar estilo", en: "Refresh style" },
   "result.empty":        { pt: "—", en: "—" },
@@ -5361,12 +5361,25 @@ function rerenderCachedResult() {
     ? r.energyAlt[energySel]
     : r.energy;
   const dualPasses = energySel === "difference" && r.passes && r.passesAlt?.unconstrained;
+  // Place the PRIMARY density tweaks (#passes-primary) under the sub-group that
+  // matches the displayed channel: terrain (unconstrained) → 3C.b "no terreno";
+  // network (constrained) / difference A-channel → 3C.a "na rede vetorial". The
+  // terrain B-channel overrides (#passes-dual-row) only show in the difference
+  // view (under 3C.b). Sub-groups hide when their channel isn't displayed.
+  const terrainOnly = energySel === "unconstrained";
+  const primaryCtl = document.getElementById("passes-primary");
+  const netGroup = document.getElementById("result-density-net-group");
+  const netBody = document.getElementById("density-net-body");
+  const terrGroup = document.getElementById("result-density-terrain-group");
+  const terrBody = document.getElementById("density-terrain-body");
   const dualRow = document.getElementById("passes-dual-row");
+  if (primaryCtl) {
+    const host = terrainOnly ? terrBody : netBody;
+    if (host && primaryCtl.parentElement !== host) host.insertBefore(primaryCtl, host.firstChild);
+  }
+  if (netGroup) netGroup.style.display = terrainOnly ? "none" : "";
+  if (terrGroup) terrGroup.style.display = (terrainOnly || dualPasses) ? "" : "none";
   if (dualRow) dualRow.style.display = dualPasses ? "" : "none";
-  // The "Network (constrained)" label sits above the shared A-channel controls;
-  // only meaningful in the difference view (where the B/terrain channel exists).
-  const netLabel = document.getElementById("passes-net-label");
-  if (netLabel) netLabel.style.display = dualPasses ? "flex" : "none";
   const passes = (r.passesAlt && energySel === "unconstrained" && r.passesAlt.unconstrained)
     ? r.passesAlt.unconstrained
     : r.passes;
