@@ -3073,6 +3073,14 @@ let drawMode = null; // 'barrier' | 'corridor' | 'portal' while a draw is armed
 
 function ensureDrawLayers() {
   if (!state.drawLayers) {
+    // Dedicated pane ABOVE the data overlays (relief..routes live at z 401-406)
+    // so drawn shapes stay visible AND clickable when a result/relief is shown —
+    // in the default overlayPane (400) they'd sit behind the overlays. A canvas
+    // renderer bound to the pane is needed because the map is preferCanvas.
+    if (!map.getPane("drawnPane")) {
+      map.createPane("drawnPane").style.zIndex = 450;
+      state.drawnRenderer = L.canvas({ pane: "drawnPane" });
+    }
     state.drawLayers = {
       barrier:  L.layerGroup().addTo(map),
       corridor: L.layerGroup().addTo(map),
@@ -3086,9 +3094,13 @@ function ensureDrawLayers() {
 // click from also reaching the map (which would drop a source/reference point).
 function bindDeletePopup(layer, onDelete) {
   const btn = document.createElement("button");
-  btn.type = "button"; btn.className = "secondary";
-  btn.textContent = t("draw.delete_this");
-  btn.style.cssText = "margin:0;padding:3px 10px;font-size:12px;";
+  btn.type = "button";
+  btn.textContent = "🗑 " + t("draw.delete_this");
+  // Explicit high-contrast style — Leaflet's popup is white, so the app's
+  // .secondary class (light text on transparent) would be invisible here.
+  btn.style.cssText =
+    "margin:0;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;" +
+    "background:#d6493e;color:#fff;border:none;border-radius:4px;white-space:nowrap;";
   btn.addEventListener("click", () => { layer.closePopup(); onDelete(); });
   const wrap = document.createElement("div");
   wrap.style.textAlign = "center";
@@ -3166,7 +3178,8 @@ function startDraw(mode) {
 // remove THIS ring from state + rebuild). Reused by draw + restore.
 function addDrawnPolygon(mode, ring) {
   const key = mode === "barrier" ? "drawnImpassable" : "drawnPassable";
-  const layer = L.polygon(ring, DRAW_STYLE[mode]).addTo(ensureDrawLayers()[mode]);
+  const groups = ensureDrawLayers();
+  const layer = L.polygon(ring, { ...DRAW_STYLE[mode], pane: "drawnPane", renderer: state.drawnRenderer }).addTo(groups[mode]);
   bindDeletePopup(layer, () => {
     state[key] = (state[key] || []).filter((r) => r !== ring);
     layer.remove();
@@ -3180,7 +3193,8 @@ function addDrawnPolygon(mode, ring) {
 // portal + its bridge). Drawn portals live in their own layer group;
 // applyBridgeOverlay skips drawn bridges so they aren't double-drawn.
 function addDrawnPortalLayer(entry) {
-  const layer = L.polyline(entry.latlngs, DRAW_STYLE.portal).addTo(ensureDrawLayers().portal);
+  const groups = ensureDrawLayers();
+  const layer = L.polyline(entry.latlngs, { ...DRAW_STYLE.portal, pane: "drawnPane", renderer: state.drawnRenderer }).addTo(groups.portal);
   bindDeletePopup(layer, () => {
     state.drawnPortals = (state.drawnPortals || []).filter((p) => p !== entry);
     state.bridges = (state.bridges || []).filter((b) => !b.drawn);
