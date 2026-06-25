@@ -90,12 +90,29 @@ fi
 #                                            staging dir (the whole dedicated
 #                                            simujaules bucket) so renames
 #                                            don't leave orphans.
+#    --exclude='^census(/|$)'                ...EXCEPT the census/ prefix. The
+#                                            ~454 MB census FlatGeobuf
+#                                            (census/setores_br_pop.fgb, fetched
+#                                            by app.js's CENSUS_FGB_URL) is built
+#                                            and uploaded OUT-OF-BAND by
+#                                            census/build_fgb.py — it is never
+#                                            staged here, so without this exclude
+#                                            --delete-unmatched would prune it on
+#                                            every deploy (it 404s afterwards).
+#                                            gcloud's --exclude is a Python regex
+#                                            (re.match, start-anchored) on the
+#                                            RELATIVE object path and is applied
+#                                            to the DESTINATION listing too, so
+#                                            matching bucket objects are removed
+#                                            from the delete-candidate set — real
+#                                            protection, not just a source skip.
 #    --checksums-only                        compare by CRC32C, not mtime — the
 #                                            staging dir gets fresh mtimes every
 #                                            run, so without this every file
 #                                            looks changed and re-uploads.
 echo ">> Uploading to $BUCKET …"
 gcloud storage rsync -r --checksums-only --delete-unmatched-destination-objects \
+  --exclude='^census(/|$)' \
   "$STAGE" "$BUCKET/" 2>&1 | tee "$RSYNC_LOG"
 
 # 4. Set headers (metadata-only — cheap, so run every deploy). HTML gets a short
