@@ -1249,17 +1249,19 @@
         const contentH = colsEl.scrollHeight;
         colsEl.style.width = savedW;
         colsEl.style.columnCount = savedCC;
-        let H = Math.max(avail, Math.ceil(contentH / effCols) + 8);
-        colsEl.style.height = Math.round(H) + 'px';
-        // Unbreakable groups (break-inside:avoid) waste column space, so a tight
-        // content/N height can still spill into an extra column. Grow until the
-        // content fits in effCols columns (no horizontal overflow), bounded so
-        // it can never loop forever.
-        for (let i = 0; i < 6; i++) {
-          const used = Math.round((colsEl.scrollWidth + gap) / (colW + gap));
-          if (used <= effCols) break;
-          H = Math.ceil(H * used / effCols) + 8;
-          colsEl.style.height = Math.round(H) + 'px';
+        if (contentH <= avail) {
+          // Everything fits in ONE viewport column → keep it in column 1 (later
+          // columns empty); don't spread a little content into thin columns.
+          colsEl.style.columnFill = 'auto';
+          colsEl.style.height = Math.round(avail) + 'px';
+        } else {
+          // Overflows one column → BALANCE the content across the N columns
+          // (minimise the height variance: an even split, not column-1-heavy).
+          // height:auto lets balance pick the equal column height; the panel
+          // scrolls vertically if that exceeds the viewport, and balance never
+          // spills into an (N+1)th column (so still no horizontal scrollbar).
+          colsEl.style.columnFill = 'balance';
+          colsEl.style.height = 'auto';
         }
       }
       let fitPending = false;
