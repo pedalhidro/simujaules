@@ -640,8 +640,24 @@
     }
     #layer-order-modal.active { display: block; }
     #layer-order-modal > .modal {
-      pointer-events: auto; width: min(320px, calc(100vw - 16px));
+      pointer-events: auto;
+      width: min(calc(var(--layer-modal-cols, 1) * 320px), calc(100vw - 16px));
       max-height: calc(100vh - 164px); padding: 14px 16px; margin: 0;
+      /* Same idea as the sidebar: widen via the left-edge resizer to flow the
+         content into up to 2 columns. The title spans; groups never split. */
+      column-count: var(--layer-modal-cols, 1); column-gap: 16px;
+    }
+    #layer-order-modal > .modal > h2 { column-span: all; }
+    #layer-order-modal > .modal > *:not(#layer-modal-resizer):not(h2) { break-inside: avoid; }
+    #layer-modal-resizer {
+      position: absolute; top: 0; bottom: 0; left: -3px; width: 6px;
+      cursor: col-resize; z-index: 3; background: transparent;
+      transition: background 0.12s ease; touch-action: none;
+    }
+    #layer-modal-resizer:hover, #layer-modal-resizer.dragging { background: var(--accent-2); opacity: 0.45; }
+    @media (max-width: 860px) {
+      #layer-modal-resizer { display: none; }
+      #layer-order-modal > .modal { column-count: 1; width: min(320px, calc(100vw - 16px)); }
     }
     .modal {
       background: var(--panel);
@@ -1327,6 +1343,43 @@
         resizer.addEventListener('dblclick', () => applyCols(cols >= MAXC ? 1 : cols + 1));
       }
 
+      // ---- Layer-control modal resizer (2-column max) -------------------
+      // Same mechanism as the sidebar, but the modal is RIGHT-anchored, so the
+      // left-edge handle measures width as (modal right edge − pointer x).
+      const mResizer = document.getElementById('layer-modal-resizer');
+      const modalEl = document.querySelector('#layer-order-modal > .modal');
+      const MCOL = 320, MMAXC = 2;
+      let mcols = 1;
+      try { const s = parseInt(localStorage.getItem('simu-layer-modal-cols'), 10); if (s >= 1 && s <= MMAXC) mcols = s; } catch {}
+      function applyModalCols(n) {
+        mcols = Math.max(1, Math.min(MMAXC, n));
+        document.documentElement.style.setProperty('--layer-modal-cols', mcols);
+        try { localStorage.setItem('simu-layer-modal-cols', String(mcols)); } catch {}
+      }
+      applyModalCols(mcols);
+      if (mResizer && modalEl) {
+        let mdrag = false, mRight = 0;
+        mResizer.addEventListener('pointerdown', (e) => {
+          if (window.innerWidth <= 860) return;
+          mdrag = true; mRight = modalEl.getBoundingClientRect().right; // fixed during drag (right-anchored)
+          mResizer.classList.add('dragging');
+          try { mResizer.setPointerCapture(e.pointerId); } catch {}
+          e.preventDefault();
+        });
+        mResizer.addEventListener('pointermove', (e) => {
+          if (!mdrag) return;
+          applyModalCols(Math.round((mRight - e.clientX) / MCOL));
+        });
+        const mend = (e) => {
+          if (!mdrag) return;
+          mdrag = false; mResizer.classList.remove('dragging');
+          try { mResizer.releasePointerCapture(e.pointerId); } catch {}
+        };
+        mResizer.addEventListener('pointerup', mend);
+        mResizer.addEventListener('pointercancel', mend);
+        mResizer.addEventListener('dblclick', () => applyModalCols(mcols >= MMAXC ? 1 : mcols + 1));
+      }
+
       // ---- Floating compute feedback visibility --------------------------
       // app.js writes #status / toggles #progress.active as before; we just
       // show the bottom pill while either has content (no writer changes).
@@ -1730,7 +1783,8 @@
   <!-- Layer stacking-order modal. Rows are rendered by app.js (top of the
        list = drawn on top); ↑/↓ apply immediately and persist. -->
   <div class="modal-backdrop" id="layer-order-modal" role="region" aria-labelledby="layer-order-title">
-    <div class="modal" style="max-width: 340px;">
+    <div class="modal">
+      <div id="layer-modal-resizer" aria-hidden="true" data-i18n-title="resizer.title" title="Arraste para redimensionar (até 2 colunas)"></div>
       <!-- No × close button: the layer-control button toggles this panel and Esc
            closes it (it's a non-blocking floating panel). -->
       <h2 id="layer-order-title" data-i18n="order.title" style="margin: 0 0 8px; font-size: 15px;">Controle de camadas</h2>
