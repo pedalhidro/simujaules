@@ -910,13 +910,12 @@
           <input type="checkbox" id="impassable-invert" />
           <span data-i18n="imp.invert">Invert (raster marks passable cells)</span>
         </label>
-        <button type="button" class="secondary" id="impassable-clear" data-i18n="imp.clear" style="margin-top: 4px;">Clear mask</button>
         <!-- On-map drawing: barrier polygons (block) + passable corridors (open). -->
         <div class="row" style="margin-top: 4px;">
           <button type="button" class="secondary" id="draw-barrier" data-i18n="draw.barrier">Draw barrier</button>
           <button type="button" class="secondary" id="draw-corridor" data-i18n="draw.corridor">Draw corridor</button>
         </div>
-        <button type="button" class="secondary" id="draw-impassable-clear" data-i18n="draw.erase_imp" style="margin-top: 4px;">Erase drawn barriers/corridors</button>
+        <button type="button" class="secondary" id="draw-impassable-clear" data-i18n="imp.erase_all" style="margin-top: 4px;">Erase mask &amp; drawings</button>
         <div class="meta" id="draw-impassable-meta" style="margin-top: 2px;"></div>
         <!-- Mask visibility + opacity now live in the on-map layer-control panel
              (impassable row); the inputs are in #layer-inputs-store. -->

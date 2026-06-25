@@ -213,6 +213,7 @@ const STRINGS = {
   "draw.portal":         { pt: "Desenhar portal", en: "Draw portal" },
   "draw.erase":          { pt: "Apagar desenhos", en: "Erase drawings" },
   "draw.erase_imp":      { pt: "Apagar barreiras/corredores desenhados", en: "Erase drawn barriers/corridors" },
+  "imp.erase_all":       { pt: "Apagar máscara e desenhos", en: "Erase mask & drawings" },
   "draw.erase_portal":   { pt: "Apagar portais desenhados", en: "Erase drawn portals" },
   "draw.need_dem":       { pt: "Carregue um DEM geográfico (lon/lat) antes de desenhar.", en: "Load a geographic (lon/lat) DEM before drawing." },
   "draw.drawing":        { pt: "Desenhando… clique para adicionar vértices, duplo-clique para concluir.", en: "Drawing… click to add vertices, double-click to finish." },
@@ -3199,7 +3200,7 @@ function ensureDrawLayers() {
       const dp = map.createPane("drawnPane");
       dp.style.zIndex = 450;
       dp.style.cursor = "pointer"; // drawn shapes are click-to-delete
-      state.drawnRenderer = L.canvas({ pane: "drawnPane" });
+      state.drawnRenderer = L.canvas({ pane: "drawnPane", tolerance: 8 }); // near-click hits thin lines too
     }
     state.drawLayers = {
       barrier:  L.layerGroup().addTo(map),
@@ -3386,6 +3387,12 @@ function clearDrawnImpassable() {
   status.textContent = t("draw.cleared");
 }
 
+// Unified 1C eraser: clears the loaded/OSM mask AND any drawn barriers/corridors.
+function clearImpassableAll() {
+  clearImpassableMask();
+  clearDrawnImpassable();
+}
+
 function clearDrawnPortals() {
   state.drawnPortals = [];
   state.bridges = (state.bridges || []).filter((b) => !b.drawn);
@@ -3427,7 +3434,7 @@ function setupDrawingTools() {
       status.textContent = t("draw.cleared");
     }
   });
-  document.getElementById("draw-impassable-clear")?.addEventListener("click", clearDrawnImpassable);
+  document.getElementById("draw-impassable-clear")?.addEventListener("click", clearImpassableAll);
   document.getElementById("draw-portal-clear")?.addEventListener("click", clearDrawnPortals);
   if (map.pm) map.on("pm:create", onDrawCreate);
   updateDrawMeta();
@@ -3446,12 +3453,22 @@ function applyBridgeOverlay() {
   if (!show || !state.dem || !state.dem.isGeographic || !state.bridges) return;
   const op = bridgeOverlayOpacity();
   const group = L.layerGroup();
+  // Tolerant renderer so a click NEAR a deck (not exactly on the 3px line) hits it.
+  const renderer = state.bridgeRenderer || (state.bridgeRenderer = L.canvas({ pane: "networkPane", tolerance: 8 }));
   for (const br of state.bridges) {
     if (br.drawn) continue; // user-drawn portals render in their own clickable group
-    L.polyline(br.latlngs, {
+    const poly = L.polyline(br.latlngs, {
       color: br.kind === "tunnel" ? "#a26bff" : "#ff7f0e",
-      weight: 3, opacity: op, pane: "networkPane", interactive: false,
+      weight: 3, opacity: op, pane: "networkPane", interactive: true, renderer,
     }).addTo(group);
+    // Click a loaded/OSM bridge or tunnel → delete it from the input dataset.
+    bindDeletePopup(poly, () => {
+      state.bridges = (state.bridges || []).filter((b) => b !== br);
+      applyBridgeOverlay();
+      markBridgesDirty(true);
+      updateBridgeMeta();
+      status.textContent = t("draw.cleared");
+    });
   }
   group.addTo(map);
   state.bridgesLayer = group;
