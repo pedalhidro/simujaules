@@ -9,6 +9,44 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v38 — 2026-06-25
+
+A UI/UX review pass. **JS/UI only — the compute engine, Web Worker and Rust
+backend are untouched and stay bit-parity.**
+
+### Units
+
+- The **energy budget stays in kJ**, so the cost coefficients α/β are labelled
+  **kJ/m** again (reverting v37's J/m). No engine change — only the nomenclature.
+- **Downhill recovery (η) is now a 0–100 percent** input (default 10), divided by
+  100 at the compute reads; bundles keep the 0–1 fraction and a one-time
+  persistence migration scales an existing `0.1` up to `10`.
+
+### Visual & interaction
+
+- The **collapse/expand group cue is a quiet grey bar** now, not a loud near-white
+  border that out-shouted the green/orange/yellow/red **status** colours.
+- **"Baixar bundle" is a secondary button** so **"Calcular"** is the only primary.
+- **Drawing**: the active draw button shows an **armed** state and **Esc cancels**
+  a draw; the **"Concluído em…" pill auto-dismisses**; the disabled **"Calcular"**
+  button now **explains what it needs**; enabling density **auto-opens** the
+  points/references group.
+
+### Accessibility
+
+- Icon buttons, file pickers and the layer-panel rows now have **bilingual
+  accessible names**; native checkboxes/radios/sliders get `accent-color`;
+  reorder/help/lang **touch targets ≥24px**; **reduced-motion** respected; the
+  floating layer panel is `role="region"` (not a fake modal).
+
+### i18n / copy / mobile
+
+- Fixed PT/EN leaks (calibration text, budget tooltip); **shortened two over-long
+  select options** so they no longer clip; PT Twitter description; the help-modal
+  title; the "Cláudio" credit typo.
+- **Mobile**: the locate button hides while the drawer is open and the layer
+  button moves to the bottom stack; the drawer gains bottom padding.
+
 ## v37 — 2026-06-25
 
 UI refinements on top of v36. **JS/UI only — the compute engine, Web Worker and

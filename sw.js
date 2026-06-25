@@ -308,7 +308,20 @@
 //              tagline. Fixes: collapsing the sidebar no longer blanks the map;
 //              the rmsampa-v2 overlay no longer 404s tiles past z16. JS/UI only;
 //              engine + worker + backend untouched (bit-parity preserved).
-const VERSION  = "v37";
+//   v37 → v38: UI/UX review pass. Units: budget stays kJ, α/β back to kJ/m
+//              (reverting v37's J/m); downhill recovery input is now a 0–100 %
+//              mapped to the engine's 0–1 fraction (one-time persistence
+//              migration). Visual: the collapse/expand group cue is a quiet grey
+//              bar (was a loud near-white border that out-shouted the status
+//              colours); "Baixar bundle" is secondary so "Calcular" is the lone
+//              primary. A11y: bilingual accessible names on icon buttons / file
+//              pickers / layer rows, accent-color on native controls, ≥24px
+//              touch targets, reduced-motion, layer panel as role=region.
+//              Interaction: draw "armed" state + Esc-cancel, auto-dismissing
+//              success pill, disabled-Calcular reason, density auto-opens the
+//              refs group. i18n/copy leaks fixed + shorter select options +
+//              mobile button fixes. JS/UI only; engine untouched (bit-parity).
+const VERSION  = "v38";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

@@ -163,8 +163,8 @@ const STRINGS = {
   "net.constrain":       { pt: "Restringir cálculo à rede", en: "Constrain compute to network" },
   "net.graph_mode":      { pt: "Calcular sobre o grafo da rede (seguir os vetores)", en: "Compute on network graph (follow vectors)" },
   "net.junctions":       { pt: "junções", en: "junctions" },
-  "net.junctions_crossings": { pt: "também nos cruzamentos", en: "also at crossings" },
-  "net.junctions_shared":    { pt: "só em extremos compartilhados", en: "only shared endpoints" },
+  "net.junctions_crossings": { pt: "nos cruzamentos", en: "at crossings" },
+  "net.junctions_shared":    { pt: "extremos comuns", en: "shared endpoints" },
   "net.osm":             { pt: "Puxar ruas do OSM (highway=*)", en: "Pull streets from OSM (highway=*)" },
   "help.p.network_osm":  { pt: "Consulta o Overpass sobre a vista atual ∩ extensão do DEM. Áreas grandes podem demorar ou estourar limites do Overpass — aproxime o zoom primeiro.", en: "Queries Overpass over the current map view ∩ DEM extent. Large areas can take a while or hit Overpass limits — zoom in first." },
   "net.compare":         { pt: "Comparar com cenário sem rede", en: "Compare with unconstrained" },
@@ -249,8 +249,8 @@ const STRINGS = {
   "param.eta":           { pt: "Recuperação na descida (%)", en: "Downhill recovery (%)" },
   "param.budget":        { pt: "Orçamento de energia (kJ)", en: "Energy budget (kJ)" },
   "param.budget_mode":   { pt: "Orçamento aplica-se a", en: "Budget applies to" },
-  "budget.leg":          { pt: "cada perna (ida OU volta)", en: "each leg (out OR back)" },
-  "budget.total":        { pt: "ida e volta (total)", en: "round trip (total)" },
+  "budget.leg":          { pt: "por perna", en: "each leg" },
+  "budget.total":        { pt: "ida e volta", en: "round trip" },
   "help.p.budget_mode":  { pt: "Só no modo ida-e-volta. \"Cada perna\": célula visível se ida ≤ orçamento E volta ≤ orçamento (total pode chegar a 2×). \"Total\": ida + volta ≤ orçamento. A contagem de passagens conta apenas trajetos até células exibidas (dentro do orçamento); células-corredor ainda acumulam os trajetos que passam por elas.", en: 'Round-trip mode only. "Each leg": a cell is shown if out ≤ budget AND back ≤ budget (totals can reach 2×). "Total": out + back ≤ budget. The passes count only counts trajectories to displayed (within-budget) cells; corridor cells still accumulate the trajectories passing through them.' },
   "param.want_passes":   { pt: "Calcular contagem de passagens", en: "Compute passes count (route density)" },
   "param.want_topn":     { pt: "Calcular top-N rotas", en: "Compute top-N routes" },
@@ -372,8 +372,26 @@ const STRINGS = {
   "order.open":          { pt: "Controle de camadas…", en: "Layer control…" },
   "order.title":         { pt: "Controle de camadas", en: "Layer control" },
   "layer.ctrl_open":     { pt: "Controle de camadas", en: "Layer control" },
-  "resizer.title":       { pt: "Arraste para 1–4 colunas", en: "Drag to set 1–4 columns" },
+  "resizer.title":       { pt: "Arraste para 1–4 colunas (duplo-clique alterna)", en: "Drag to set 1–4 columns (double-click cycles)" },
   "status.dismiss":      { pt: "Dispensar", en: "Dismiss" },
+  // Accessible names / tooltips (icon buttons, file pickers, layer rows) + a few
+  // strings that used to be hardcoded (calibration, gate reasons, budget hint).
+  "drawer.toggle":       { pt: "Mostrar/ocultar painel", en: "Show/hide panel" },
+  "lang.toggle.aria":    { pt: "Mudar idioma", en: "Switch language" },
+  "modal.close":         { pt: "Fechar", en: "Close" },
+  "aria.dem_file":       { pt: "Carregar DEM", en: "Load DEM" },
+  "aria.vector_file":    { pt: "Carregar rede vetorial", en: "Load vector network" },
+  "aria.mask_file":      { pt: "Carregar máscara de barreira", en: "Load barrier mask" },
+  "aria.bundle_file":    { pt: "Importar bundle", en: "Import bundle" },
+  "layer.opacity":       { pt: "opacidade", en: "opacity" },
+  "order.move_up":       { pt: "Mover para cima", en: "Move up" },
+  "order.move_down":     { pt: "Mover para baixo", en: "Move down" },
+  "estimate.calibrating":{ pt: "≈ estimando…", en: "≈ estimating…" },
+  "param.budget.title":  { pt: "≤0 = ∞ (sem orçamento)", en: "≤0 = ∞ (no budget)" },
+  "compute.need_dem":    { pt: "Carregue um DEM primeiro", en: "Load a DEM first" },
+  "compute.need_src":    { pt: "Clique no mapa para definir a origem", en: "Click the map to set the source" },
+  "compute.need_ref":    { pt: "Defina ao menos 1 ponto de referência", en: "Place at least 1 reference point" },
+  "help.modal_title":    { pt: "Simulador bici-geo-energético", en: "Bike-geo-energy simulator" },
   "order.hint":          { pt: "O topo da lista é desenhado por cima. Marcadores e tooltips ficam sempre acima. Aplicado na hora; lembrado neste dispositivo.", en: "Top of the list is drawn on top. Markers and tooltips always stay above. Applied immediately; remembered on this device." },
   "order.reset":         { pt: "Restaurar padrão", en: "Reset to default" },
   "order.relief":        { pt: "Relevo (DEM)", en: "Relief (DEM)" },
@@ -441,7 +459,7 @@ const STRINGS = {
   "help.h.interp":       { pt: "Interpolação fora da rede", en: "Off-network interpolation" },
   "help.p.interp":       { pt: "Visualização opcional: preenche células fora da rede com a média dos valores da rede em redor, usando o mesmo algoritmo do GDAL <code>fillnodata</code>. Para cada célula vazia, busca em 8 direções até achar uma célula de rede dentro de <strong>distância máx</strong> (em células); calcula a média ponderada por <code>1/d²</code> dos acertos. Em seguida, aplica <strong>suavizações</strong> passes de média 3×3 sobre o preenchimento — preservando os valores originais da rede.", en: 'Optional visualisation: fills off-network cells with a weighted mean of nearby on-network values, using the same algorithm as GDAL <code>fillnodata</code>. For each empty cell, scan 8 directions for a network cell within <strong>max distance</strong> (cells); compute a <code>1/d²</code>-weighted mean of the hits. Then apply <strong>smoothing iters</strong> 3×3 mean passes over the fill, preserving the original network values.' },
   "help.p.interp_only":  { pt: "Apenas para visualização; a análise (Dijkstra, top-N, densidade) continua estritamente sobre a rede.", en: 'For visualisation only; the analysis (Dijkstra, top-N, density) stays strictly on the network.' },
-  "help.h.changelog":    { pt: "Histórico de versões (changelog)", en: "Changelog" },
+  "help.h.changelog":    { pt: "Histórico de versões (changelog, em inglês)", en: "Changelog" },
   "help.h.impl":         { pt: "Implementação", en: "Implementation" },
   "help.p.impl":         { pt: "JS puro, em Web Worker: Dijkstra 8-conectada com heap binária sobre arrays tipados (<code>Float64Array</code> de prioridades + <code>Int32Array</code> de payloads). Tudo o que precisa de Δh assimétrico, passes count, top-N e densidade roda no mesmo motor.", en: 'Pure JS in a Web Worker: 8-connected Dijkstra on a binary heap over typed arrays (<code>Float64Array</code> for priorities + <code>Int32Array</code> for payloads). Everything — asymmetric Δh, passes count, top-N, density — runs on the same engine.' },
 };
@@ -1097,6 +1115,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const sync = () => {
       const on = densCheck.checked;
       densExtra.style.display = on ? "" : "none";
+      if (on) setGroupOpen("pick-points-group", true); // surface the census/refs panel
 
       const passesCheck = document.getElementById("want-passes");
       const passesLabel = passesCheck?.closest("label");
@@ -1400,7 +1419,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const mkBtn = (label, disabled, delta) => {
         const b = document.createElement("button");
         b.type = "button"; b.className = "secondary"; b.textContent = label;
-        b.disabled = disabled; b.style.cssText = "width:23px;padding:2px 0;margin:0;";
+        b.disabled = disabled; b.style.cssText = "width:24px;height:24px;padding:2px 0;margin:0;";
+        b.setAttribute("aria-label", t(delta > 0 ? "order.move_up" : "order.move_down") + " — " + t(labelKey));
         b.addEventListener("click", () => {
           // Visually "up" = drawn on top = later in the bottom→top layerOrder.
           const i = layerOrder.indexOf(reorder.key);
@@ -1420,7 +1440,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const realVis = vis ? document.getElementById(vis) : null;
     if (realVis) {
       const cb = document.createElement("input");
-      cb.type = "checkbox"; cb.style.flex = "none";
+      cb.type = "checkbox"; cb.style.flex = "none"; cb.setAttribute("aria-label", t(labelKey));
       cb.checked = realVis.checked;
       cb.addEventListener("change", () => { realVis.checked = cb.checked; fireInput(realVis); });
       row.appendChild(cb);
@@ -1437,6 +1457,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (realOp) {
       const r = document.createElement("input");
       r.type = "range"; r.min = "0"; r.max = "1"; r.step = "0.05"; r.value = realOp.value;
+      r.setAttribute("aria-label", t(labelKey) + " — " + t("layer.opacity"));
       r.style.cssText = "flex:none;width:64px;";
       r.addEventListener("input", () => { realOp.value = r.value; fireInput(realOp); });
       row.appendChild(r);
@@ -3141,7 +3162,9 @@ function ensureDrawLayers() {
     // in the default overlayPane (400) they'd sit behind the overlays. A canvas
     // renderer bound to the pane is needed because the map is preferCanvas.
     if (!map.getPane("drawnPane")) {
-      map.createPane("drawnPane").style.zIndex = 450;
+      const dp = map.createPane("drawnPane");
+      dp.style.zIndex = 450;
+      dp.style.cursor = "pointer"; // drawn shapes are click-to-delete
       state.drawnRenderer = L.canvas({ pane: "drawnPane" });
     }
     state.drawLayers = {
@@ -3227,6 +3250,13 @@ function reappendDrawnPortals() {
   for (const p of state.drawnPortals) { const br = makePortalBridge(p.latlngs); if (br) state.bridges.push(br); }
 }
 
+// Toggle the "armed" highlight (+ aria-pressed) on the three draw buttons.
+function clearDrawArmed() {
+  for (const m of ["barrier", "corridor", "portal"]) {
+    const b = document.getElementById("draw-" + m);
+    if (b) { b.classList.remove("armed"); b.removeAttribute("aria-pressed"); }
+  }
+}
 function startDraw(mode) {
   if (!state.dem || !state.dem.isGeographic) {
     status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("draw.need_dem"))}</span>`;
@@ -3234,6 +3264,9 @@ function startDraw(mode) {
   }
   if (!map.pm) return;
   drawMode = mode;
+  clearDrawArmed();
+  const ab = document.getElementById("draw-" + mode);
+  if (ab) { ab.classList.add("armed"); ab.setAttribute("aria-pressed", "true"); }
   const shape = mode === "portal" ? "Line" : "Polygon";
   map.pm.enableDraw(shape, { templineStyle: DRAW_STYLE[mode], hintlineStyle: DRAW_STYLE[mode], pathOptions: DRAW_STYLE[mode] });
   status.textContent = t("draw.drawing");
@@ -3277,6 +3310,7 @@ function addDrawnPortalLayer(entry) {
 function onDrawCreate(e) {
   const mode = drawMode;
   drawMode = null;
+  clearDrawArmed();
   if (map.pm) map.pm.disableDraw();
   const layer = e.layer;
   if (!mode || !layer) { if (layer && layer.remove) layer.remove(); return; }
@@ -3350,6 +3384,15 @@ function setupDrawingTools() {
   document.getElementById("draw-barrier")?.addEventListener("click", () => startDraw("barrier"));
   document.getElementById("draw-corridor")?.addEventListener("click", () => startDraw("corridor"));
   document.getElementById("draw-portal")?.addEventListener("click", () => startDraw("portal"));
+  // Esc cancels an armed draw (a mode-error escape hatch).
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && drawMode) {
+      drawMode = null;
+      if (map.pm) map.pm.disableDraw();
+      clearDrawArmed();
+      status.textContent = t("draw.cleared");
+    }
+  });
   document.getElementById("draw-impassable-clear")?.addEventListener("click", clearDrawnImpassable);
   document.getElementById("draw-portal-clear")?.addEventListener("click", clearDrawnPortals);
   if (map.pm) map.on("pm:create", onDrawCreate);
@@ -4806,6 +4849,15 @@ function syncRefDisplay() {
   estimateRunTime();
 }
 
+let statusClearTimer = null;
+// Auto-dismiss a transient SUCCESS message after a few seconds so the floating
+// pill doesn't park over the map indefinitely. Only clears if the text is still
+// the same message (a newer status/compute write cancels the dismissal).
+function scheduleStatusClear(msg) {
+  clearTimeout(statusClearTimer);
+  statusClearTimer = setTimeout(() => { if (status.textContent === msg) status.textContent = ""; }, 6000);
+}
+
 // Unified gate for the Compute button. In density mode it unlocks once at
 // least one reference point exists; otherwise it follows the src/dst rules.
 function updateRunButtonState() {
@@ -4817,6 +4869,11 @@ function updateRunButtonState() {
       ? !(state.refPoints && state.refPoints.length > 0)
       : !state.src;
   }
+  // Explain the gate at the (disabled) button — title + status colours.
+  runBtn.title = !runBtn.disabled ? ""
+    : !state.dem ? t("compute.need_dem")
+    : document.getElementById("want-density")?.checked ? t("compute.need_ref")
+    : t("compute.need_src");
   syncLoadedHighlights(); // refresh 3B/3C/4 status colours
 }
 
@@ -5000,6 +5057,7 @@ runBtn.addEventListener("click", async () => {
     stampBridgeDeckPasses(m.passes); // deck cells carry the bridge flow (portals skip them)
     renderResult(m);
     status.textContent = t("status.done_ms", m.elapsedMs.toFixed(0));
+    scheduleStatusClear(status.textContent);
     setGroupOpen("result-group", true); // compute done → reveal results
     syncLoadedHighlights();              // 3C → done (green), 4 → ready (orange)
     // Learn from this run: nudge the estimate toward reality (single runs
@@ -5730,12 +5788,14 @@ runBtn.addEventListener("click", async () => {
         }
         renderGraphOverlay();
         status.textContent = doneMsg;
+        scheduleStatusClear(doneMsg);
         // Graph interp is single-worker — learn its rate (corrInterp).
         if (!energyAlt) { updateEstimateCorrection(0, performance.now() - interpStart); estimateRunTime(); }
       } else {
         if (eGrid) state.graphEnergyRaster = eGrid;
         renderGraphOverlay();
         status.textContent = doneMsg;
+        scheduleStatusClear(doneMsg);
       }
     };
     const runOnGraph = (graph) => {
@@ -7349,7 +7409,7 @@ function estimateRunTime() {
   if (!state.dem) { out.textContent = ""; return; }
 
   const cal = state.calibration;
-  if (!cal) { out.textContent = "≈ estimating…"; return; }
+  if (!cal) { out.textContent = t("estimate.calibrating"); return; }
 
   const N = state.dem.H * state.dem.W;
   const opts = currentRunOpts(cal, N);
