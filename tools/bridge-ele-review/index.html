@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Revisão de elevação de pontes — ponto_intervia → OSM</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root{
+    --bg:#13161c; --panel:#1b1f28; --panel2:#232936; --line:#313a4b;
+    --fg:#e7ecf3; --mut:#8c98ab; --acc:#4da3ff;
+    --ok:#37c871; --no:#ff5d5d; --warn:#ffb454; --pend:#6b7688;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{display:flex;flex-direction:column;font:13px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--fg)}
+  header{display:flex;gap:14px;align-items:center;padding:8px 12px;background:var(--panel);
+         border-bottom:1px solid var(--line);flex:0 0 auto;flex-wrap:wrap}
+  header h1{font-size:14px;margin:0;font-weight:600}
+  header .sp{flex:1}
+  .counts{display:flex;gap:8px;font-size:12px}
+  .pill{padding:2px 8px;border-radius:10px;background:var(--panel2);border:1px solid var(--line)}
+  .pill b{font-weight:700}
+  .pill.ok b{color:var(--ok)} .pill.no b{color:var(--no)} .pill.pend b{color:var(--pend)}
+  button,select,input,textarea{font:inherit;color:var(--fg);background:var(--panel2);
+    border:1px solid var(--line);border-radius:6px;padding:5px 9px}
+  button{cursor:pointer}
+  button:hover{border-color:var(--acc)}
+  button.primary{background:#1f6feb;border-color:#1f6feb;color:#fff;font-weight:600}
+  button.ok{background:#1c6b3c;border-color:#2a8a51;color:#fff;font-weight:600}
+  button.no{background:#7a2330;border-color:#a3303f;color:#fff;font-weight:600}
+  main{flex:1;display:flex;min-height:0}
+  /* list */
+  #list{flex:0 0 280px;border-right:1px solid var(--line);overflow:auto;background:var(--panel)}
+  .row{display:flex;gap:8px;align-items:center;padding:6px 9px;border-bottom:1px solid #222936;cursor:pointer}
+  .row:hover{background:var(--panel2)}
+  .row.cur{background:#26324a;box-shadow:inset 3px 0 0 var(--acc)}
+  .row .st{width:14px;text-align:center;font-weight:700;flex:0 0 14px}
+  .row .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .meta{color:var(--mut);font-size:11px}
+  .st.ok{color:var(--ok)} .st.no{color:var(--no)} .st.pend{color:var(--pend)} .st.flag{color:var(--warn)}
+  /* map */
+  #map{flex:1;min-width:0}
+  /* detail */
+  #detail{flex:0 0 330px;border-left:1px solid var(--line);overflow:auto;background:var(--panel);padding:12px}
+  #detail h2{font-size:15px;margin:0 0 2px}
+  #detail .sub{color:var(--mut);margin-bottom:10px}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:8px 0;font-size:12px}
+  .kv .k{color:var(--mut)}
+  .ele{font-size:30px;font-weight:800;letter-spacing:-.5px}
+  .ele small{font-size:13px;font-weight:500;color:var(--mut)}
+  .gap{font-weight:700}
+  .gap.hi{color:var(--warn)} .gap.lo{color:var(--ok)}
+  .svlist{margin:8px 0;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .sv{display:flex;gap:8px;align-items:center;padding:6px 9px;border-bottom:1px solid #222936;cursor:pointer}
+  .sv:last-child{border-bottom:0}
+  .sv:hover{background:var(--panel2)}
+  .sv.sel{background:#243a2c;box-shadow:inset 3px 0 0 var(--ok)}
+  .sv .dot{width:11px;height:11px;border-radius:50%;flex:0 0 11px;border:1px solid #0006}
+  .sv .a{font-weight:700;width:62px}
+  .sv .d{color:var(--mut);width:54px}
+  .sv .g{margin-left:auto;font-size:11px}
+  .actions{display:flex;gap:8px;margin:12px 0}
+  .actions button{flex:1}
+  .nav{display:flex;gap:8px;margin:8px 0}
+  .nav button{flex:1}
+  label.fld{display:block;margin:8px 0 3px;color:var(--mut)}
+  textarea{width:100%;resize:vertical;min-height:42px}
+  .hint{font-size:11px;color:var(--mut);margin-top:4px}
+  .badge{display:inline-block;padding:1px 6px;border-radius:8px;font-size:11px;font-weight:600}
+  .badge.warn{background:#4a3a18;color:var(--warn)} .badge.elev{background:#1f3a52;color:var(--acc)}
+  kbd{background:#000;border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
+  a{color:var(--acc)}
+  .leaflet-container{background:#000}
+</style>
+</head>
+<body>
+<header>
+  <h1>🌉 Revisão de elevação · <span style="color:var(--mut);font-weight:400">ponto_intervia → OSM</span></h1>
+  <div class="counts" id="counts"></div>
+  <span class="sp"></span>
+  <select id="filter" title="Filtrar lista">
+    <option value="pending">Pendentes</option>
+    <option value="all">Todas</option>
+    <option value="approved">Aprovadas</option>
+    <option value="rejected">Rejeitadas</option>
+    <option value="flagged">Multi-nível (cuidado)</option>
+  </select>
+  <button id="exGeo" class="primary" title="Baixar dataset validado (só aprovadas)">⬇ GeoJSON</button>
+  <button id="exCsv" title="Baixar CSV das aprovadas">⬇ CSV</button>
+  <button id="exAll" title="Backup de todas as decisões (p/ retomar depois)">💾 Decisões</button>
+  <button id="imp" title="Restaurar decisões salvas">📂 Importar</button>
+  <input type="file" id="impFile" accept=".json" style="display:none">
+  <button id="help">?</button>
+</header>
+<main>
+  <div id="list"></div>
+  <div id="map"></div>
+  <div id="detail"><div class="sub">Carregando…</div></div>
+</main>
+<script src="candidates.js"></script>
+<script>
+"use strict";
+const C = window.CANDIDATES || [];
+const META = window.CANDIDATES_META || {};
+const LS = "bridgeEleDecisions.v1";
+
+// ---- persistence ----------------------------------------------------------
+let decisions = {};
+try { decisions = JSON.parse(localStorage.getItem(LS) || "{}"); } catch (e) {}
+function save(){ localStorage.setItem(LS, JSON.stringify(decisions)); }
+function dec(id){ return decisions[id] || {status:"pending"}; }
+
+// ---- derived helpers ------------------------------------------------------
+function spread(c){ const a=c.sv.slice(0,6).map(s=>s.alt); return a.length>1?Math.max(...a)-Math.min(...a):0; }
+function isFlagged(c){ return spread(c) > 5; }                 // multi-level ambiguity
+function defaultIdx(c){ return 0; }                            // nearest by default
+function gapClass(g){ return g==null?"":(Math.abs(g)>=4?"hi":"lo"); }
+function svColor(c, alt){                                       // warm = above terrain (deck-ish)
+  if (c.terr==null) return "#7aa7ff";
+  const d = alt - c.terr;
+  if (d >= 6)  return "#ff5d3a";   // well above bare earth → likely the deck
+  if (d >= 2)  return "#ffb454";
+  if (d >= -2) return "#4da3ff";   // ~ground level
+  return "#9aa6b6";                // below terrain (odd)
+}
+
+// ---- map ------------------------------------------------------------------
+const map = L.map("map", {zoomControl:true}).setView([-23.55,-46.63], 12);
+const OSM_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const RMSAMPA_URL = "https://telhas.pedalhidrografi.co/rmsampa-v2/{z}/{x}/{y}.png";
+const rmOpts = {maxZoom:21, maxNativeZoom:16, opacity:0.85, attribution:"Topografia: Pedal Hidrográfico"};
+const sat = L.tileLayer(
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  {maxZoom:21, maxNativeZoom:19, attribution:"Imagery © Esri"}).addTo(map);
+const osm = L.tileLayer(OSM_URL, {maxZoom:19, attribution:"© OpenStreetMap"});
+const labels = L.tileLayer(
+  "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+  {maxZoom:21, maxNativeZoom:19});
+// rmsampa-v2 "topografia colorida" (telhas.pedalhidrografi.co). Offered as a
+// base (over OSM streets) and as an overlay (relevo sobre o satélite).
+const topo = L.layerGroup([
+  L.tileLayer(OSM_URL, {maxZoom:19, attribution:"© OpenStreetMap"}),
+  L.tileLayer(RMSAMPA_URL, rmOpts),
+]);
+const rmsampaOverlay = L.tileLayer(RMSAMPA_URL, rmOpts);
+L.control.layers(
+  {"Satélite (Esri)":sat, "OpenStreetMap":osm, "Topografia (rmsampa-v2)":topo},
+  {"Rótulos":labels, "Relevo rmsampa-v2":rmsampaOverlay}
+).addTo(map);
+
+let layerGroup = L.layerGroup().addTo(map);
+let curIdx = -1, selSv = 0;
+
+function drawCurrent(c){
+  layerGroup.clearLayers();
+  L.polyline(c.deck, {color:"#ff3b30", weight:5, opacity:.9}).addTo(layerGroup);
+  // center marker
+  L.marker(c.c, {icon: L.divIcon({className:"", html:
+    '<div style="width:16px;height:16px;border-radius:50%;background:#ffec3d;border:2px solid #000;box-shadow:0 0 0 2px #ffec3d"></div>',
+    iconSize:[16,16], iconAnchor:[8,8]})}).addTo(layerGroup).bindTooltip("centro do tabuleiro");
+  // survey points
+  c.sv.forEach((s,i)=>{
+    const m = L.circleMarker(s.ll, {radius: i===selSv?9:6, weight: i===selSv?3:1,
+      color: i===selSv?"#fff":"#0008", fillColor: svColor(c,s.alt), fillOpacity:.95}).addTo(layerGroup);
+    m.bindTooltip(`#${i} · ${s.alt} m · ${s.d} m`+(c.terr!=null?` · Δterr ${(s.alt-c.terr>=0?"+":"")}${(s.alt-c.terr).toFixed(1)}`:""),{permanent:false});
+    m.on("click",()=>{ selectSv(i); });
+  });
+  const b = L.latLngBounds(c.deck.concat(c.sv.map(s=>s.ll))).pad(0.4);
+  map.fitBounds(b, {maxZoom:19});
+}
+
+// ---- render list ----------------------------------------------------------
+function statusGlyph(id){
+  const s = dec(id).status;
+  return s==="approved"?["ok","✓"]:s==="rejected"?["no","✕"]:["pend","•"];
+}
+function visible(){
+  const f = document.getElementById("filter").value;
+  return C.map((c,i)=>({c,i})).filter(({c})=>{
+    const s = dec(c.id).status;
+    if (f==="all") return true;
+    if (f==="flagged") return isFlagged(c);
+    return s===f || (f==="pending" && s==="pending");
+  });
+}
+function renderList(){
+  const host = document.getElementById("list");
+  const vis = visible();
+  host.innerHTML = "";
+  vis.forEach(({c,i})=>{
+    const [cls,gl] = statusGlyph(c.id);
+    const row = document.createElement("div");
+    row.className = "row"+(i===curIdx?" cur":"");
+    row.innerHTML = `<span class="st ${cls}">${gl}</span>
+      <span class="nm">${c.name?esc(c.name):"<i style='color:var(--mut)'>(sem nome)</i>"}
+        ${isFlagged(c)?'<span class="st flag" title="multi-nível">⚠</span>':''}
+        <div class="meta">${esc(c.hw||"?")}${c.layer!=null?" · layer "+c.layer:""} · ${c.sv[0].d} m</div></span>`;
+    row.onclick = ()=>goto(i);
+    host.appendChild(row);
+  });
+  document.getElementById("counts").innerHTML = countHtml();
+}
+function countHtml(){
+  let ap=0,rj=0,pd=0;
+  C.forEach(c=>{const s=dec(c.id).status; if(s==="approved")ap++;else if(s==="rejected")rj++;else pd++;});
+  return `<span class="pill ok">✓ <b>${ap}</b></span>
+          <span class="pill no">✕ <b>${rj}</b></span>
+          <span class="pill pend">• <b>${pd}</b></span>
+          <span class="pill">Σ <b>${C.length}</b></span>`;
+}
+
+// ---- detail ---------------------------------------------------------------
+function curEle(c){
+  const d = dec(c.id);
+  if (d.source==="manual" && d.ele!=null) return {ele:d.ele, src:"manual"};
+  const s = c.sv[selSv];
+  return {ele:s.alt, src:"survey", sv:s};
+}
+function renderDetail(){
+  const c = C[curIdx]; if(!c) return;
+  const d = dec(c.id);
+  const cur = curEle(c);
+  const gap = c.terr!=null ? +(cur.ele - c.terr).toFixed(1) : null;
+  const osmUrl = `https://www.openstreetmap.org/way/${c.id}`;
+  const host = document.getElementById("detail");
+  host.innerHTML = `
+    <h2>${c.name?esc(c.name):"<i style='color:var(--mut)'>(ponte sem nome)</i>"}</h2>
+    <div class="sub">
+      ${esc(c.hw||"?")}${c.btype?" · "+esc(c.btype):""}
+      ${c.layer!=null?`<span class="badge elev">layer ${c.layer}</span>`:""}
+      ${isFlagged(c)?'<span class="badge warn">⚠ multi-nível</span>':""}
+    </div>
+    <a href="${osmUrl}" target="_blank" rel="noopener">way ${c.id} no OSM ↗</a>
+
+    <div style="margin:12px 0 4px"><span class="k" style="color:var(--mut)">ele proposto</span></div>
+    <div class="ele">${cur.ele.toFixed(1)} <small>m</small></div>
+    <div class="kv">
+      <span class="k">fonte</span><span>${cur.src==="manual"?"manual":`ponto_intervia #${selSv} · ${cur.sv.d} m do centro`}</span>
+      <span class="k">Terreno (DTM)</span><span>${c.terr!=null?c.terr.toFixed(1)+" m":"—"}</span>
+      <span class="k">COP30 (DSM)</span><span>${c.cop!=null?c.cop.toFixed(1)+" m":"—"}</span>
+      <span class="k">ele − Terreno</span><span class="gap ${gapClass(gap)}">${gap==null?"—":(gap>=0?"+":"")+gap+" m"}${gap!=null&&gap>=4?" (tabuleiro elevado)":""}</span>
+      <span class="k">comprimento</span><span>${c.len} m</span>
+    </div>
+
+    <label class="fld">Pontos ponto_intervia próximos (clique p/ escolher a fonte):</label>
+    <div class="svlist">
+      ${c.sv.map((s,i)=>{
+        const g = c.terr!=null ? (s.alt-c.terr) : null;
+        return `<div class="sv ${i===selSv&&cur.src!=='manual'?'sel':''}" data-i="${i}">
+          <span class="dot" style="background:${svColor(c,s.alt)}"></span>
+          <span class="a">${s.alt.toFixed(1)} m</span>
+          <span class="d">${s.d} m</span>
+          <span class="g" style="color:${g!=null&&g>=4?'var(--warn)':'var(--mut)'}">${g==null?"":"Δfab "+(g>=0?"+":"")+g.toFixed(1)}</span>
+        </div>`;
+      }).join("")}
+    </div>
+
+    <label class="fld">…ou valor manual (m):</label>
+    <input id="manual" type="number" step="0.1" placeholder="ex. 728.0"
+           value="${d.source==='manual'&&d.ele!=null?d.ele:''}">
+
+    <label class="fld">Nota (opcional):</label>
+    <textarea id="note" placeholder="ex. ponto sobre o tabuleiro confirmado na imagem">${d.note?esc(d.note):""}</textarea>
+
+    <div class="actions">
+      <button class="ok"  id="bApprove">✓ Aprovar <kbd>A</kbd></button>
+      <button class="no"  id="bReject">✕ Rejeitar <kbd>R</kbd></button>
+    </div>
+    <div class="nav">
+      <button id="bPrev">← <kbd>K</kbd></button>
+      <button id="bNextP" class="primary">Próx. pendente <kbd>N</kbd></button>
+      <button id="bNext"><kbd>J</kbd> →</button>
+    </div>
+    <div class="hint">${curIdx+1} / ${C.length}. Cores: <span style="color:#ff5d3a">vermelho</span>=acima do terreno (provável tabuleiro), <span style="color:#4da3ff">azul</span>=nível do solo. Salvo automático; exporte de tempos em tempos.</div>
+  `;
+  host.querySelectorAll(".sv").forEach(el=>el.onclick=()=>selectSv(+el.dataset.i));
+  document.getElementById("manual").oninput = onManual;
+  document.getElementById("note").oninput = ()=>{ const d=dec(c.id); d.note=document.getElementById("note").value; decisions[c.id]=d; save(); };
+  document.getElementById("bApprove").onclick = approve;
+  document.getElementById("bReject").onclick  = reject;
+  document.getElementById("bPrev").onclick = ()=>step(-1);
+  document.getElementById("bNext").onclick = ()=>step(1);
+  document.getElementById("bNextP").onclick = nextPending;
+}
+function onManual(){
+  const c=C[curIdx]; const v=parseFloat(document.getElementById("manual").value);
+  const d=dec(c.id);
+  if (Number.isFinite(v)){ d.source="manual"; d.ele=v; } else { d.source="survey"; }
+  decisions[c.id]=d; save(); renderDetail();
+}
+function selectSv(i){
+  selSv=i; const c=C[curIdx]; const d=dec(c.id);
+  d.source="survey"; d.svIdx=i; d.ele=c.sv[i].alt; d.svLL=c.sv[i].ll;
+  decisions[c.id]=d; save();
+  drawCurrent(c); renderDetail();
+}
+
+// ---- navigation & decisions ----------------------------------------------
+function goto(i){
+  if(i<0||i>=C.length) return;
+  curIdx=i; const c=C[i]; const d=dec(c.id);
+  selSv = (d.source==="survey" && d.svIdx!=null) ? d.svIdx : defaultIdx(c);
+  drawCurrent(c); renderList(); renderDetail();
+}
+function step(dir){
+  const vis=visible().map(v=>v.i);
+  let pos=vis.indexOf(curIdx);
+  if(pos===-1){ goto(C.findIndex((_,k)=>true)); return; }
+  const ni=vis[pos+dir]; if(ni!=null) goto(ni);
+}
+function nextPending(){
+  for(let k=1;k<=C.length;k++){ const i=(curIdx+k)%C.length; if(dec(C[i].id).status==="pending"){goto(i);return;} }
+}
+function commit(status){
+  const c=C[curIdx]; const cur=curEle(c); const d=dec(c.id);
+  d.status=status;
+  if(status==="approved"){
+    d.ele = cur.ele;
+    d.source = cur.src;
+    if(cur.src==="survey"){ d.svIdx=selSv; d.svLL=cur.sv.ll; d.svDist=cur.sv.d; }
+  }
+  d.ts = new Date().toISOString();
+  decisions[c.id]=d; save();
+  renderList();
+  if(status!=="pending") nextPending(); else renderDetail();
+}
+const approve=()=>commit("approved");
+const reject =()=>commit("rejected");
+
+// ---- export ---------------------------------------------------------------
+function approvedRecords(){
+  return C.map(c=>({c,d:dec(c.id)})).filter(x=>x.d.status==="approved");
+}
+function download(name, text, type){
+  const blob=new Blob([text],{type}); const u=URL.createObjectURL(blob);
+  const a=document.createElement("a"); a.href=u; a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(u),2000);
+}
+function exGeo(){
+  const feats=approvedRecords().map(({c,d})=>({
+    type:"Feature",
+    geometry:{type:"Point",coordinates:[c.c[1],c.c[0]]},
+    properties:{
+      osm_type:"way", osm_id:c.id, name:c.name||null, highway:c.hw||null,
+      layer:c.layer, bridge:c.btype||null,
+      ele:+(+d.ele).toFixed(1),
+      ele_source: d.source==="manual"?"manual":"ponto_intervia",
+      source_dist_m: d.source==="manual"?null:(d.svDist??null),
+      terrain:c.terr, cop30:c.cop,
+      terrain_gap: c.terr!=null?+(+d.ele - c.terr).toFixed(1):null,
+      note:d.note||null, reviewed_at:d.ts||null
+    }
+  }));
+  download("bridge_ele_validated.geojson",
+    JSON.stringify({type:"FeatureCollection",
+      meta:{...META, exported_at:new Date().toISOString(), count:feats.length},
+      features:feats},null,2), "application/geo+json");
+}
+function exCsv(){
+  const head=["osm_id","name","highway","layer","ele","ele_source","source_dist_m",
+              "terrain","terrain_gap","center_lat","center_lng","note"];
+  const rows=[head.join(",")];
+  approvedRecords().forEach(({c,d})=>{
+    const cell=v=>{v=(v==null?"":String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+    rows.push([c.id,c.name,c.hw,c.layer,(+d.ele).toFixed(1),
+      d.source==="manual"?"manual":"ponto_intervia", d.source==="manual"?"":(d.svDist??""),
+      c.terr, c.terr!=null?(+d.ele-c.terr).toFixed(1):"", c.c[0], c.c[1], d.note||""].map(cell).join(","));
+  });
+  download("bridge_ele_validated.csv", rows.join("\n"), "text/csv");
+}
+function exAll(){
+  download("bridge_ele_decisions.json", JSON.stringify({version:1, decisions},null,2), "application/json");
+}
+function importDecisions(file){
+  const r=new FileReader();
+  r.onload=()=>{ try{
+    const o=JSON.parse(r.result); const d=o.decisions||o;
+    decisions={...decisions,...d}; save(); renderList(); if(curIdx>=0)renderDetail();
+    alert("Decisões importadas: "+Object.keys(d).length);
+  }catch(e){ alert("Falha ao ler: "+e.message);} };
+  r.readAsText(file);
+}
+
+// ---- misc -----------------------------------------------------------------
+function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));}
+document.getElementById("filter").onchange=renderList;
+document.getElementById("exGeo").onclick=exGeo;
+document.getElementById("exCsv").onclick=exCsv;
+document.getElementById("exAll").onclick=exAll;
+document.getElementById("imp").onclick=()=>document.getElementById("impFile").click();
+document.getElementById("impFile").onchange=e=>{ if(e.target.files[0]) importDecisions(e.target.files[0]); };
+document.getElementById("help").onclick=()=>alert(
+  "Atalhos:\n  A aprovar · R rejeitar\n  J/→ próxima · K/← anterior · N próxima pendente\n  1–9 escolher ponto de levantamento\n\n"+
+  "Fluxo: confirme na imagem de satélite que o ponto escolhido (anel branco) está SOBRE o tabuleiro, "+
+  "não na via de baixo. Vermelho = acima do terreno (provável tabuleiro). Ajuste a fonte clicando no ponto, "+
+  "ou digite um valor manual. Exporte o GeoJSON ao terminar.\n\n"+
+  "Decisões ficam no navegador (localStorage). Exporte '💾 Decisões' p/ backup/retomar."
+);
+document.addEventListener("keydown",e=>{
+  if(/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+  const k=e.key.toLowerCase();
+  if(k==="a"){approve();e.preventDefault();}
+  else if(k==="r"){reject();e.preventDefault();}
+  else if(k==="j"||k==="arrowright"){step(1);e.preventDefault();}
+  else if(k==="k"||k==="arrowleft"){step(-1);e.preventDefault();}
+  else if(k==="n"){nextPending();e.preventDefault();}
+  else if(/^[1-9]$/.test(k)){ const c=C[curIdx]; if(c&&c.sv[+k-1]) selectSv(+k-1); }
+});
+
+// ---- boot -----------------------------------------------------------------
+if(!C.length){
+  document.getElementById("detail").innerHTML="<b>candidates.js não carregou.</b> Rode <code>build_candidates.py</code> primeiro.";
+}else{
+  renderList(); goto(0);
+}
+</script>
+</body>
+</html>
