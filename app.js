@@ -4132,7 +4132,7 @@ function buildGraphFieldLayer(graph, field, { pane, greyscale, minId, maxId, per
 // "Draw network". Reads style knobs live → recolours on restyle, no recompute.
 function renderGraphOverlay() {
   if (!state.lastGraphResult || !state.dem) return;
-  const { graph, result, energyAlt } = state.lastGraphResult;
+  const { graph, result, energyAlt, passesAlt } = state.lastGraphResult;
   const { W, H } = state.dem;
   if (state.passesOverlay) { state.passesOverlay.remove(); state.passesOverlay = null; }
   removeGraphLayers();
@@ -4168,17 +4168,38 @@ function renderGraphOverlay() {
     state.energyDataUrl = null;
   }
 
-  // Passes: vector corridors (the "follow the vectors" result), when density or
-  // "want passes" is on (mirrors the grid, where passes renders only if computed).
+  // Passes. Network = the graph "follow-the-vectors" corridors (3C.a). When a
+  // compare produced terrain (free-movement) passes, the difference / unconstrained
+  // views ALSO show them as a RASTER overlay (3C.b) — the terrain is NOT graphed.
   const passesWanted = !!document.getElementById("want-density")?.checked || !!document.getElementById("want-passes")?.checked;
   const hasPasses = passesWanted && result.edgePasses && result.edgePasses.some((v) => v > 0);
-  if (hasPasses) {
+  const terrainPasses = passesAlt && passesAlt.unconstrained;
+  const showNet = hasPasses && energySel !== "unconstrained";              // graph vector passes
+  const showTerr = !!terrainPasses && (energySel === "unconstrained" || energySel === "difference");
+  if (showNet) {
     state.graphPassesLayer = buildGraphFieldLayer(graph, result.edgePasses, { pane: "passesPane", greyscale: true, minId: "passes-vmin", maxId: "passes-vmax", percentiles: [10, 90], skipZero: true });
     if (state.graphPassesLayer) {
       state.graphPassesLayer.addTo(map);
       state.lastPassesAutoMin = state.graphPassesLayer._range[0];
       state.lastPassesAutoMax = state.graphPassesLayer._range[1];
     }
+  }
+  if (showTerr) {
+    // Terrain passes raster, driven by the 3C.b (B-channel) controls.
+    const gammaB = parseFloat(document.getElementById("passes-gamma-b")?.value);
+    const winB = parseInt(document.getElementById("passes-mean-window-b")?.value, 10);
+    const out = renderFieldToDataURL(terrainPasses, W, H, {
+      usePercentileBounds: true, percentiles: [10, 90], maxAboveMin: true,
+      userMin: readRangeInput("passes-vmin-b", null), userMax: readRangeInput("passes-vmax-b", null),
+      gamma: Number.isFinite(gammaB) ? gammaB : 1,
+      meanWindow: Number.isFinite(winB) && winB > 1 ? winB : 1,
+      useGreyscale: true, treatZeroAsTransparent: true,
+    });
+    state.passesDataUrl = out.url;
+    if (!showNet) { state.lastPassesAutoMin = out.lo; state.lastPassesAutoMax = out.hi; }
+    applyPassesOverlay();
+  } else {
+    state.passesDataUrl = null;
   }
   const routesGroup = L.layerGroup();
   if (result.routes && result.routes.length) {
@@ -4190,10 +4211,21 @@ function renderGraphOverlay() {
   state.graphRoutesLayer = routesGroup;
 
   const passesRow = document.getElementById("passes-row");
-  if (passesRow) passesRow.style.display = hasPasses ? "" : "none";
-  // Graph mode is always network-constrained and its passes are the network-graph
-  // passes — place them under 3C.a, no terrain channel.
-  applyDensityChannelGroups("constrained", true, false);
+  if (passesRow) passesRow.style.display = (showNet || showTerr) ? "" : "none";
+  // Graph channel mapping is FIXED (unlike the raster path, which MOVES the
+  // primary controls): network vector passes → 3C.a (passes-primary controls),
+  // terrain raster passes → 3C.b (passes-dual-row controls).
+  const primaryCtl = document.getElementById("passes-primary");
+  const netBody = document.getElementById("density-net-body");
+  const terrBody = document.getElementById("density-terrain-body");
+  const dualRow = document.getElementById("passes-dual-row");
+  if (primaryCtl && netBody && primaryCtl.parentElement !== netBody) netBody.insertBefore(primaryCtl, netBody.firstChild);
+  if (dualRow && terrBody && dualRow.parentElement !== terrBody) terrBody.appendChild(dualRow);
+  const netGroup = document.getElementById("result-density-net-group");
+  const terrGroup = document.getElementById("result-density-terrain-group");
+  if (netGroup) netGroup.style.display = showNet ? "" : "none";
+  if (terrGroup) terrGroup.style.display = showTerr ? "" : "none";
+  if (dualRow) dualRow.style.display = showTerr ? "" : "none";
 
   applyLayerControls();   // drive visibility + opacity from the Energy/Passes controls
   updateLegendTicks();
@@ -5554,11 +5586,14 @@ runBtn.addEventListener("click", async () => {
   // mask). Density → browser pool; single-source → one worker (energy only, no
   // path/top-N). Resolves a Float32Array (Infinity where unreachable), or null on
   // cancel/error. Runs in-browser (graph mode never uses the native backend).
+  // Returns { energy, passes } — passes is the unconstrained TERRAIN density (a
+  // raster), present only for the density partner (the from/to partner is
+  // energy-only). Used for the graph-mode difference's 3C.b terrain channel.
   const computeUnconstrainedEnergy = () => {
-    if (wantDensity) return computeDensityField({ useNetwork: false }).then((r) => r.energy);
+    if (wantDensity) return computeDensityField({ useNetwork: false }).then((r) => ({ energy: r.energy, passes: r.passes || null }));
     return new Promise((resolve) => {
       const w = spawnWorker((m) => {
-        if (m.kind === "done") resolve(m.energy);
+        if (m.kind === "done") resolve({ energy: m.energy, passes: m.passes || null });
         else if (m.kind === "error") { computeFailed(m.message); resolve(null); }
       });
       const { height, mask, transfer } = buildComputeGrid();
@@ -5603,16 +5638,21 @@ runBtn.addEventListener("click", async () => {
       // it against the graph energy (network cells), mirroring raster compare. The
       // diff is the energy COST of being restricted to the network (clamped ≥ 0).
       let energyAlt = null;
+      let passesAlt = null;
       if (graphCompareOn && eGrid) {
         status.textContent = t("status.computing");
-        const uncon = await computeUnconstrainedEnergy();
-        if (gen !== state.computeGen || !uncon) return;
+        const unconR = await computeUnconstrainedEnergy();
+        if (gen !== state.computeGen || !unconR || !unconR.energy) return;
+        const uncon = unconR.energy;
         const diff = new Float32Array(N);
         for (let i = 0; i < N; i++) {
           const a = eGrid[i], b = uncon[i];
           diff[i] = (Number.isFinite(a) && Number.isFinite(b)) ? Math.max(0, a - b) : Infinity;
         }
         energyAlt = { unconstrained: uncon, difference: diff };
+        // Terrain (free-movement) passes as a RASTER → the difference view's 3C.b
+        // channel. Present for density compares; null for from/to (energy-only partner).
+        if (unconR.passes) passesAlt = { unconstrained: unconR.passes };
       }
 
       // Finalise the run now (the partner, if any, is done).
@@ -5622,7 +5662,7 @@ runBtn.addEventListener("click", async () => {
       updateRunButtonState();
       state.computeStartedAt = 0;
       setGroupOpen("result-group", true); // graph compute done → reveal results (3)
-      state.lastGraphResult = { graph, result, energyAlt };
+      state.lastGraphResult = { graph, result, energyAlt, passesAlt };
       state.graphEnergyRaster = null;
       renderGraphOverlay();   // passes corridors show immediately
       // Learn the graph engine's real per-edge cost (corrGraph). The graph's
