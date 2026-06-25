@@ -187,7 +187,7 @@ const STRINGS = {
   "imp.clear":           { pt: "Limpar máscara", en: "Clear mask" },
   "imp.osm":             { pt: "Puxar água do OSM", en: "Pull water from OSM" },
   "imp.example_water":   { pt: "Águas RMSampa", en: "RMSampa water mask" },
-  "imp.example_water_tag": { pt: "~0,7 MB · nuvem", en: "~0.7 MB · cloud" },
+  "imp.example_water_tag": { pt: "~2,4 MB · nuvem", en: "~2.4 MB · cloud" },
   "imp.rivers":          { pt: "Rios (linhas) intransponíveis", en: "Rivers (lines) impassable" },
   "imp.corridor":        { pt: "Rede abre corredores passáveis sobre a máscara", en: "Network carves passable corridors across the mask" },
   "imp.offset":          { pt: "deslocamento no centro da ponte (m, −5…+15)", en: "bridge centre offset (m, −5…+15)" },
@@ -4188,6 +4188,43 @@ function rasterizeGraphEnergy(graph, result) {
   return any ? eGrid : null;
 }
 
+// Splat per-edge PASSES (3C.a network channel) onto the DEM grid — the raster
+// twin of buildGraphFieldLayer's vectors, so the "filtro média N" mean filter
+// can smooth them exactly like the terrain passes raster. Each cell takes the
+// MAX passes of any edge crossing it (a junction shouldn't sum-inflate). Mirrors
+// rasterizeGraphEnergy's walk; 0 = untouched (transparent).
+function rasterizeGraphPasses(graph, edgePasses) {
+  if (!state.dem || !edgePasses) return null;
+  const { H, W, mask } = state.dem;
+  const lineWidth = Math.max(1, parseInt(document.getElementById("vec-width")?.value, 10) || 1);
+  const halfWidth = (lineWidth - 1) >> 1;
+  const grid = new Float32Array(H * W); // 0-filled
+  let any = false;
+  for (let e = 0; e < graph.nEdges; e++) {
+    const v = edgePasses[e];
+    if (!Number.isFinite(v) || v <= 0) continue;
+    const a = graph.edgeA[e], b = graph.edgeB[e];
+    if (graph.nodeValid && (!graph.nodeValid[a] || !graph.nodeValid[b])) continue;
+    const r0 = graph.nodeR[a], c0 = graph.nodeC[a], r1 = graph.nodeR[b], c1 = graph.nodeC[b];
+    const steps = Math.max(1, Math.ceil(Math.hypot(r1 - r0, c1 - c0)));
+    for (let s = 0; s <= steps; s++) {
+      const f = s / steps;
+      const rr = Math.round(r0 + (r1 - r0) * f), cc = Math.round(c0 + (c1 - c0) * f);
+      for (let pdr = -halfWidth; pdr <= halfWidth; pdr++) {
+        const rrr = rr + pdr; if (rrr < 0 || rrr >= H) continue;
+        for (let pdc = -halfWidth; pdc <= halfWidth; pdc++) {
+          const ccc = cc + pdc; if (ccc < 0 || ccc >= W) continue;
+          const idx = rrr * W + ccc;
+          if (!mask[idx]) continue;
+          if (v > grid[idx]) grid[idx] = v;
+          any = true;
+        }
+      }
+    }
+  }
+  return any ? grid : null;
+}
+
 // Remove all graph-mode layers and reset the pane opacities (the raster
 // overlays assume the panes sit at opacity 1 and set their own element opacity).
 function removeGraphLayers() {
@@ -4303,7 +4340,19 @@ function renderGraphOverlay() {
   // views stay greyscale, matching raster mode.
   const diffView = energySel === "difference";
   const NET_ORANGE = [255, 165, 60], TERR_BLUE = [0, 90, 195];
-  if (showNet) {
+  const numOr = (id, fb) => { const v = parseFloat(document.getElementById(id)?.value); return Number.isFinite(v) ? v : fb; };
+  const intOr = (id, fb) => { const v = parseInt(document.getElementById(id)?.value, 10); return Number.isFinite(v) ? v : fb; };
+  const phB = (id, v) => { const el = document.getElementById(id); if (el) el.placeholder = v; };
+  // 3C.a network channel: precise VECTORS when "filtro média N" is empty; a
+  // rasterised + mean-smoothed grid when N is set (so it respects the mean filter
+  // exactly like the terrain raster). A rasterised network can't share the single
+  // passes overlay with the terrain raster, so in the difference view the two are
+  // composited into one orange/azure image (renderDualPassesToDataURL — the same
+  // path raster mode's difference uses, additive blend baked into the pixels).
+  const netWin = parseInt(document.getElementById("passes-mean-window")?.value, 10);
+  const netRasterize = showNet && Number.isFinite(netWin) && netWin > 1;
+
+  if (showNet && !netRasterize) {
     state.graphPassesLayer = buildGraphFieldLayer(graph, result.edgePasses, {
       pane: "passesPane", greyscale: !diffView, tint: diffView ? NET_ORANGE : null,
       minId: "passes-vmin", maxId: "passes-vmax", percentiles: [10, 90], skipZero: true });
@@ -4313,14 +4362,46 @@ function renderGraphOverlay() {
       state.lastPassesAutoMax = state.graphPassesLayer._range[1];
     }
   }
-  if (showTerr) {
-    // Terrain passes raster. When terrain is the displayed PRIMARY channel
-    // (unconstrained) it uses the PRIMARY controls — exactly like raster mode, so
-    // the mean filter (default 5) applies and it isn't thin. In the difference
-    // view it's the B-channel override, inheriting the A value where empty.
+
+  if (netRasterize && showTerr) {
+    // Difference: rasterised network (orange, A) + terrain (azure, B) → one image.
+    const netGrid = rasterizeGraphPasses(graph, result.edgePasses);
+    if (netGrid) {
+      const gammaB = numOr("passes-gamma-b", null), winB = intOr("passes-mean-window-b", null);
+      const out = renderDualPassesToDataURL(netGrid, terrainPasses, W, H, {
+        userMin: readRangeInput("passes-vmin", null), userMax: readRangeInput("passes-vmax", null),
+        gamma: numOr("passes-gamma", 1), meanWindow: netWin,
+        userMinB: readRangeInput("passes-vmin-b", null), userMaxB: readRangeInput("passes-vmax-b", null),
+        gammaB, meanWindowB: winB,
+      });
+      state.passesDataUrl = out.url;
+      state.lastPassesAutoMin = out.lo; state.lastPassesAutoMax = out.hi;
+      // 3C.b placeholders = the RESOLVED B (terrain) values; inputs stay empty.
+      phB("passes-vmin-b", out.loB != null ? formatSci(out.loB) : "=");
+      phB("passes-vmax-b", out.hiB != null ? formatSci(out.hiB) : "=");
+      phB("passes-gamma-b", String(gammaB != null ? gammaB : numOr("passes-gamma", 1)));
+      phB("passes-mean-window-b", String(winB != null && winB > 1 ? winB : netWin));
+    } else state.passesDataUrl = null;
+  } else if (netRasterize) {
+    // Constrained: rasterised network only → single greyscale raster.
+    const netGrid = rasterizeGraphPasses(graph, result.edgePasses);
+    if (netGrid) {
+      const out = renderFieldToDataURL(netGrid, W, H, {
+        usePercentileBounds: true, percentiles: [10, 90], maxAboveMin: true,
+        userMin: readRangeInput("passes-vmin", null), userMax: readRangeInput("passes-vmax", null),
+        gamma: numOr("passes-gamma", 1), meanWindow: netWin,
+        useGreyscale: true, treatZeroAsTransparent: true,
+      });
+      state.passesDataUrl = out.url;
+      state.lastPassesAutoMin = out.lo; state.lastPassesAutoMax = out.hi;
+    } else state.passesDataUrl = null;
+  } else if (showTerr) {
+    // Terrain passes raster (network is vectors or absent). When terrain is the
+    // displayed PRIMARY channel (unconstrained) it uses the PRIMARY controls —
+    // exactly like raster mode, so the mean filter (default 5) applies and it
+    // isn't thin. In the difference view it's the B-channel override, inheriting
+    // the A value where empty.
     const terrPrimary = !showNet;
-    const numOr = (id, fb) => { const v = parseFloat(document.getElementById(id)?.value); return Number.isFinite(v) ? v : fb; };
-    const intOr = (id, fb) => { const v = parseInt(document.getElementById(id)?.value, 10); return Number.isFinite(v) ? v : fb; };
     const aGamma = numOr("passes-gamma", 1), aWin = intOr("passes-mean-window", 1);
     const gamma = terrPrimary ? aGamma : numOr("passes-gamma-b", aGamma);
     const win   = terrPrimary ? aWin   : intOr("passes-mean-window-b", aWin);
@@ -4339,16 +4420,15 @@ function renderGraphOverlay() {
     // Difference view: surface the RESOLVED terrain values as the 3C.b placeholders
     // — the inputs stay empty (= inheriting) but show the inferred number, not "=".
     if (showNet) {
-      const ph = (id, v) => { const el = document.getElementById(id); if (el) el.placeholder = v; };
-      ph("passes-vmin-b", out.lo != null ? formatSci(out.lo) : "=");
-      ph("passes-vmax-b", out.hi != null ? formatSci(out.hi) : "=");
-      ph("passes-gamma-b", String(gamma));
-      ph("passes-mean-window-b", String(win > 1 ? win : 1));
+      phB("passes-vmin-b", out.lo != null ? formatSci(out.lo) : "=");
+      phB("passes-vmax-b", out.hi != null ? formatSci(out.hi) : "=");
+      phB("passes-gamma-b", String(gamma));
+      phB("passes-mean-window-b", String(win > 1 ? win : 1));
     }
-    applyPassesOverlay();
   } else {
     state.passesDataUrl = null;
   }
+  applyPassesOverlay();
   const routesGroup = L.layerGroup();
   if (result.routes && result.routes.length) {
     for (let i = 0; i < result.routes.length; i++) drawGraphPath(graph, result.routes[i], routeColour(i, result.routes.length), routesGroup);
@@ -4384,7 +4464,11 @@ function renderGraphOverlay() {
   // After applyLayerControls, which would otherwise reset blend to passes-blend.
   if (diffView && showTerr && state.passesOverlay) {
     const el = state.passesOverlay.getElement();
-    if (el) el.style.mixBlendMode = "plus-lighter";
+    // The combined network+terrain raster (netRasterize) already bakes the
+    // additive blend into its pixels, so it draws NORMAL; the vector-network
+    // difference still needs plus-lighter to add the azure terrain raster over
+    // the orange network vectors.
+    if (el) el.style.mixBlendMode = netRasterize ? "normal" : "plus-lighter";
   }
   updateLegendTicks();
   applyColormapToLegend();
@@ -6573,7 +6657,7 @@ function renderDualPassesToDataURL(constrained, unconstrained, W, H, opts) {
     }
   }
   ctx.putImageData(img, 0, 0);
-  return { url: canvas.toDataURL(), lo, hi };
+  return { url: canvas.toDataURL(), lo, hi, loB, hiB };
 }
 
 // ============================================================================
