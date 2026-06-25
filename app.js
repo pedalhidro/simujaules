@@ -4082,7 +4082,7 @@ function removeGraphLayers() {
 // Build one colored-polyline-per-edge vector layer for a per-edge field.
 // greyscale matches the raster passes layer; colormap matches the energy layer.
 // Returns a layerGroup with `_range = [lo, hi]` for the legend.
-function buildGraphFieldLayer(graph, field, { pane, greyscale, minId, maxId, percentiles, skipZero }) {
+function buildGraphFieldLayer(graph, field, { pane, greyscale, tint, minId, maxId, percentiles, skipZero }) {
   // Collect drawable values. skipZero mirrors the raster's treatZeroAsTransparent:
   // zero / unreached edges DON'T draw, so the result reads as corridors instead
   // of a full-network outline. Percentile bounds tame the long passes tail.
@@ -4112,7 +4112,8 @@ function buildGraphFieldLayer(graph, field, { pane, greyscale, minId, maxId, per
     let t = (v - lo) / span; t = t < 0 ? 0 : (t > 1 ? 1 : t);
     t = Math.pow(t, gamma);
     let col;
-    if (greyscale) { const g = Math.round(t * 255); col = `rgb(${g},${g},${g})`; }
+    if (tint) { const [tr, tg, tb] = tint; col = `rgb(${Math.round(tr * t)},${Math.round(tg * t)},${Math.round(tb * t)})`; }
+    else if (greyscale) { const g = Math.round(t * 255); col = `rgb(${g},${g},${g})`; }
     else { const [cr, cg, cb] = colormap(t); col = `rgb(${cr},${cg},${cb})`; }
     const a = graph.edgeA[e], b = graph.edgeB[e];
     group.addLayer(L.polyline(
@@ -4176,8 +4177,16 @@ function renderGraphOverlay() {
   const terrainPasses = passesAlt && passesAlt.unconstrained;
   const showNet = hasPasses && energySel !== "unconstrained";              // graph vector passes
   const showTerr = !!terrainPasses && (energySel === "unconstrained" || energySel === "difference");
+  // In the difference view, colour the two channels like the raster difference:
+  // network = warm orange, terrain = azure blue (additive complements → white on
+  // overlap, discriminable under red–green colour-blindness). Single-scenario
+  // views stay greyscale, matching raster mode.
+  const diffView = energySel === "difference";
+  const NET_ORANGE = [255, 165, 60], TERR_BLUE = [0, 90, 195];
   if (showNet) {
-    state.graphPassesLayer = buildGraphFieldLayer(graph, result.edgePasses, { pane: "passesPane", greyscale: true, minId: "passes-vmin", maxId: "passes-vmax", percentiles: [10, 90], skipZero: true });
+    state.graphPassesLayer = buildGraphFieldLayer(graph, result.edgePasses, {
+      pane: "passesPane", greyscale: !diffView, tint: diffView ? NET_ORANGE : null,
+      minId: "passes-vmin", maxId: "passes-vmax", percentiles: [10, 90], skipZero: true });
     if (state.graphPassesLayer) {
       state.graphPassesLayer.addTo(map);
       state.lastPassesAutoMin = state.graphPassesLayer._range[0];
@@ -4193,7 +4202,7 @@ function renderGraphOverlay() {
       userMin: readRangeInput("passes-vmin-b", null), userMax: readRangeInput("passes-vmax-b", null),
       gamma: Number.isFinite(gammaB) ? gammaB : 1,
       meanWindow: Number.isFinite(winB) && winB > 1 ? winB : 1,
-      useGreyscale: true, treatZeroAsTransparent: true,
+      useGreyscale: !diffView, tint: diffView ? TERR_BLUE : null, treatZeroAsTransparent: true,
     });
     state.passesDataUrl = out.url;
     if (!showNet) { state.lastPassesAutoMin = out.lo; state.lastPassesAutoMax = out.hi; }
@@ -4228,6 +4237,13 @@ function renderGraphOverlay() {
   if (dualRow) dualRow.style.display = showTerr ? "" : "none";
 
   applyLayerControls();   // drive visibility + opacity from the Energy/Passes controls
+  // Difference view: additively blend the azure terrain raster over the orange
+  // network vectors so overlap sums to white (matches the raster difference).
+  // After applyLayerControls, which would otherwise reset blend to passes-blend.
+  if (diffView && showTerr && state.passesOverlay) {
+    const el = state.passesOverlay.getElement();
+    if (el) el.style.mixBlendMode = "plus-lighter";
+  }
   updateLegendTicks();
   applyColormapToLegend();
 }
@@ -6268,6 +6284,12 @@ function renderFieldToDataURL(field, W, H, opts) {
         if (tc < 0) tc = 0;
         else if (tc > 1) tc = 1;
         [r2, g2, b2] = colormap(tc);
+        a2 = Math.round(t * 255);
+      } else if (opts.tint) {
+        // Solid colour scaled by intensity (the orange/azure difference channels);
+        // alpha = intensity so dark cells are transparent and additive blends sum.
+        const [tr, tg, tb] = opts.tint;
+        r2 = Math.round(tr * t); g2 = Math.round(tg * t); b2 = Math.round(tb * t);
         a2 = Math.round(t * 255);
       } else if (opts.useGreyscale) {
         const g = Math.round(t * 255);
