@@ -4310,14 +4310,24 @@ function renderGraphOverlay() {
     }
   }
   if (showTerr) {
-    // Terrain passes raster, driven by the 3C.b (B-channel) controls.
-    const gammaB = parseFloat(document.getElementById("passes-gamma-b")?.value);
-    const winB = parseInt(document.getElementById("passes-mean-window-b")?.value, 10);
+    // Terrain passes raster. When terrain is the displayed PRIMARY channel
+    // (unconstrained) it uses the PRIMARY controls — exactly like raster mode, so
+    // the mean filter (default 5) applies and it isn't thin. In the difference
+    // view it's the B-channel override, inheriting the A value where empty.
+    const terrPrimary = !showNet;
+    const numOr = (id, fb) => { const v = parseFloat(document.getElementById(id)?.value); return Number.isFinite(v) ? v : fb; };
+    const intOr = (id, fb) => { const v = parseInt(document.getElementById(id)?.value, 10); return Number.isFinite(v) ? v : fb; };
+    const aGamma = numOr("passes-gamma", 1), aWin = intOr("passes-mean-window", 1);
+    const gamma = terrPrimary ? aGamma : numOr("passes-gamma-b", aGamma);
+    const win   = terrPrimary ? aWin   : intOr("passes-mean-window-b", aWin);
+    const uMin = terrPrimary ? readRangeInput("passes-vmin", null)
+      : (readRangeInput("passes-vmin-b", null) ?? readRangeInput("passes-vmin", null));
+    const uMax = terrPrimary ? readRangeInput("passes-vmax", null)
+      : (readRangeInput("passes-vmax-b", null) ?? readRangeInput("passes-vmax", null));
     const out = renderFieldToDataURL(terrainPasses, W, H, {
       usePercentileBounds: true, percentiles: [10, 90], maxAboveMin: true,
-      userMin: readRangeInput("passes-vmin-b", null), userMax: readRangeInput("passes-vmax-b", null),
-      gamma: Number.isFinite(gammaB) ? gammaB : 1,
-      meanWindow: Number.isFinite(winB) && winB > 1 ? winB : 1,
+      userMin: uMin, userMax: uMax,
+      gamma, meanWindow: win > 1 ? win : 1,
       useGreyscale: !diffView, tint: diffView ? TERR_BLUE : null, treatZeroAsTransparent: true,
     });
     state.passesDataUrl = out.url;
@@ -4337,20 +4347,23 @@ function renderGraphOverlay() {
 
   const passesRow = document.getElementById("passes-row");
   if (passesRow) passesRow.style.display = (showNet || showTerr) ? "" : "none";
-  // Graph channel mapping is FIXED (unlike the raster path, which MOVES the
-  // primary controls): network vector passes → 3C.a (passes-primary controls),
-  // terrain raster passes → 3C.b (passes-dual-row controls).
+  // Channel mapping mirrors the raster path: the PRIMARY controls live with the
+  // displayed primary channel — network (3C.a) unless terrain is the ONLY channel
+  // (unconstrained), where they move to 3C.b so you edit real values there. The
+  // B-channel dual-row shows only in the difference view (both channels visible).
   const primaryCtl = document.getElementById("passes-primary");
   const netBody = document.getElementById("density-net-body");
   const terrBody = document.getElementById("density-terrain-body");
   const dualRow = document.getElementById("passes-dual-row");
-  if (primaryCtl && netBody && primaryCtl.parentElement !== netBody) netBody.insertBefore(primaryCtl, netBody.firstChild);
+  const terrPrimary = showTerr && !showNet;
+  const primaryHost = terrPrimary ? terrBody : netBody;
+  if (primaryCtl && primaryHost && primaryCtl.parentElement !== primaryHost) primaryHost.insertBefore(primaryCtl, primaryHost.firstChild);
   if (dualRow && terrBody && dualRow.parentElement !== terrBody) terrBody.appendChild(dualRow);
   const netGroup = document.getElementById("result-density-net-group");
   const terrGroup = document.getElementById("result-density-terrain-group");
   if (netGroup) netGroup.style.display = showNet ? "" : "none";
   if (terrGroup) terrGroup.style.display = showTerr ? "" : "none";
-  if (dualRow) dualRow.style.display = showTerr ? "" : "none";
+  if (dualRow) dualRow.style.display = (showNet && showTerr) ? "" : "none";
 
   applyLayerControls();   // drive visibility + opacity from the Energy/Passes controls
   // Difference view: additively blend the azure terrain raster over the orange
