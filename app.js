@@ -423,6 +423,24 @@ const STRINGS = {
   "btn.export_rendered": { pt: "Exportar imagens renderizadas (.zip)", en: "Export rendered images (.zip)" },
   "btn.export_refs":     { pt: "Exportar referências (GeoJSON)", en: "Export references (GeoJSON)" },
   "ref.export_empty":    { pt: "Nenhuma referência para exportar.", en: "No references to export." },
+  "io.inputs_hint":      { pt: "Dados de entrada (1A–1D), mesmo formato na ida e volta:", en: "Input datasets (1A–1D), same format both ways:" },
+  "io.export_dem":       { pt: "Exportar DEM (.tif)", en: "Export DEM (.tif)" },
+  "io.import_dem":       { pt: "Importar DEM (.tif)", en: "Import DEM (.tif)" },
+  "io.export_network":   { pt: "Exportar rede (.gpkg)", en: "Export network (.gpkg)" },
+  "io.import_network":   { pt: "Importar rede (.gpkg)", en: "Import network (.gpkg)" },
+  "io.export_mask":      { pt: "Exportar máscara (.tif)", en: "Export mask (.tif)" },
+  "io.import_mask":      { pt: "Importar máscara (.tif)", en: "Import mask (.tif)" },
+  "io.export_bridges":   { pt: "Exportar pontes (.gpkg)", en: "Export bridges (.gpkg)" },
+  "io.import_bridges":   { pt: "Importar pontes (.gpkg)", en: "Import bridges (.gpkg)" },
+  "io.exported":         { pt: "{0} exportado.", en: "{0} exported." },
+  "io.no_dem":           { pt: "Nenhum DEM carregado para exportar.", en: "No DEM loaded to export." },
+  "io.no_mask":          { pt: "Nenhuma máscara carregada para exportar.", en: "No mask loaded to export." },
+  "io.no_network":       { pt: "Nenhuma rede carregada para exportar.", en: "No network loaded to export." },
+  "io.no_bridges":       { pt: "Nenhuma ponte carregada para exportar.", en: "No bridges loaded to export." },
+  "io.no_dem_first":     { pt: "Carregue um DEM antes de importar pontes.", en: "Load a DEM before importing bridges." },
+  "io.gpkg_invalid":     { pt: "Arquivo .gpkg inválido (sem gpkg_geometry_columns).", en: "Invalid .gpkg (no gpkg_geometry_columns)." },
+  "io.gpkg_no_lines":    { pt: "Nenhuma linha encontrada no .gpkg.", en: "No line features found in the .gpkg." },
+  "bridges.need_geographic": { pt: "As pontes precisam de um DEM geográfico (lon/lat).", en: "Bridges need a geographic (lon/lat) DEM." },
   "ref.export_done":     { pt: "{0} referência(s) exportada(s).", en: "Exported {0} reference(s)." },
   "credit":              { pt: "feito por Cláudio e dirigido pelos neogeógrafos geomorfológicos", en: "made by Cláudio, directed by the geomorphological neo-geographers" },
 
@@ -1366,6 +1384,29 @@ document.addEventListener("DOMContentLoaded", () => {
       ev.target.value = "";
     });
   }
+
+  // Group 0 input-dataset export/import. Exports are one-click; imports open a
+  // hidden file input and route to the matching loader (same loaders the 1A–1D
+  // groups use), so import accepts exactly what export produces.
+  document.getElementById("export-dem")?.addEventListener("click", exportDemTif);
+  document.getElementById("export-network")?.addEventListener("click", exportNetworkGpkg);
+  document.getElementById("export-mask")?.addEventListener("click", exportMaskTif);
+  document.getElementById("export-bridges")?.addEventListener("click", exportBridgesGpkg);
+  const wireImport = (btnId, inputId, loader) => {
+    document.getElementById(btnId)?.addEventListener("click", () => document.getElementById(inputId)?.click());
+    document.getElementById(inputId)?.addEventListener("change", async (ev) => {
+      const f = ev.target.files[0];
+      ev.target.value = ""; // re-picking the same file fires change again
+      if (!f) return;
+      try { await loader(f); }
+      catch (err) { console.error(err); status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(err.message)}</span>`; }
+    });
+  };
+  wireImport("import-dem", "io-dem-file", async (f) => { state.demSourceUrl = null; await loadDemFromArrayBuffer(await f.arrayBuffer(), f.name); });
+  wireImport("import-network", "io-network-file", (f) => loadVectorNetwork(f));
+  wireImport("import-mask", "io-mask-file", (f) => loadImpassableMaskFromFile(f));
+  wireImport("import-bridges", "io-bridges-file", (f) => importBridgesGpkg(f));
+
   applyColormapToLegend();
   // Apply initial layer controls so the rmsampa-v2 tile layer (default ON)
   // gets added to the map without waiting for a Compute.
@@ -2508,6 +2549,181 @@ function getSQL() {
     }).catch((err) => { _sqlPromise = null; throw err; }); // let a later retry re-fetch
   }
   return _sqlPromise;
+}
+
+// ------- Group 0: input-dataset export / import -------
+// Round-trips the four inputs in the SAME format on both ends: 1A DEM + 1C mask
+// as GeoTIFF (reusing writeRasterAsGeoTIFF, georeferenced from state.dem), 1B
+// network + 1D bridges as GeoPackage. The .gpkg WRITER below inverts
+// parseGpkgGeom/parseWKB — a sql.js DB carrying the OGC metadata tables and one
+// StandardGeoPackageBinary LineString blob per feature, all WGS84 (EPSG:4326), so
+// loadVectorNetwork / parseGpkgGeom read them straight back.
+
+function ioDownload(bytes, filename, mime) {
+  const blob = new Blob([bytes], { type: mime || "application/octet-stream" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// (WGS84_WKT — the EPSG:4326 definition gpkg_spatial_ref_sys needs so the reader's
+// proj4 resolves srs_id 4326 — is declared near the GeoTIFF export below.)
+
+// Encode one polyline ([[lat,lng],…]) as a StandardGeoPackageBinary LineString
+// blob: 8-byte header (GP magic, version, flags=no-envelope/LE, srs_id) + WKB
+// (LE byte order, type 2, vertex count, then [lng,lat] float64 pairs). The exact
+// inverse of parseGpkgGeom + parseWKB; coords stay [x=lng, y=lat] (no swap).
+function encodeGpkgLineString(latlngs, srsId) {
+  const n = latlngs.length;
+  const buf = new ArrayBuffer(8 + 9 + n * 16);
+  const dv = new DataView(buf);
+  let o = 0;
+  dv.setUint8(o++, 0x47); dv.setUint8(o++, 0x50);   // "GP"
+  dv.setUint8(o++, 0x00);                           // version 0
+  dv.setUint8(o++, 0x01);                           // flags: LE header, no envelope
+  dv.setInt32(o, srsId, true); o += 4;              // srs_id (little-endian)
+  dv.setUint8(o++, 0x01);                           // WKB byte order: little-endian
+  dv.setUint32(o, 2, true); o += 4;                 // WKB type: LineString
+  dv.setUint32(o, n, true); o += 4;                 // vertex count
+  for (let i = 0; i < n; i++) {
+    dv.setFloat64(o, latlngs[i][1], true); o += 8;  // X = lng
+    dv.setFloat64(o, latlngs[i][0], true); o += 8;  // Y = lat
+  }
+  return new Uint8Array(buf);
+}
+
+// Build a GeoPackage (Uint8Array) of LineString features. `features` =
+// [{ latlngs:[[lat,lng],…], attrs:{colName:value} }]; `attrCols` = [{name,type}].
+async function buildGeoPackage(features, { tableName, attrCols = [] }) {
+  const SQL = await getSQL();
+  const db = new SQL.Database();
+  const SRS = 4326;
+  try {
+    db.run("PRAGMA application_id = 1196444487;"); // 'GPKG' — flags the file as a GeoPackage
+    db.run("PRAGMA user_version = 10401;");
+    db.run("CREATE TABLE gpkg_spatial_ref_sys (srs_name TEXT NOT NULL, srs_id INTEGER PRIMARY KEY, organization TEXT NOT NULL, organization_coordsys_id INTEGER NOT NULL, definition TEXT NOT NULL, description TEXT);");
+    db.run("CREATE TABLE gpkg_contents (table_name TEXT PRIMARY KEY, data_type TEXT NOT NULL, identifier TEXT UNIQUE, description TEXT DEFAULT '', last_change TEXT NOT NULL, min_x DOUBLE, min_y DOUBLE, max_x DOUBLE, max_y DOUBLE, srs_id INTEGER);");
+    db.run("CREATE TABLE gpkg_geometry_columns (table_name TEXT NOT NULL, column_name TEXT NOT NULL, geometry_type_name TEXT NOT NULL, srs_id INTEGER NOT NULL, z TINYINT NOT NULL, m TINYINT NOT NULL, PRIMARY KEY (table_name, column_name));");
+    db.run("INSERT INTO gpkg_spatial_ref_sys VALUES ('Undefined cartesian SRS',-1,'NONE',-1,'undefined',''),('Undefined geographic SRS',0,'NONE',0,'undefined',''),('WGS 84 geodetic',4326,'EPSG',4326,?,'');", [WGS84_WKT]);
+    const colDefs = attrCols.map((c) => `, "${c.name}" ${c.type || "TEXT"}`).join("");
+    db.run(`CREATE TABLE "${tableName}" (fid INTEGER PRIMARY KEY AUTOINCREMENT, geom BLOB${colDefs});`);
+    db.run("INSERT INTO gpkg_geometry_columns VALUES (?, 'geom', 'LINESTRING', ?, 0, 0);", [tableName, SRS]);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const cols = ["geom", ...attrCols.map((c) => `"${c.name}"`)].join(", ");
+    const ph = ["?", ...attrCols.map(() => "?")].join(", ");
+    const stmt = db.prepare(`INSERT INTO "${tableName}" (${cols}) VALUES (${ph});`);
+    for (const f of features) {
+      if (!f.latlngs || f.latlngs.length < 2) continue;
+      for (const [lat, lng] of f.latlngs) {
+        if (lng < minX) minX = lng; if (lng > maxX) maxX = lng;
+        if (lat < minY) minY = lat; if (lat > maxY) maxY = lat;
+      }
+      const vals = [encodeGpkgLineString(f.latlngs, SRS),
+        ...attrCols.map((c) => { const v = f.attrs ? f.attrs[c.name] : null; return v == null ? null : v; })];
+      stmt.run(vals);
+    }
+    stmt.free();
+    if (!Number.isFinite(minX)) { minX = minY = maxX = maxY = 0; }
+    db.run("INSERT INTO gpkg_contents (table_name, data_type, identifier, last_change, min_x, min_y, max_x, max_y, srs_id) VALUES (?, 'features', ?, ?, ?, ?, ?, ?, ?);",
+      [tableName, tableName, new Date().toISOString(), minX, minY, maxX, maxY, SRS]);
+    return db.export();
+  } finally {
+    db.close();
+  }
+}
+
+// 1A — DEM raster → GeoTIFF.
+function exportDemTif() {
+  if (!state.dem) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("io.no_dem"))}</span>`; return; }
+  try {
+    ioDownload(new Uint8Array(writeRasterAsGeoTIFF(state.dem.height, state.dem, "float32")), "dem.tif", "image/tiff");
+    status.textContent = t("io.exported", "dem.tif");
+  } catch (e) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(e.message)}</span>`; }
+}
+
+// 1C — impassable mask raster → GeoTIFF (DEM-aligned uint8, same as the bundle).
+function exportMaskTif() {
+  if (!state.dem || !state.impassable) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("io.no_mask"))}</span>`; return; }
+  try {
+    ioDownload(new Uint8Array(writeRasterAsGeoTIFF(state.impassable, state.dem, "uint8")), "impassable_mask.tif", "image/tiff");
+    status.textContent = t("io.exported", "impassable_mask.tif");
+  } catch (e) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(e.message)}</span>`; }
+}
+
+// 1B — vector network → GeoPackage. Carries the per-way {deck, layer} tags so the
+// file is self-describing in a GIS (loadVectorNetwork doesn't read them back into
+// networkLinesMeta yet — same limitation as any .gpkg network).
+async function exportNetworkGpkg() {
+  if (!state.networkLines || !state.networkLines.length) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("io.no_network"))}</span>`; return; }
+  try {
+    const meta = state.networkLinesMeta;
+    const features = state.networkLines.map((ll, i) => ({
+      latlngs: ll,
+      attrs: { deck: meta && meta[i] ? (meta[i].deck ? 1 : 0) : null, layer: meta && meta[i] ? meta[i].layer : null },
+    }));
+    const bytes = await buildGeoPackage(features, { tableName: "network", attrCols: [{ name: "deck", type: "INTEGER" }, { name: "layer", type: "INTEGER" }] });
+    ioDownload(bytes, "network.gpkg", "application/geopackage+sqlite3");
+    status.textContent = t("io.exported", "network.gpkg");
+  } catch (e) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(e.message)}</span>`; }
+}
+
+// 1D — bridges/portals → GeoPackage (LineStrings + kind/layer/name/eleA/eleB).
+// Drawn portals are excluded (they persist through the config, like the bundle).
+async function exportBridgesGpkg() {
+  const bridges = (state.bridges || []).filter((b) => !b.drawn);
+  if (!bridges.length) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("io.no_bridges"))}</span>`; return; }
+  try {
+    const features = bridges.map((b) => ({
+      latlngs: b.latlngs,
+      attrs: { kind: b.kind || null, layer: b.layer ?? null, name: b.name || null, eleA: b.eleA ?? null, eleB: b.eleB ?? null },
+    }));
+    const bytes = await buildGeoPackage(features, { tableName: "bridges", attrCols: [
+      { name: "kind", type: "TEXT" }, { name: "layer", type: "INTEGER" }, { name: "name", type: "TEXT" },
+      { name: "eleA", type: "REAL" }, { name: "eleB", type: "REAL" }] });
+    ioDownload(bytes, "bridges.gpkg", "application/geopackage+sqlite3");
+    status.textContent = t("io.exported", "bridges.gpkg");
+  } catch (e) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(e.message)}</span>`; }
+}
+
+// 1D import — read a bridges .gpkg (the inverse of exportBridgesGpkg) and feed it
+// to installBridgesFromWays. Assumes WGS84 geometry (what we write); a geographic
+// DEM is required for the lat/lng→cell abutment mapping.
+async function importBridgesGpkg(file) {
+  if (!state.dem) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("io.no_dem_first"))}</span>`; return; }
+  if (!state.dem.isGeographic) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("bridges.need_geographic"))}</span>`; return; }
+  const SQL = await getSQL();
+  const db = new SQL.Database(new Uint8Array(await file.arrayBuffer()));
+  try {
+    const gc = db.exec("SELECT table_name, column_name FROM gpkg_geometry_columns LIMIT 1");
+    if (!gc.length) throw new Error(t("io.gpkg_invalid"));
+    const tbl = gc[0].values[0][0], gcol = gc[0].values[0][1] || "geom";
+    const info = db.exec(`PRAGMA table_info("${tbl}")`);
+    const present = info.length ? info[0].values.map((r) => r[1]) : [];
+    const extra = ["kind", "layer", "name", "eleA", "eleB"].filter((c) => present.includes(c));
+    const sel = [`"${gcol}"`, ...extra.map((c) => `"${c}"`)].join(", ");
+    const res = db.exec(`SELECT ${sel} FROM "${tbl}"`);
+    const ways = [];
+    if (res.length) {
+      for (const row of res[0].values) {
+        let lines = null;
+        try { lines = parseGpkgGeom(row[0]); } catch { lines = null; }
+        if (!lines) continue;
+        const at = {}; extra.forEach((c, i) => { at[c] = row[1 + i]; });
+        for (const coords of lines) {
+          const latlngs = coords.map(([lng, lat]) => [lat, lng]);
+          if (latlngs.length < 2) continue;
+          ways.push({ latlngs, kind: at.kind || "bridge", layer: Number.isFinite(at.layer) ? at.layer : 0,
+            name: at.name || null, eleA: Number.isFinite(at.eleA) ? at.eleA : null, eleB: Number.isFinite(at.eleB) ? at.eleB : null });
+        }
+      }
+    }
+    if (!ways.length) throw new Error(t("io.gpkg_no_lines"));
+    installBridgesFromWays(ways, file.name);
+  } finally {
+    db.close();
+  }
 }
 
 // Parse a GeoPackage StandardGeoPackageBinary blob into an array of

@@ -808,6 +808,27 @@
         </div>
         <input type="file" id="config-file" accept=".json,.jsonld" style="display: none;" />
         <button type="button" class="secondary" id="config-reset" data-i18n="config.reset" style="margin-top: 4px;">Reset to defaults</button>
+        <div class="hint" data-i18n="io.inputs_hint" style="margin-top: 8px;">Input datasets (1A–1D), same format both ways:</div>
+        <div class="row" style="margin-top: 3px;">
+          <button type="button" class="secondary" id="export-dem" data-i18n="io.export_dem">Export DEM (.tif)</button>
+          <button type="button" class="secondary" id="import-dem" data-i18n="io.import_dem">Import DEM (.tif)</button>
+        </div>
+        <div class="row" style="margin-top: 3px;">
+          <button type="button" class="secondary" id="export-network" data-i18n="io.export_network">Export network (.gpkg)</button>
+          <button type="button" class="secondary" id="import-network" data-i18n="io.import_network">Import network (.gpkg)</button>
+        </div>
+        <div class="row" style="margin-top: 3px;">
+          <button type="button" class="secondary" id="export-mask" data-i18n="io.export_mask">Export mask (.tif)</button>
+          <button type="button" class="secondary" id="import-mask" data-i18n="io.import_mask">Import mask (.tif)</button>
+        </div>
+        <div class="row" style="margin-top: 3px;">
+          <button type="button" class="secondary" id="export-bridges" data-i18n="io.export_bridges">Export bridges (.gpkg)</button>
+          <button type="button" class="secondary" id="import-bridges" data-i18n="io.import_bridges">Import bridges (.gpkg)</button>
+        </div>
+        <input type="file" id="io-dem-file" accept=".tif,.tiff" style="display: none;" />
+        <input type="file" id="io-network-file" accept=".gpkg" style="display: none;" />
+        <input type="file" id="io-mask-file" accept=".tif,.tiff" style="display: none;" />
+        <input type="file" id="io-bridges-file" accept=".gpkg" style="display: none;" />
       </details>
 
       <details class="group-parent" id="group-1" open>
@@ -889,7 +910,7 @@
         </label>
         <input type="file" id="impassable-file" accept=".tif,.tiff" data-i18n-aria="aria.mask_file" />
         <button type="button" class="ex-link" id="ex-water" style="margin-top: 4px;">
-          <span data-i18n="imp.example_water">Águas RMSampa</span> <span class="ex-tag" data-i18n="imp.example_water_tag">~0,7 MB · nuvem</span>
+          <span data-i18n="imp.example_water">Águas RMSampa</span> <span class="ex-tag" data-i18n="imp.example_water_tag">~2,4 MB · nuvem</span>
         </button>
         <button type="button" class="secondary" id="impassable-osm" data-i18n="imp.osm" style="margin-top: 4px;">Pull water from OSM</button>
         <label id="imp-corridor-row" style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text); opacity: 0.55;">
@@ -1466,7 +1487,7 @@
               reduced-motion support. Plus i18n/copy fixes, shorter (non-clipping)
               select options, and mobile button placement fixes. New cloud example
               datasets: <em>Viário RMSampa</em> (road network, 1B) and
-              <em>Águas RMSampa</em> (water mask, 1C).</p>
+              <em>Águas RMSampa</em> (water mask, 1C), covering the full RMSampa region.</p>
               <p><strong>v37</strong> — 2026-06-25<br/>
               UI refinements on top of v36 (JS/UI only; engine untouched). Sidebar
               groups reordered/renamed (1B–1D, 2A–2C; "maximizar energia" and
