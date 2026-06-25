@@ -4275,14 +4275,18 @@ function buildGraphFieldLayer(graph, field, { pane, greyscale, tint, minId, maxI
     if (skipZero && v <= 0) continue;
     let t = (v - lo) / span; t = t < 0 ? 0 : (t > 1 ? 1 : t);
     t = Math.pow(t, gamma);
-    let col;
-    if (tint) { const [tr, tg, tb] = tint; col = `rgb(${Math.round(tr * t)},${Math.round(tg * t)},${Math.round(tb * t)})`; }
+    let col, op = 1;
+    // Tint (difference view): keep the HUE constant (a true orange / azure) and
+    // encode intensity as OPACITY. Multiplying the tint RGB by t (the old way)
+    // darkened mid-values into a muddy yellow-brown that didn't read as the
+    // channel colour, and made min/max edits look unresponsive (dark→dark).
+    if (tint) { const [tr, tg, tb] = tint; col = `rgb(${tr},${tg},${tb})`; op = 0.3 + 0.7 * t; }
     else if (greyscale) { const g = Math.round(t * 255); col = `rgb(${g},${g},${g})`; }
     else { const [cr, cg, cb] = colormap(t); col = `rgb(${cr},${cg},${cb})`; }
     const a = graph.edgeA[e], b = graph.edgeB[e];
     group.addLayer(L.polyline(
       [cellFracToLatLng(graph.nodeR[a], graph.nodeC[a]), cellFracToLatLng(graph.nodeR[b], graph.nodeC[b])],
-      { color: col, weight, opacity: 1, interactive: false, renderer },
+      { color: col, weight, opacity: op, interactive: false, renderer },
     ));
   }
   group._range = [lo, hi];
@@ -4479,6 +4483,10 @@ function renderGraphOverlay() {
   }
   updateLegendTicks();
   applyColormapToLegend();
+  // Show the resolved auto bounds as the 3C.a passes + 3B energy input
+  // placeholders — graph mode never called this, so they stayed at the static
+  // "p10"/"p90"/"auto" defaults instead of the real numbers.
+  syncRangePlaceholders();
 }
 
 map.on("click", (e) => {
