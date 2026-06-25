@@ -5621,6 +5621,7 @@ runBtn.addEventListener("click", async () => {
       progress.classList.remove("active");
       updateRunButtonState();
       state.computeStartedAt = 0;
+      setGroupOpen("result-group", true); // graph compute done → reveal results (3)
       state.lastGraphResult = { graph, result, energyAlt };
       state.graphEnergyRaster = null;
       renderGraphOverlay();   // passes corridors show immediately
