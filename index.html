@@ -948,12 +948,12 @@
                 <option value="to"    data-i18n="mode.to">To source point</option>
                 <option value="round" data-i18n="mode.round">Round trip</option>
               </select></td></tr>
-          <tr><td class="kv-key"><label for="alpha" data-i18n="param.alpha">Horizontal cost (J/m)</label></td>
+          <tr><td class="kv-key"><label for="alpha" data-i18n="param.alpha">Horizontal cost (kJ/m)</label></td>
               <td class="kv-val"><input type="number" id="alpha" value="0.008" step="0.001" min="0" /></td></tr>
-          <tr><td class="kv-key"><label for="beta" data-i18n="param.beta">Vertical cost (J/m)</label></td>
+          <tr><td class="kv-key"><label for="beta" data-i18n="param.beta">Vertical cost (kJ/m)</label></td>
               <td class="kv-val"><input type="number" id="beta" value="1.0" step="0.1" min="0" /></td></tr>
           <tr><td class="kv-key"><label for="eta" data-i18n="param.eta">Downhill recovery (%)</label></td>
-              <td class="kv-val"><input type="number" id="eta" value="0.1" step="0.05" min="0" max="1" title="fração 0–1 (0,1 = 10%)" /></td></tr>
+              <td class="kv-val"><input type="number" id="eta" value="10" step="5" min="0" max="100" /></td></tr>
           <tr><td class="kv-key"><label for="e-max" data-i18n="param.budget">Energy budget (kJ)</label></td>
               <td class="kv-val"><input type="number" id="e-max" value="0" step="any" title="≤0 = ∞ (sem orçamento)" /></td></tr>
           <tr id="e-max-mode-row" style="display: none;"><td class="kv-key"><label for="e-max-mode" data-i18n="param.budget_mode">Budget applies to</label></td>

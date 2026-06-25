@@ -244,8 +244,8 @@ const STRINGS = {
   "mode.from":           { pt: "Saindo da fonte",     en: "From source" },
   "mode.to":             { pt: "Vindo até a fonte",  en: "To source point" },
   "mode.round":          { pt: "Ida e volta",         en: "Round trip" },
-  "param.alpha":         { pt: "Custo horizontal (J/m)", en: "Horizontal cost (J/m)" },
-  "param.beta":          { pt: "Custo vertical (J/m)", en: "Vertical cost (J/m)" },
+  "param.alpha":         { pt: "Custo horizontal (kJ/m)", en: "Horizontal cost (kJ/m)" },
+  "param.beta":          { pt: "Custo vertical (kJ/m)", en: "Vertical cost (kJ/m)" },
   "param.eta":           { pt: "Recuperação na descida (%)", en: "Downhill recovery (%)" },
   "param.budget":        { pt: "Orçamento de energia (kJ)", en: "Energy budget (kJ)" },
   "param.budget_mode":   { pt: "Orçamento aplica-se a", en: "Budget applies to" },
@@ -681,6 +681,14 @@ function setupParamPersistence() {
         el.value = saved[id];
         if (id === "colormap" && COLORMAPS[saved[id]]) activeColormap = saved[id];
       }
+    }
+    // MIGRATE eta: it used to be a 0–1 fraction; the input is now a 0–100
+    // percent. Any persisted value ≤ 1 is an old fraction (η is realistically
+    // ≥10%), so scale it up once. Idempotent — a percent (>1) is left alone.
+    const etaEl = document.getElementById("eta");
+    if (etaEl && "eta" in saved) {
+      const v = parseFloat(etaEl.value);
+      if (Number.isFinite(v) && v > 0 && v <= 1) etaEl.value = String(v * 100);
     }
     for (const id of PERSIST_REFIRE) {
       document.getElementById(id)?.dispatchEvent(new Event("change"));
@@ -4835,7 +4843,7 @@ runBtn.addEventListener("click", async () => {
   const alpha = Number.isFinite(alphaRaw) ? Math.max(0, alphaRaw) : 0.008;
   const betaRaw = parseFloat(document.getElementById("beta").value);
   const beta = Number.isFinite(betaRaw) ? Math.max(0, betaRaw) : 1.0;
-  const eta = parseFloat(document.getElementById("eta").value);
+  const eta = parseFloat(document.getElementById("eta").value) / 100; // input is %, engine wants 0–1
   const eMaxRaw = parseFloat(document.getElementById("e-max")?.value);
   const eMax = Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0;
   // Round mode only: budget caps each leg ("leg", default — totals reach
@@ -7095,7 +7103,7 @@ function startCalibrationProbe() {
   const probeGen = state.calibrationGen;
   const alpha = parseFloat(document.getElementById("alpha")?.value) || 0.008;
   const beta = parseFloat(document.getElementById("beta")?.value) || 1.0;
-  const eta = parseFloat(document.getElementById("eta")?.value) || 0.1;
+  const eta = parseFloat(document.getElementById("eta")?.value) / 100 || 0.1; // % → 0–1
 
   const w = new Worker(WORKER_URL);
   state.probeWorker = w;
@@ -8192,7 +8200,7 @@ function buildMetadata(result, withOutputs = true) {
     mode:          document.getElementById("mode")?.value,
     alpha:         parseFloat(document.getElementById("alpha")?.value),
     beta:          parseFloat(document.getElementById("beta")?.value),
-    eta:           parseFloat(document.getElementById("eta")?.value),
+    eta:           parseFloat(document.getElementById("eta")?.value) / 100, // store as 0–1 fraction (bundle stays fraction-based; back-compat)
     eMax:          parseFloat(document.getElementById("e-max")?.value) || 0,
     eMaxMode:      document.getElementById("e-max-mode")?.value || "leg",
     src:           state.src,
@@ -8657,7 +8665,7 @@ function applyMetadataToUI(md, bin = {}) {
   set("mode", p.mode);
   set("alpha", p.alpha);
   set("beta", p.beta);
-  set("eta", p.eta);
+  set("eta", p.eta != null ? p.eta * 100 : p.eta); // bundle stores 0–1; input is %
   set("e-max", p.eMax);
   set("e-max-mode", p.eMaxMode);
   check("want-passes", p.wantPasses);
