@@ -4332,6 +4332,15 @@ function renderGraphOverlay() {
     });
     state.passesDataUrl = out.url;
     if (!showNet) { state.lastPassesAutoMin = out.lo; state.lastPassesAutoMax = out.hi; }
+    // Difference view: surface the RESOLVED terrain values as the 3C.b placeholders
+    // — the inputs stay empty (= inheriting) but show the inferred number, not "=".
+    if (showNet) {
+      const ph = (id, v) => { const el = document.getElementById(id); if (el) el.placeholder = v; };
+      ph("passes-vmin-b", out.lo != null ? formatSci(out.lo) : "=");
+      ph("passes-vmax-b", out.hi != null ? formatSci(out.hi) : "=");
+      ph("passes-gamma-b", String(gamma));
+      ph("passes-mean-window-b", String(win > 1 ? win : 1));
+    }
     applyPassesOverlay();
   } else {
     state.passesDataUrl = null;
