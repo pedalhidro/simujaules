@@ -127,7 +127,18 @@ const STRINGS = {
   "help.title":          { pt: "Como funciona", en: "How it works" },
 
   // ---- Group: Load DEM --------------------------------------------------
-  "group.load_dem":      { pt: "1. Carregar DEM", en: "1. Load DEM" },
+  "group.io":            { pt: "0. Importar / Exportar dados", en: "0. Import / Export data" },
+  "group.inputs":        { pt: "1. Dados de entrada", en: "1. Input data" },
+  "group.compute":       { pt: "2. Configuração do cálculo", en: "2. Compute setup" },
+  "group.execution":     { pt: "2C. Execução", en: "2C. Execution" },
+  "config.hint":         { pt: "Configuração (todos os controles):", en: "Settings (all toggles & values):" },
+  "config.export":       { pt: "Exportar config", en: "Export config" },
+  "config.import":       { pt: "Importar config", en: "Import config" },
+  "config.reset":        { pt: "Restaurar padrões", en: "Reset to defaults" },
+  "config.imported":     { pt: "Configuração importada.", en: "Config imported." },
+  "config.import_error": { pt: "Falha ao importar a configuração", en: "Failed to import config" },
+  "config.reset_confirm":{ pt: "Restaurar todas as configurações para os padrões? A página será recarregada.", en: "Reset all settings to defaults? The page will reload." },
+  "group.load_dem":      { pt: "1A. Carregar DEM", en: "1A. Load DEM" },
   "examples.heading":    { pt: "ou baixar (localmente) um exemplo:", en: "or download (locally) an example:" },
   "ex.aguapreta":        { pt: "Entorno da Água Preta", en: "Água Preta surroundings" },
   "ex.centro":           { pt: "Sampa Centro Expandido", en: "São Paulo central area" },
@@ -141,7 +152,7 @@ const STRINGS = {
   "bundle.reload_hint":  { pt: "Restaurar bundle (.zip) ou .jsonld:", en: "Reload a saved bundle (.zip) or .jsonld:" },
 
   // ---- Group: Vector network -------------------------------------------
-  "group.network":       { pt: "1b. Rede vetorial opcional (.gpkg)", en: "1b. Optional vector network (.gpkg)" },
+  "group.network":       { pt: "1B. Rede vetorial opcional (.gpkg)", en: "1B. Optional vector network (.gpkg)" },
   "net.line_width":      { pt: "largura da linha (células)", en: "line width (cells)" },
   "net.snap_radius":     { pt: "raio de snap (células)", en: "snap radius (cells)" },
   "net.clear":           { pt: "Limpar rede",  en: "Clear network" },
@@ -167,7 +178,7 @@ const STRINGS = {
   "net.no_network":      { pt: "Nenhuma rede carregada.", en: "No network loaded." },
 
   // ---- Group: Impassable mask ------------------------------------------
-  "group.impassable":    { pt: "1c. Máscara de barreira opcional (água, GeoTIFF)", en: "1c. Optional impassable mask (water, GeoTIFF)" },
+  "group.impassable":    { pt: "1C. Máscara de barreira opcional (água)", en: "1C. Optional impassable mask (water)" },
   "imp.enabled":         { pt: "Aplicar ao cálculo", en: "Apply to compute" },
   "imp.invert":          { pt: "Inverter (raster marca células passáveis)", en: "Invert (raster marks passable cells)" },
   "imp.clear":           { pt: "Limpar máscara", en: "Clear mask" },
@@ -182,28 +193,42 @@ const STRINGS = {
   "imp.meta.corridor":   { pt: "{0} células de corredor (pontes)", en: "{0} bridge-corridor cells" },
   "imp.cell_blocked":    { pt: "Célula intransponível (máscara de barreira) — escolha outra.", en: "Impassable cell (barrier mask) — pick another." },
   "aria.opacity_impassable": { pt: "opacidade da máscara de barreira", en: "impassable mask opacity" },
-  "help.h.impassable":   { pt: "1c · Máscara de barreira", en: "1c · Impassable mask" },
+  "help.h.impassable":   { pt: "Máscara de barreira", en: "Impassable mask" },
 
   // ---- Group: Bridges & tunnels ----------------------------------------
-  "group.bridges":       { pt: "1d. Pontes e túneis opcionais (OSM)", en: "1d. Optional bridges & tunnels (OSM)" },
+  "group.bridges":       { pt: "1D. Pontes e túneis opcionais (OSM)", en: "1D. Optional bridges & tunnels (OSM)" },
   "bridge.enabled":      { pt: "Aplicar ao cálculo", en: "Apply to compute" },
   "bridge.osm":          { pt: "Puxar pontes e túneis do OSM", en: "Pull bridges & tunnels from OSM" },
   "bridge.from_network": { pt: "Extrair da rede carregada", en: "Extract from loaded network" },
   "bridge.no_candidates":{ pt: "A rede carregada não tem pontes/túneis marcados (tags bridge/tunnel).", en: "The loaded network has no bridge/tunnel tags." },
   "bridge.tunnels":      { pt: "Incluir túneis (tunnel=yes)", en: "Include tunnels (tunnel=yes)" },
   "bridge.clear":        { pt: "Limpar pontes", en: "Clear bridges" },
+  "draw.barrier":        { pt: "Desenhar barreira", en: "Draw barrier" },
+  "draw.corridor":       { pt: "Desenhar corredor", en: "Draw corridor" },
+  "draw.portal":         { pt: "Desenhar portal", en: "Draw portal" },
+  "draw.erase":          { pt: "Apagar desenhos", en: "Erase drawings" },
+  "draw.need_dem":       { pt: "Carregue um DEM geográfico (lon/lat) antes de desenhar.", en: "Load a geographic (lon/lat) DEM before drawing." },
+  "draw.drawing":        { pt: "Desenhando… clique para adicionar vértices, duplo-clique para concluir.", en: "Drawing… click to add vertices, double-click to finish." },
+  "draw.barrier_added":  { pt: "Barreira adicionada ({0} no total).", en: "Barrier added ({0} total)." },
+  "draw.corridor_added": { pt: "Corredor passável adicionado ({0} no total).", en: "Passable corridor added ({0} total)." },
+  "draw.portal_added":   { pt: "Portal adicionado ({0} no total).", en: "Portal added ({0} total)." },
+  "draw.portal_invalid": { pt: "Portal inválido (extremos fora do DEM, sobre nodata ou coincidentes).", en: "Invalid portal (endpoints off-DEM, on nodata, or coincident)." },
+  "draw.cleared":        { pt: "Desenhos apagados.", en: "Drawings erased." },
+  "draw.imp_meta":       { pt: "{0} barreira(s), {1} corredor(es) desenhado(s)", en: "{0} barrier(s), {1} corridor(s) drawn" },
+  "draw.portal_meta":    { pt: "{0} portal(is) desenhado(s)", en: "{0} portal(s) drawn" },
+  "draw.delete_this":    { pt: "Apagar este desenho", en: "Delete this drawing" },
   "bridge.show":         { pt: "Mostrar tabuleiros no mapa", en: "Show decks on map" },
   "bridge.opacity":      { pt: "opacidade do tabuleiro", en: "deck opacity" },
   "bridge.none":         { pt: "Nenhuma ponte carregada.", en: "No bridges loaded." },
   "bridge.meta.count":   { pt: "{0} tabuleiros de ponte/túnel", en: "{0} bridge/tunnel decks" },
   "bridge.meta.skipped": { pt: "{0} ignorados (fora do DEM ou apoio sem dado)", en: "{0} skipped (off-DEM or nodata abutment)" },
   "aria.opacity_bridge": { pt: "opacidade dos tabuleiros de ponte", en: "bridge deck opacity" },
-  "help.h.bridges":      { pt: "1d · Pontes e túneis", en: "1d · Bridges & tunnels" },
+  "help.h.bridges":      { pt: "Pontes e túneis", en: "Bridges & tunnels" },
   "help.p.bridges":      { pt: "Puxa pontes (bridge=*) e, opcionalmente, túneis (tunnel=yes) do OpenStreetMap sobre a extensão do DEM, ou extrai-os da rede vetorial já carregada (1b) que tenha tags bridge/tunnel (coluna ou other_tags). Cada estrutura é modelada como um tabuleiro plano entre seus dois apoios no solo: no cálculo em raster ela vira uma \"aresta-portal\" entre as células das pontas, com o custo do tabuleiro plano, sem alterar as células por baixo — então tanto a rota POR CIMA da ponte quanto a rota POR BAIXO ficam corretas. Pressupõe um DEM de terreno nu (sem o tabuleiro). No modo \"seguir os vetores\" (grafo), as pontes/túneis da própria rede (puxada do OSM) são achatadas e os cruzamentos em níveis diferentes não se conectam.", en: "Pulls bridges (bridge=*) and, optionally, tunnels (tunnel=yes) from OpenStreetMap over the DEM extent, or extracts them from the already-loaded vector network (1b) when it carries bridge/tunnel tags (a column or other_tags). Each structure is modelled as a level deck between its two ground abutments: in the raster compute it becomes a \"portal edge\" between the end cells at the flat-deck cost, without altering the cells underneath — so both the route OVER the bridge and the route UNDER it stay correct. Assumes a bare-earth DEM (deck not in the terrain). In \"follow the vectors\" (graph) mode, the network's own bridges/tunnels (pulled from OSM) are flattened and crossings at different layers don't connect." },
   "help.p.impassable":   { pt: "Suba um GeoTIFF binário (1=intransponível, p.ex. corpos d'água). É reamostrado para a grade do DEM por maioria de área (≥50% intransponível ⇒ célula barrada); fora da extensão da máscara assume-se passável. Pode estar em extensão/resolução/CRS diferentes do DEM. Opcionalmente, a rede vetorial (1b) abre corredores passáveis (pontes) sobre a máscara, com um deslocamento suave de elevação que sobe linearmente das margens até o centro da ponte.", en: "Upload a binary GeoTIFF (1=impassable, e.g. water bodies). It is resampled onto the DEM grid by area-coverage majority (≥50% impassable ⇒ blocked cell); outside the mask extent cells are assumed passable. It may have a different extent/resolution/CRS than the DEM. Optionally the vector network (1b) carves passable corridors (bridges) across the mask, with a smooth elevation offset that ramps linearly from the shores up to the bridge centre." },
 
   // ---- Group: Pick points ----------------------------------------------
-  "group.pick_points":   { pt: "2. Marcar pontos", en: "2. Pick points" },
+  "group.pick_points":   { pt: "2B. Pontos e referências", en: "2B. Points & references" },
   "pts.click_map":       { pt: "— clicar mapa —", en: "— click map —" },
   "pts.optional":        { pt: "— opcional —",  en: "— optional —" },
   "pts.click_again":     { pt: "— clicar novamente —", en: "— click again —" },
@@ -211,7 +236,7 @@ const STRINGS = {
   "pts.clear":           { pt: "Limpar pontos", en: "Clear points" },
 
   // ---- Group: Parameters -----------------------------------------------
-  "group.parameters":    { pt: "3. Parâmetros", en: "3. Parameters" },
+  "group.parameters":    { pt: "2A. Parâmetros", en: "2A. Parameters" },
   "param.mode":          { pt: "Modo", en: "Mode" },
   "mode.from":           { pt: "Saindo da fonte",     en: "From source" },
   "mode.to":             { pt: "Vindo até a fonte",  en: "To source point" },
@@ -266,6 +291,7 @@ const STRINGS = {
   "ref.place_random":    { pt: "Distribuir aleatórias", en: "Place random" },
   "param.sampling":      { pt: "Estratégia de amostragem", en: "Sampling strategy" },
   "sampling.random":     { pt: "pseudoaleatória", en: "pseudo-random" },
+  "sampling.uniform":    { pt: "uniforme (pseudoaleatória)", en: "uniform (pseudo-random)" },
   "sampling.sobol":      { pt: "Sobol (quase-aleatória)", en: "Sobol (quasi-random)" },
   "sampling.halton":     { pt: "Halton (quase-aleatória)", en: "Halton (quasi-random)" },
   "sampling.census":     { pt: "Censo IBGE 2022 (densidade populacional)", en: "IBGE 2022 census (population density)" },
@@ -282,6 +308,7 @@ const STRINGS = {
   "census.lib_missing":  { pt: "Biblioteca FlatGeobuf indisponível (offline?). Reconecte e recarregue.", en: "FlatGeobuf library unavailable (offline?). Reconnect and reload." },
   "ref.clear":           { pt: "Limpar referências", en: "Clear refs" },
   "ref.none":            { pt: "nenhuma referência marcada", en: "no references placed" },
+  "ref.count":           { pt: "{0} referência(s) marcada(s)", en: "{0} reference(s) placed" },
   "ref.show_markers":    { pt: "Mostrar marcadores de referência", en: "Show reference markers" },
   "ref.load_file":       { pt: "Carregar referências (GeoJSON)", en: "Load reference points (GeoJSON)" },
   "help.p.ref_file":     { pt: "Carregue um GeoJSON de pontos (Point), ex.: census/points.geojson. Cada ponto vira uma referência; pontos fora do DEM são ignorados. Substitui as referências atuais; limite de 2000.", en: "Load a GeoJSON of Point features (e.g. census/points.geojson). Each point becomes a reference; points outside the DEM are skipped. Replaces the current references; capped at 2000." },
@@ -310,7 +337,13 @@ const STRINGS = {
   "btn.compute":         { pt: "Calcular", en: "Compute" },
 
   // ---- Group: Result ----------------------------------------------------
-  "group.result":        { pt: "Resultado", en: "Result" },
+  "group.result":        { pt: "3. Resultados", en: "3. Results" },
+  "group.result_stats":          { pt: "3A. Estatísticas", en: "3A. Statistics" },
+  "group.result_energy":         { pt: "3B. Campo de energia", en: "3B. Energy field" },
+  "group.result_density":        { pt: "3C. Densidade de trajetos", en: "3C. Trajectory density" },
+  "group.result_density_net":    { pt: "3C.a. Densidade de trajetos na rede vetorial", en: "3C.a. Trajectory density on the vector network" },
+  "group.result_density_terrain":{ pt: "3C.b. Densidade de trajetos no terreno", en: "3C.b. Trajectory density on the terrain" },
+  "group.result_legend":         { pt: "3D. Legenda", en: "3D. Legend" },
   "btn.refresh_style":   { pt: "Atualizar estilo", en: "Refresh style" },
   "result.empty":        { pt: "—", en: "—" },
   "layer.tiles":         { pt: "rmsampa-v2 tiles", en: "rmsampa-v2 tiles" },
@@ -331,8 +364,12 @@ const STRINGS = {
   "basemap.black":       { pt: "sem mapa base (tudo preto)", en: "no basemap (all black)" },
   "basemap.white":       { pt: "sem mapa base (tudo branco)", en: "no basemap (all white)" },
   "basemap.gray":        { pt: "sem mapa base (tudo cinza)", en: "no basemap (all gray)" },
-  "order.open":          { pt: "Ordem de empilhamento das camadas…", en: "Layer stacking order…" },
-  "order.title":         { pt: "Ordem de empilhamento", en: "Layer stacking order" },
+  "basemap.satellite":   { pt: "Satélite (Esri)", en: "Satellite (Esri)" },
+  "order.open":          { pt: "Controle de camadas…", en: "Layer control…" },
+  "order.title":         { pt: "Controle de camadas", en: "Layer control" },
+  "layer.ctrl_open":     { pt: "Controle de camadas", en: "Layer control" },
+  "resizer.title":       { pt: "Arraste para 1–4 colunas", en: "Drag to set 1–4 columns" },
+  "status.dismiss":      { pt: "Dispensar", en: "Dismiss" },
   "order.hint":          { pt: "O topo da lista é desenhado por cima. Marcadores e tooltips ficam sempre acima. Aplicado na hora; lembrado neste dispositivo.", en: "Top of the list is drawn on top. Markers and tooltips always stay above. Applied immediately; remembered on this device." },
   "order.reset":         { pt: "Restaurar padrão", en: "Reset to default" },
   "order.relief":        { pt: "Relevo (DEM)", en: "Relief (DEM)" },
@@ -357,24 +394,27 @@ const STRINGS = {
   "btn.range_reset":     { pt: "Reset auto", en: "Reset ranges to auto" },
   "btn.download_bundle": { pt: "Baixar bundle (.zip)", en: "Download bundle (.zip)" },
   "btn.export_rendered": { pt: "Exportar imagens renderizadas (.zip)", en: "Export rendered images (.zip)" },
+  "btn.export_refs":     { pt: "Exportar referências (GeoJSON)", en: "Export references (GeoJSON)" },
+  "ref.export_empty":    { pt: "Nenhuma referência para exportar.", en: "No references to export." },
+  "ref.export_done":     { pt: "{0} referência(s) exportada(s).", en: "Exported {0} reference(s)." },
   "credit":              { pt: "feito por Cláudio e dirigido pelos neogeógrafos geomorfológicos", en: "made by Cláudio, directed by the geomorphological neo-geographers" },
 
   // ---- Help modal -------------------------------------------------------
   "help.usage_heading":  { pt: "Como usar", en: "How to use" },
   "help.theory_heading": { pt: "O que estamos fazendo", en: "What we're doing" },
-  "help.h.load_dem":     { pt: "1 · Carregar um DEM", en: "1 · Load a DEM" },
+  "help.h.load_dem":     { pt: "Carregar um DEM", en: "Load a DEM" },
   "help.p.load_dem":     { pt: "Use o seletor para abrir um GeoTIFF local, clique num exemplo hospedado, ou aperte <em>Carregar FABDEM para a janela atual</em> (puxa tiles FABDEM 1°×1° pela extensão visível, limite de 50 MB). O DEM aparece como retângulo tracejado e o mapa centra automaticamente.", en: 'Use the file picker to open a local GeoTIFF, click a hosted example, or press <em>Load FABDEM for current viewport</em> (pulls FABDEM 1°×1° tiles for the visible extent, 50 MB cap). The DEM is shown as a dashed rectangle and the map auto-centres.' },
-  "help.h.points":       { pt: "2 · Marcar pontos", en: "2 · Pick points" },
+  "help.h.points":       { pt: "Marcar pontos", en: "Pick points" },
   "help.p.points":       { pt: "<strong>Modo padrão:</strong> clique no mapa para o ponto-fonte (<code>src</code>). Um segundo clique marca o destino (<code>dst</code>) — necessário para \"até a fonte\", \"ida e volta\" e \"top-N rotas\".", en: '<strong>Default mode:</strong> click the map for the source (<code>src</code>). A second click sets the destination (<code>dst</code>) — required for "to source point", "round trip", and "top-N routes".' },
   "help.p.density_pts":  { pt: "<strong>Densidade multi-referência:</strong> ative <em>Calcular densidade multi-referência</em>. Os cliques agora adicionam pontos numerados. Use \"Distribuir aleatórias\" ou ajuste <em>N referências</em>. Política FIFO: ao exceder N, o mais antigo é descartado.", en: '<strong>Multi-reference density:</strong> turn on <em>Compute multi-reference density</em>. Clicks now add numbered reference points. Use "Place random" or adjust <em>N references</em>. FIFO policy: above N, the oldest is dropped.' },
-  "help.h.params":       { pt: "3 · Parâmetros", en: "3 · Parameters" },
+  "help.h.params":       { pt: "Parâmetros", en: "Parameters" },
   "help.p.params":       { pt: "<code>α</code> custo por metro horizontal · <code>β</code> custo por metro de subida · <code>η</code> fração da subida recuperada na descida (0–1) · <em>Orçamento</em> para podar caminhos acima de um limiar (≤0 = sem orçamento).", en: '<code>α</code> cost per horizontal metre · <code>β</code> cost per metre uphill · <code>η</code> fraction of the climb recovered on descent (0–1) · <em>Budget</em> prunes paths above a threshold (≤0 = no budget).' },
   "help.h.maximize":     { pt: "Maximizar energia", en: "Maximize energy" },
-  "help.h.compute":      { pt: "4 · Calcular", en: "4 · Compute" },
+  "help.h.compute":      { pt: "Calcular", en: "Compute" },
   "help.p.compute":      { pt: "Aperte <em>Calcular</em>. Habilitado quando há fonte (modo padrão) ou pelo menos uma referência (modo densidade). Estimativa de tempo aparece antes; durante a execução, a barra mostra o tempo restante.", en: 'Hit <em>Compute</em>. Enabled when a source is set (default mode) or at least one reference (density mode). A time estimate appears beforehand; during the run, the bar shows time remaining.' },
-  "help.h.viz":          { pt: "5 · Visualização", en: "5 · Visualisation" },
+  "help.h.viz":          { pt: "Visualização", en: "Visualisation" },
   "help.p.viz":          { pt: "As camadas <em>Energia</em> e <em>Passagens</em> têm visibilidade, opacidade e blend independentes. Mudanças de colormap, range, gamma, filtro média e blend ficam pendentes até <em>Atualizar estilo</em> — evita re-renderizar a cada digitação em DEMs grandes.", en: 'The <em>Energy</em> and <em>Passes</em> layers have independent visibility, opacity, and blend. Changes to colormap, range, gamma, mean filter, and blend stay pending until you click <em>Refresh style</em> — saves re-rendering on every keystroke for large DEMs.' },
-  "help.h.bundle":       { pt: "6 · Salvar / restaurar", en: "6 · Save / reload" },
+  "help.h.bundle":       { pt: "Salvar / restaurar", en: "Save / reload" },
   "help.p.bundle":       { pt: "<em>Baixar bundle (.zip)</em> empacota um <code>metadata.jsonld</code> com todos os parâmetros, mais GeoTIFFs georeferenciados (energy.tif, passes.tif, network.tif, impassable.tif) que abrem direto no QGIS. Para reproduzir: carregue o mesmo DEM, depois leia o JSON-LD ou ZIP.", en: '<em>Download bundle (.zip)</em> packs a <code>metadata.jsonld</code> with every parameter, plus georeferenced GeoTIFFs (energy.tif, passes.tif, network.tif, impassable.tif) that open directly in QGIS. To reproduce: load the same DEM, then read the JSON-LD or ZIP back.' },
   "help.h.cost":         { pt: "Modelo de custo assimétrico", en: "Asymmetric cost model" },
   "help.p.cost":         { pt: "Cada movimento entre células adjacentes (4 cardeais + 4 diagonais) tem custo em \"joules normalizados\". Com <code>Δh = h_v − h_u</code>:", en: 'Each move between adjacent cells (4 cardinal + 4 diagonal) costs "normalised joules". With <code>Δh = h_v − h_u</code>:' },
@@ -450,9 +490,36 @@ function setLang(lang) {
   currentLang = lang;
   try { localStorage.setItem("simu-lang", lang); } catch {}
   applyTranslations();
+  // applyTranslations() blindly re-applies each [data-i18n] element's EMPTY-state
+  // string, which clobbers any live dynamic content. Re-render the dynamic metas
+  // from state in the new language so loaded data / counts / picked points
+  // survive a language toggle. (dem/vec/result metas drop their data-i18n on
+  // write, so applyTranslations already leaves those alone.)
+  if (typeof updateBridgeMeta === "function") updateBridgeMeta();
+  if (typeof updateImpassableMeta === "function") updateImpassableMeta();
+  if (typeof syncRefDisplay === "function") syncRefDisplay();
+  if (typeof syncPointDisplays === "function") syncPointDisplays();
   // The cloud transfer line is set imperatively via t() (no data-i18n), so
   // re-render it after a language switch.
   if (typeof estimateRunTime === "function") estimateRunTime();
+}
+
+// Re-derive the src/dst point displays from state (density mode / src / dst), in
+// the current language. Called on language toggle so picked coordinates and the
+// correct prompt survive (applyTranslations would otherwise reset them).
+function syncPointDisplays() {
+  const srcDisp = document.getElementById("src-display");
+  const dstDisp = document.getElementById("dst-display");
+  if (!srcDisp || !dstDisp) return;
+  if (document.getElementById("want-density")?.checked) {
+    srcDisp.textContent = t("pts.density"); srcDisp.classList.remove("set");
+    dstDisp.textContent = t("pts.density"); dstDisp.classList.remove("set");
+    return;
+  }
+  if (state.src) { srcDisp.textContent = `r=${state.src[0]}, c=${state.src[1]}`; srcDisp.classList.add("set"); }
+  else { srcDisp.textContent = t("pts.click_map"); srcDisp.classList.remove("set"); }
+  if (state.dst) { dstDisp.textContent = `r=${state.dst[0]}, c=${state.dst[1]}`; dstDisp.classList.add("set"); }
+  else { dstDisp.textContent = state.src ? t("pts.click_again") : t("pts.optional"); dstDisp.classList.remove("set"); }
 }
 
 // ---- Loaded-group highlight (style only — never affects compute) --------
@@ -460,11 +527,61 @@ function setLang(lang) {
 // present. There is no central state-change event in this app — DOM is
 // driven off polled state — so this is called at every DEM/network load and
 // clear site. `.toggle(..., bool)` makes the clear paths self-heal.
+// Set exactly one status colour (or none) on a group's <details>/<summary>.
+function setGroupStatus(id, status) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove("st-green", "st-orange", "st-yellow", "st-red", "loaded");
+  if (status) el.classList.add("st-" + status);
+}
+
+// Open/expand a collapsible group (and any ancestor <details>) so a nested
+// group becomes visible. Used by the auto-expand hooks (DEM/network/mask/
+// compute/bundle). Collapse state is not persisted — it follows these rules.
+function setGroupOpen(id, open) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.open = !!open;
+  if (open) {
+    let p = el.parentElement;
+    while (p) { if (p.tagName === "DETAILS") p.open = true; p = p.parentElement; }
+  }
+}
+
+// Per-group status colours (style-only). Loaded inputs (1A-1D) go green when
+// applied-to-compute, orange when loaded-but-not-applied. 3B/3C/4 reflect
+// whether there are enough points, the run state, and a ready result.
 function syncLoadedHighlights() {
-  document.getElementById("load-dem-group")?.classList.toggle("loaded", !!state.dem);
-  document.getElementById("network-group")?.classList.toggle("loaded", !!state.networkMask);
-  document.getElementById("impassable-group")?.classList.toggle("loaded", !!state.impassable);
-  document.getElementById("bridges-group")?.classList.toggle("loaded", !!(state.bridges && state.bridges.length));
+  setGroupStatus("load-dem-group", state.dem ? "green" : "");
+  const apply = (loaded, id) => loaded ? (document.getElementById(id)?.checked ? "green" : "orange") : "";
+  setGroupStatus("network-group", apply(!!state.networkMask, "vec-constrain"));
+  setGroupStatus("impassable-group", apply(!!state.impassable, "imp-enabled"));
+  setGroupStatus("bridges-group", apply(!!(state.bridges && state.bridges.length), "bridge-enabled"));
+
+  // 3B — points & references: red = can't compute, orange = partial, green = complete.
+  let pts = "";
+  if (state.dem) {
+    if (document.getElementById("want-density")?.checked) {
+      const n = state.refPoints ? state.refPoints.length : 0;
+      const target = Math.max(1, parseInt(document.getElementById("n-refs")?.value, 10) || 1);
+      pts = n <= 0 ? "red" : (n >= target ? "green" : "orange");
+    } else {
+      pts = !state.src ? "red" : (state.dst ? "green" : "orange");
+    }
+  }
+  setGroupStatus("pick-points-group", pts);
+
+  // 3C — execution: orange running, green succeeded, yellow runnable-idle.
+  const runBtnEl = document.getElementById("run");
+  let exec = "";
+  if (state.computeStartedAt) exec = "orange";
+  else if (state.lastResult) exec = "green";
+  else if (state.dem && runBtnEl && !runBtnEl.disabled) exec = "yellow";
+  setGroupStatus("execution-group", exec);
+
+  // 4 — results: orange if a result is ready.
+  // 4 — results: orange while a compute is running, green once it finished.
+  setGroupStatus("result-group", state.computeStartedAt ? "orange" : (state.lastResult ? "green" : ""));
 }
 
 // ---- Accessible names for standalone labels -----------------------------
@@ -501,9 +618,13 @@ const PERSIST_IDS = [
   "vec-width", "vec-snap", "vec-constrain", "vec-graph-mode", "vec-junction-mode",
   "vec-compare", "vec-render", "vec-render-width", "vec-render-opacity",
   "net-interp", "net-interp-max-dist", "net-interp-smoothing",
+  // Impassable mask (1C) + bridges (1D) — apply toggles, render + generation knobs
+  "imp-enabled", "imp-show", "imp-opacity", "imp-rivers", "imp-corridor", "imp-offset",
+  "impassable-invert",
+  "bridge-enabled", "bridge-show", "bridge-opacity", "bridge-tunnels",
   // Visualization
   "basemap-select", "tile-visible", "tile-opacity", "relief-visible", "relief-opacity",
-  "energy-visible", "energy-opacity", "vmin", "vmax",
+  "energy-visible", "energy-opacity", "energy-source", "vmin", "vmax",
   "passes-visible", "passes-opacity", "passes-vmin", "passes-vmax",
   "passes-gamma", "passes-mean-window", "passes-blend",
   "passes-vmin-b", "passes-vmax-b", "passes-gamma-b", "passes-mean-window-b",
@@ -579,6 +700,134 @@ function setupParamPersistence() {
   // their change to persist too.
   document.querySelectorAll('input[name="compute-source"]').forEach((el) => {
     el.addEventListener("change", savePersistedParams);
+  });
+}
+
+// ------- Full config: export / import / reset (Group 0) -------
+// One portable object capturing EVERY persisted control + the separately-stored
+// bits (compute source, layer order, max-workers, language). Shared by the
+// Group-0 buttons AND bundle embedding (buildMetadata/applyMetadataToUI).
+function collectConfig() {
+  const params = {};
+  for (const id of PERSIST_IDS) {
+    const el = document.getElementById(id);
+    if (el) params[id] = el.type === "checkbox" ? !!el.checked : el.value;
+  }
+  let maxWorkers = "";
+  try { maxWorkers = localStorage.getItem("simu-max-workers") || ""; } catch {}
+  return {
+    kind: "simujoules-config",
+    version: 1,
+    params,
+    computeSource: computeMode(),
+    layerOrder: layerOrder.slice(),
+    maxWorkers,
+    lang: currentLang,
+    // On-map drawn geometry (1C barriers/corridors as lat/lng rings, 1D portals
+    // as lat/lng polylines) so it round-trips through config + bundles.
+    drawn: {
+      impassable: state.drawnImpassable || [],
+      passable: state.drawnPassable || [],
+      portals: (state.drawnPortals || []).map((p) => ({ latlngs: p.latlngs })),
+    },
+  };
+}
+
+// Apply a config object (from import or a bundle). Tolerates a flat params map.
+// Returns true on success. Mirrors setupParamPersistence's restore path.
+// opts.persist (default true): write the applied state back to localStorage and
+// adopt the config's language. A BUNDLE load passes persist:false — it applies
+// the params to the live session UI but must NOT clobber the user's saved
+// language / params / layer order / max-workers on disk.
+function applyConfig(cfg, opts = {}) {
+  if (!cfg || typeof cfg !== "object") return false;
+  const persist = opts.persist !== false;
+  const params = (cfg.params && typeof cfg.params === "object") ? cfg.params : cfg;
+  for (const id of PERSIST_IDS) {
+    if (!(id in params)) continue;
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (el.type === "checkbox") el.checked = !!params[id];
+    else {
+      el.value = params[id];
+      if (id === "colormap" && COLORMAPS[params[id]]) activeColormap = params[id];
+    }
+  }
+  for (const id of PERSIST_REFIRE) document.getElementById(id)?.dispatchEvent(new Event("change"));
+  const cs = cfg.computeSource;
+  if (cs === "browser" || cs === "localhost" || cs === "cloud") {
+    const radio = document.getElementById(
+      cs === "localhost" ? "cs-localhost" : cs === "cloud" ? "cs-cloud" : "cs-browser");
+    if (radio && !radio.disabled) radio.checked = true;
+  }
+  syncComputeSourceUI();
+  if (Array.isArray(cfg.layerOrder) && cfg.layerOrder.length) {
+    const valid = cfg.layerOrder.filter((k) => DEFAULT_LAYER_ORDER.includes(k));
+    layerOrder = valid.concat(DEFAULT_LAYER_ORDER.filter((k) => !valid.includes(k)));
+    if (persist) try { localStorage.setItem("simu-layer-order", JSON.stringify(layerOrder)); } catch {}
+    applyLayerOrder();
+  }
+  if (cfg.maxWorkers != null) {
+    const mw = document.getElementById("max-workers");
+    if (mw) mw.value = cfg.maxWorkers;
+    if (persist) try { localStorage.setItem("simu-max-workers", String(cfg.maxWorkers)); } catch {}
+  }
+  // Adopt the config's language only on an explicit import — a bundle must not
+  // flip the user's UI language (setLang persists it).
+  if (persist && (cfg.lang === "en" || cfg.lang === "pt")) setLang(cfg.lang);
+  // Restore on-map drawn geometry (overlays + masks + portal bridges).
+  if (cfg.drawn && typeof cfg.drawn === "object") {
+    state.drawnImpassable = Array.isArray(cfg.drawn.impassable) ? cfg.drawn.impassable : [];
+    state.drawnPassable = Array.isArray(cfg.drawn.passable) ? cfg.drawn.passable : [];
+    state.drawnPortals = Array.isArray(cfg.drawn.portals) ? cfg.drawn.portals : [];
+    if (typeof restoreDrawnGeometry === "function") restoreDrawnGeometry();
+    // The grid changed — drop any stale rendered result so it doesn't linger
+    // inconsistent with the restored barriers/corridors/portals. (In the bundle
+    // path the bundle's own result is rendered immediately after, overwriting.)
+    const hasDrawn = (state.drawnImpassable.length || state.drawnPassable.length || state.drawnPortals.length);
+    if (hasDrawn) { markImpassableDirty(true); markBridgesDirty(true); }
+  }
+  applyColormapToLegend();
+  applyLayerControls();
+  if (persist) savePersistedParams();
+  return true;
+}
+
+// Wire the Group-0 export/import/reset buttons. Called from init.
+function setupConfigButtons() {
+  document.getElementById("config-export")?.addEventListener("click", () => {
+    const blob = new Blob([JSON.stringify(collectConfig(), null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "simujoules-config.json";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+  document.getElementById("config-import-btn")?.addEventListener("click", () => {
+    document.getElementById("config-file")?.click();
+  });
+  document.getElementById("config-file")?.addEventListener("change", (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const cfg = JSON.parse(reader.result);
+        if (applyConfig(cfg)) status.textContent = t("config.imported");
+        else status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("config.import_error"))}</span>`;
+      } catch (e) {
+        status.innerHTML = `<span style="color:#ff6b6b">${t("config.import_error")}: ${escapeHtml(e.message)}</span>`;
+      }
+    };
+    reader.readAsText(f);
+  });
+  document.getElementById("config-reset")?.addEventListener("click", () => {
+    if (!window.confirm(t("config.reset_confirm"))) return;
+    for (const k of ["simu-params", "simu-layer-order", "simu-max-workers", "simu-lang", "simu-sidebar-cols"]) {
+      try { localStorage.removeItem(k); } catch {}
+    }
+    location.reload();
   });
 }
 
@@ -870,13 +1119,13 @@ document.addEventListener("DOMContentLoaded", () => {
         if (state.pathLine)  { state.pathLine.remove();  state.pathLine = null; }
         const srcDisp = document.getElementById("src-display");
         const dstDisp = document.getElementById("dst-display");
-        if (srcDisp) { srcDisp.textContent = "— density —"; srcDisp.classList.remove("set"); }
-        if (dstDisp) { dstDisp.textContent = "— density —"; dstDisp.classList.remove("set"); }
+        if (srcDisp) { srcDisp.textContent = t("pts.density"); srcDisp.classList.remove("set"); }
+        if (dstDisp) { dstDisp.textContent = t("pts.density"); dstDisp.classList.remove("set"); }
       } else {
         const srcDisp = document.getElementById("src-display");
         const dstDisp = document.getElementById("dst-display");
-        if (srcDisp && !state.src) srcDisp.textContent = "— click map —";
-        if (dstDisp && !state.dst) dstDisp.textContent = "— optional —";
+        if (srcDisp && !state.src) srcDisp.textContent = t("pts.click_map");
+        if (dstDisp && !state.dst) dstDisp.textContent = t("pts.optional");
       }
 
       // Energy layer stays available in density mode — when refs > 0 the
@@ -903,6 +1152,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (f) await loadRefPointsFromFile(f);
     ev.target.value = "";   // let the same file be re-loaded
   });
+  document.getElementById("ref-export")?.addEventListener("click", exportRefPoints);
   // Anything that affects the time estimate
   // Inputs that move the (now budget- and engine-aware) time estimate.
   // `alpha` scales the explored region (flat reach ∝ eMax/alpha); the
@@ -1003,6 +1253,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("impassable-osm")?.addEventListener("click", loadOsmWater);
   document.getElementById("imp-rivers")?.addEventListener("change", rebuildOsmWaterMask);
   document.getElementById("imp-enabled")?.addEventListener("change", () => markImpassableDirty(true));
+  // 1B "Aplicar ao cálculo" toggle updates its green/orange status.
+  document.getElementById("vec-constrain")?.addEventListener("change", syncLoadedHighlights);
   document.getElementById("impassable-invert")?.addEventListener("change", () => {
     // Re-resample the cached source with the flipped convention (no re-upload).
     if (state.impassableRaster) applyImpassableRaster(state.impassableRaster, state.impassableMeta?.name);
@@ -1097,30 +1349,43 @@ document.addEventListener("DOMContentLoaded", () => {
   // persisted. Rebuilt on every open so labels follow the language toggle.
   const orderModal = document.getElementById("layer-order-modal");
   const orderList = document.getElementById("layer-order-list");
-  const renderOrderList = () => {
-    if (!orderList) return;
-    orderList.innerHTML = "";
-    const topToBottom = layerOrder.slice().reverse();
-    topToBottom.forEach((key, di) => {
-      const row = document.createElement("div");
-      row.style.cssText =
-        "display:flex;align-items:center;gap:6px;padding:4px 8px;" +
-        "border:1px solid var(--border);border-radius:4px;margin-top:4px;";
-      const name = document.createElement("span");
-      name.style.flex = "1";
-      name.textContent = t(`order.${key}`);
-      row.appendChild(name);
+  // Per-layer visibility/opacity input ids the modal rows PROXY (the real
+  // inputs live in a hidden store, or in groups 1B/1C for network/impassable).
+  // Every proxied input already has its own input+change listener that applies
+  // the change, so the proxy just mirrors the value and dispatches those events.
+  const LAYER_VIS = {
+    relief:     { vis: "relief-visible",  op: "relief-opacity"  },
+    impassable: { vis: "imp-show",        op: "imp-opacity"     },
+    energy:     { vis: "energy-visible",  op: "energy-opacity"  },
+    network:    { vis: "vec-render",      op: "vec-render-opacity" },
+    passes:     { vis: "passes-visible",  op: "passes-opacity"  },
+    routes:     { vis: null,              op: null              },
+  };
+  // Fixed (non-reorderable) layers shown after the stacking list.
+  const FIXED_ROWS = [
+    { labelKey: "layer.tiles",      vis: "tile-visible", op: "tile-opacity" },
+    { labelKey: "ref.show_markers", vis: "refs-visible", op: null },
+  ];
+  const fireInput = (el) => {
+    el.dispatchEvent(new Event("input",  { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const buildLayerRow = ({ labelKey, reorder, vis, op }) => {
+    const row = document.createElement("div");
+    row.style.cssText =
+      "display:flex;align-items:center;gap:6px;padding:4px 6px;" +
+      "border:1px solid var(--border);border-radius:4px;margin-top:4px;";
+    // Ordering arrows on the LEFT (or a same-width spacer for fixed rows).
+    const arrows = document.createElement("div");
+    arrows.style.cssText = "display:flex;gap:2px;flex:none;width:50px;";
+    if (reorder) {
       const mkBtn = (label, disabled, delta) => {
         const b = document.createElement("button");
-        b.type = "button";
-        b.className = "secondary";
-        b.textContent = label;
-        b.disabled = disabled;
-        b.style.cssText = "width:30px;padding:2px 0;margin:0;";
+        b.type = "button"; b.className = "secondary"; b.textContent = label;
+        b.disabled = disabled; b.style.cssText = "width:23px;padding:2px 0;margin:0;";
         b.addEventListener("click", () => {
-          // Visually "up" = drawn on top of more layers = later in the
-          // bottom→top layerOrder array.
-          const i = layerOrder.indexOf(key);
+          // Visually "up" = drawn on top = later in the bottom→top layerOrder.
+          const i = layerOrder.indexOf(reorder.key);
           const j = i + delta;
           if (j < 0 || j >= layerOrder.length) return;
           [layerOrder[i], layerOrder[j]] = [layerOrder[j], layerOrder[i]];
@@ -1129,14 +1394,61 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         return b;
       };
-      row.appendChild(mkBtn("↑", di === 0, +1));
-      row.appendChild(mkBtn("↓", di === topToBottom.length - 1, -1));
-      orderList.appendChild(row);
-    });
+      arrows.appendChild(mkBtn("↑", reorder.di === 0, +1));
+      arrows.appendChild(mkBtn("↓", reorder.di === reorder.last, -1));
+    }
+    row.appendChild(arrows);
+    // Visibility checkbox (proxies the real input).
+    const realVis = vis ? document.getElementById(vis) : null;
+    if (realVis) {
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.style.flex = "none";
+      cb.checked = realVis.checked;
+      cb.addEventListener("change", () => { realVis.checked = cb.checked; fireInput(realVis); });
+      row.appendChild(cb);
+    } else {
+      const sp = document.createElement("span"); sp.style.cssText = "width:13px;flex:none;";
+      row.appendChild(sp);
+    }
+    // Name.
+    const name = document.createElement("span");
+    name.style.cssText = "flex:1;font-size:12px;"; name.textContent = t(labelKey);
+    row.appendChild(name);
+    // Opacity slider (proxies the real input).
+    const realOp = op ? document.getElementById(op) : null;
+    if (realOp) {
+      const r = document.createElement("input");
+      r.type = "range"; r.min = "0"; r.max = "1"; r.step = "0.05"; r.value = realOp.value;
+      r.style.cssText = "flex:none;width:64px;";
+      r.addEventListener("input", () => { realOp.value = r.value; fireInput(realOp); });
+      row.appendChild(r);
+    }
+    return row;
   };
-  const openOrder = () => { renderOrderList(); orderModal?.classList.add("active"); };
-  const closeOrder = () => orderModal?.classList.remove("active");
-  document.getElementById("layer-order-btn")?.addEventListener("click", openOrder);
+  const renderOrderList = () => {
+    if (!orderList) return;
+    orderList.innerHTML = "";
+    const topToBottom = layerOrder.slice().reverse();
+    topToBottom.forEach((key, di) => {
+      const v = LAYER_VIS[key] || {};
+      orderList.appendChild(buildLayerRow({
+        labelKey: `order.${key}`,
+        reorder: { key, di, last: topToBottom.length - 1 },
+        vis: v.vis, op: v.op,
+      }));
+    });
+    FIXED_ROWS.forEach((f) => orderList.appendChild(buildLayerRow({
+      labelKey: f.labelKey, reorder: null, vis: f.vis, op: f.op,
+    })));
+  };
+  const layerCtrlBtns = ["layer-ctrl-open", "layer-ctrl-btn"]
+    .map((id) => document.getElementById(id)).filter(Boolean);
+  const markLayerBtns = (on) => layerCtrlBtns.forEach((b) => b.classList.toggle("active", on));
+  const openOrder = () => { renderOrderList(); orderModal?.classList.add("active"); markLayerBtns(true); };
+  const closeOrder = () => { orderModal?.classList.remove("active"); markLayerBtns(false); };
+  // Non-blocking corner panel: the buttons TOGGLE it (re-click to dismiss).
+  const toggleOrder = () => orderModal?.classList.contains("active") ? closeOrder() : openOrder();
+  layerCtrlBtns.forEach((b) => b.addEventListener("click", toggleOrder));
   document.getElementById("layer-order-close")?.addEventListener("click", closeOrder);
   orderModal?.addEventListener("click", (e) => {
     if (e.target === orderModal) closeOrder();
@@ -1154,6 +1466,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // Last so the colormap selects are populated and every sub-panel sync
   // handler is already wired (restore dispatches synthetic change events).
   setupParamPersistence();
+  setupConfigButtons();
+  setupDrawingTools();
 });
 
 const map = L.map("map", { preferCanvas: true }).setView([-23.55, -46.63], 12);
@@ -1223,6 +1537,10 @@ const BASEMAPS = {
       maxZoom: 20,
     },
   },
+  "esri-satellite": {
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    options: { attribution: "© Esri, Maxar, Earthstar Geographics", maxZoom: 19 },
+  },
   "none-black": { color: "#000000" },
   "none-white": { color: "#ffffff" },
   "none-gray":  { color: "#808080" },
@@ -1234,7 +1552,8 @@ function applyBasemap(key) {
   if (baseTileLayer) { baseTileLayer.remove(); baseTileLayer = null; }
   const container = document.getElementById("map");
   if (def.url) {
-    baseTileLayer = L.tileLayer(def.url, def.options).addTo(map);
+    // zIndex 0 keeps the basemap UNDER the rmsampa hydrography overlay (z 10).
+    baseTileLayer = L.tileLayer(def.url, { ...def.options, zIndex: 0 }).addTo(map);
     if (container) container.style.background = "";
   } else if (container) {
     container.style.background = def.color;
@@ -1519,6 +1838,10 @@ const RMSAMPA_URL = "https://telhas.pedalhidrografi.co/rmsampa-v2/{z}/{x}/{y}.pn
 state.tileOverlay = L.tileLayer(RMSAMPA_URL, {
   maxZoom: 19,
   opacity: 0.85,
+  // Keep the hydrography overlay ABOVE the basemap within the tile pane,
+  // regardless of add order (the basemap is re-added on the persistence
+  // refire AFTER this layer, which would otherwise bury it until toggled).
+  zIndex: 10,
   attribution: 'pedalhidrografi.co',
 });
 
@@ -1602,6 +1925,18 @@ function centerOnUserLocation() {
       if (btn) btn.disabled = false;
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
+      const acc = pos.coords.accuracy; // metres
+      // Drop a marker + accuracy circle at the located point (replace any prior).
+      if (state.locateMarker) { state.locateMarker.remove(); state.locateMarker = null; }
+      if (state.locateCircle) { state.locateCircle.remove(); state.locateCircle = null; }
+      state.locateMarker = L.circleMarker([lat, lng], {
+        radius: 6, color: "#1f6fd0", weight: 2, fillColor: "#4ea3ff", fillOpacity: 0.9,
+      }).addTo(map);
+      if (Number.isFinite(acc) && acc > 0) {
+        state.locateCircle = L.circle([lat, lng], {
+          radius: acc, color: "#1f6fd0", weight: 1, fillColor: "#4ea3ff", fillOpacity: 0.12,
+        }).addTo(map);
+      }
       // panTo keeps the current zoom; setView would force a zoom change.
       map.panTo([lat, lng]);
       status.textContent = t("locate.centered", lat.toFixed(4), lng.toFixed(4));
@@ -1961,8 +2296,8 @@ async function loadDemFromArrayBuffer(buf, label) {
   if (state.bridgesLayer) { state.bridgesLayer.remove(); state.bridgesLayer = null; }
   updateBridgeMeta();
   syncRefDisplay();
-  document.getElementById("src-display").textContent = "— click map —";
-  document.getElementById("dst-display").textContent = "— optional —";
+  document.getElementById("src-display").textContent = t("pts.click_map");
+  document.getElementById("dst-display").textContent = t("pts.optional");
   document.getElementById("src-display").classList.remove("set");
   document.getElementById("dst-display").classList.remove("set");
   resultMeta.innerHTML = "—";
@@ -1981,6 +2316,7 @@ async function loadDemFromArrayBuffer(buf, label) {
     origin <span class="v">${originLabel}</span><br/>
     ${coverLabel}
   `;
+  demMeta.removeAttribute("data-i18n"); // live content — don't let a lang toggle wipe it
   if (state.dem.isGeographic) {
     status.textContent = t("status.dem_loaded", label);
   } else {
@@ -1991,7 +2327,25 @@ async function loadDemFromArrayBuffer(buf, label) {
   }
   updateRunButtonState();
   syncLoadedHighlights(); // light up group 1A (and 1B was just cleared above)
+  // Auto-expand: a fresh DEM opens the next input step (1B) + the compute setup.
+  setGroupOpen("network-group", true);
+  setGroupOpen("group-3", true);
+  setGroupOpen("params-group", true);
+  setGroupOpen("pick-points-group", true);
+  setGroupOpen("execution-group", true);
   estimateRunTime();
+  // Re-grid any drawn geometry against the new DEM (it may have been restored
+  // from a config import before a DEM was loaded, or the DEM just changed).
+  if ((state.drawnImpassable && state.drawnImpassable.length) ||
+      (state.drawnPassable && state.drawnPassable.length) ||
+      (state.drawnPortals && state.drawnPortals.length)) {
+    state.drawnImpassableMask = rasterizeRingsToMask(state.drawnImpassable);
+    state.drawnPassableMask = rasterizeRingsToMask(state.drawnPassable);
+    state.bridges = (state.bridges || []).filter((b) => !b.drawn);
+    reappendDrawnPortals();
+    applyBridgeOverlay(); // the bridge layer was just cleared on DEM load — redraw drawn portal decks
+    if (typeof updateDrawMeta === "function") updateDrawMeta();
+  }
 
   // Build the cmocean.phase + slope hillshade for the new DEM. Renders
   // synchronously — for a 12 M-cell viewport (the FABDEM cap) this takes
@@ -2408,6 +2762,7 @@ async function loadVectorNetwork(file) {
       // unusable. Say so loudly instead.
       document.getElementById("vec-meta").innerHTML =
         t("status.net_meta_zero", srsId, scanned, rasterised);
+      document.getElementById("vec-meta").removeAttribute("data-i18n");
       status.innerHTML = `<span style="color:#ff6b6b">${t("status.net_zero_cells")}</span>`;
       return;
     }
@@ -2417,6 +2772,7 @@ async function loadVectorNetwork(file) {
     state.networkFeatureCount = rasterised;
     document.getElementById("vec-meta").innerHTML =
       `EPSG:${srsId} · ` + t("status.net_meta_drawn", rasterised, networkCells.toLocaleString(), (100 * networkCells / (W * H)).toFixed(1));
+    document.getElementById("vec-meta").removeAttribute("data-i18n");
     status.textContent = t("status.network_loaded");
     state.lastResult = null; // previous compute used the un-constrained mask
     cancelActiveCompute();   // …and so would an in-flight one
@@ -2425,6 +2781,7 @@ async function loadVectorNetwork(file) {
     state.networkBridgeCandidates = bridgeCandidates.length ? bridgeCandidates : null;
     applyNetworkLinesOverlay();
     syncLoadedHighlights(); // light up group 1B
+    setGroupOpen("impassable-group", true); // network loaded → next input step
     onNetworkCorridorsChanged(); // a new network may carve corridors over the mask
   } finally {
     db.close();
@@ -2470,6 +2827,7 @@ function installNetworkFromLines(lines, srsId, sourceLabel, meta = null) {
   state.networkFeatureCount = rasterised;
   document.getElementById("vec-meta").innerHTML =
     `${escapeHtml(sourceLabel)} · ` + t("status.net_meta_drawn", rasterised, networkCells.toLocaleString(), (100 * networkCells / (W * H)).toFixed(1));
+  document.getElementById("vec-meta").removeAttribute("data-i18n");
   status.textContent = t("status.network_loaded");
   state.lastResult = null;
   cancelActiveCompute();
@@ -2490,6 +2848,7 @@ function installNetworkFromLines(lines, srsId, sourceLabel, meta = null) {
   state.networkLinesMeta = keptMeta;
   applyNetworkLinesOverlay();
   syncLoadedHighlights(); // light up group 1B
+  setGroupOpen("impassable-group", true); // network loaded → next input step
   onNetworkCorridorsChanged(); // a new network may carve corridors over the mask
   return true;
 }
@@ -2598,7 +2957,7 @@ async function loadOsmBridges() {
   if (btn) btn.disabled = true;
   progress.classList.add("active");
   progressBar.style.width = "20%";
-  status.textContent = "Querying OSM (Overpass) for bridges…";
+  status.textContent = t("status.osm_querying");
   try {
     const bbox = `${south.toFixed(6)},${west.toFixed(6)},${north.toFixed(6)},${east.toFixed(6)}`;
     const parts = [`way["bridge"]["bridge"!="no"]["highway"](${bbox});`];
@@ -2611,9 +2970,9 @@ async function loadOsmBridges() {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: "data=" + encodeURIComponent(query),
     });
-    if (!resp.ok) throw new Error(`Overpass HTTP ${resp.status} (busy? try again in a minute)`);
+    if (!resp.ok) throw new Error(t("status.overpass_http", resp.status));
     progressBar.style.width = "60%";
-    status.textContent = "Parsing OSM response…";
+    status.textContent = t("status.osm_parsing");
     const json = await resp.json();
     // Mapped node elevations (`ele`), keyed by rounded coord — matched to way
     // vertices by position (same OSM nodes ⇒ identical coords).
@@ -2691,6 +3050,7 @@ function installBridgesFromWays(ways, sourceLabel) {
     return false;
   }
   state.bridges = bridges;
+  reappendDrawnPortals(); // this pull REPLACED state.bridges — keep drawn portals
   state.bridgesMeta = { source: sourceLabel, count: bridges.length, skipped };
   updateBridgeMeta();
   applyBridgeOverlay();
@@ -2702,8 +3062,10 @@ function installBridgesFromWays(ways, sourceLabel) {
 function clearBridges() {
   state.bridges = null;
   state.bridgesMeta = null;
+  state.drawnPortals = []; // 1D "Clear bridges" also drops user-drawn portals
   if (state.bridgesLayer) { state.bridgesLayer.remove(); state.bridgesLayer = null; }
   updateBridgeMeta();
+  if (typeof updateDrawMeta === "function") updateDrawMeta();
   markBridgesDirty(true);
 }
 
@@ -2734,6 +3096,240 @@ function markBridgesDirty(reprobe = false) {
     startCalibrationProbe();
   }
   estimateRunTime();
+  syncLoadedHighlights(); // 1D status (loaded/applied) may have changed
+}
+
+// ------- On-map drawing tools (Leaflet-Geoman) -------
+// 1C: barrier polygons (force impassable) + passable-corridor polygons (force
+//     passable) rasterise into state.drawn{Impassable,Passable}Mask, applied in
+//     buildComputeGrid + effectivePassableAt — separate from the file/OSM mask.
+// 1D: portal lines become bridge shortcuts (drawn:true) in state.bridges, so
+//     buildPortals + applyBridgeOverlay pick them up like OSM bridges.
+// All drawn geometry persists via collectConfig/applyConfig (config + bundle).
+const DRAW_STYLE = {
+  barrier:  { color: "#d6493e", weight: 2, fillColor: "#d6493e", fillOpacity: 0.25 },
+  corridor: { color: "#3fb56a", weight: 2, fillColor: "#3fb56a", fillOpacity: 0.22 },
+  portal:   { color: "#1f6fd0", weight: 3, dashArray: "5,5" },
+};
+let drawMode = null; // 'barrier' | 'corridor' | 'portal' while a draw is armed
+
+function ensureDrawLayers() {
+  if (!state.drawLayers) {
+    // Dedicated pane ABOVE the data overlays (relief..routes live at z 401-406)
+    // so drawn shapes stay visible AND clickable when a result/relief is shown —
+    // in the default overlayPane (400) they'd sit behind the overlays. A canvas
+    // renderer bound to the pane is needed because the map is preferCanvas.
+    if (!map.getPane("drawnPane")) {
+      map.createPane("drawnPane").style.zIndex = 450;
+      state.drawnRenderer = L.canvas({ pane: "drawnPane" });
+    }
+    state.drawLayers = {
+      barrier:  L.layerGroup().addTo(map),
+      corridor: L.layerGroup().addTo(map),
+      portal:   L.layerGroup().addTo(map),
+    };
+  }
+  return state.drawLayers;
+}
+
+// Bind a popup with a "delete this shape" button to a drawn layer, and stop the
+// click from also reaching the map (which would drop a source/reference point).
+function bindDeletePopup(layer, onDelete) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.textContent = "🗑 " + t("draw.delete_this");
+  // Explicit high-contrast style — Leaflet's popup is white, so the app's
+  // .secondary class (light text on transparent) would be invisible here.
+  btn.style.cssText =
+    "margin:0;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;" +
+    "background:#d6493e;color:#fff;border:none;border-radius:4px;white-space:nowrap;";
+  btn.addEventListener("click", () => { layer.closePopup(); onDelete(); });
+  const wrap = document.createElement("div");
+  wrap.style.textAlign = "center";
+  wrap.appendChild(btn);
+  layer.bindPopup(wrap);
+  layer.on("click", (e) => L.DomEvent.stopPropagation(e)); // don't place a point too
+}
+
+// lat/lng polygon rings → DEM-grid Uint8Array (1 inside). null if no geo DEM.
+function rasterizeRingsToMask(rings) {
+  if (!state.dem || !state.dem.isGeographic || !rings || !rings.length) return null;
+  const { W, H } = state.dem;
+  const data = new Uint8Array(W * H);
+  for (const ring of rings) fillRingsEvenOdd([ring.map(([lat, lng]) => llToGridFrac(lat, lng))], data, W, H);
+  return data;
+}
+
+function rebuildDrawnMasks() {
+  state.drawnImpassableMask = rasterizeRingsToMask(state.drawnImpassable);
+  state.drawnPassableMask = rasterizeRingsToMask(state.drawnPassable);
+  updateDrawMeta();
+  markImpassableDirty(true); // mask changed → invalidate compute + reprobe
+}
+
+function updateDrawMeta() {
+  const im = document.getElementById("draw-impassable-meta");
+  if (im) im.textContent = t("draw.imp_meta", (state.drawnImpassable || []).length, (state.drawnPassable || []).length);
+  const pm = document.getElementById("draw-portal-meta");
+  if (pm) pm.textContent = t("draw.portal_meta", (state.drawnPortals || []).length);
+}
+
+// Build a bridge object from a drawn portal polyline (mirrors the per-way logic
+// of installBridgesFromWays). Returns null if the endpoints aren't usable.
+function makePortalBridge(latlngs) {
+  if (!state.dem || !state.dem.isGeographic || !latlngs || latlngs.length < 2) return null;
+  const { H, W, dxM, dyM, mask } = state.dem;
+  const inB = (rc) => rc[0] >= 0 && rc[0] < H && rc[1] >= 0 && rc[1] < W;
+  const a = llToCell(latlngs[0][0], latlngs[0][1]);
+  const z = llToCell(latlngs[latlngs.length - 1][0], latlngs[latlngs.length - 1][1]);
+  if (!inB(a) || !inB(z)) return null;
+  const endA = a[0] * W + a[1], endB = z[0] * W + z[1];
+  if (endA === endB || !mask[endA] || !mask[endB]) return null;
+  let deckLenM = 0, prev = a;
+  for (let i = 1; i < latlngs.length; i++) {
+    const cur = llToCell(latlngs[i][0], latlngs[i][1]);
+    deckLenM += Math.hypot((cur[0] - prev[0]) * dyM, (cur[1] - prev[1]) * dxM);
+    prev = cur;
+  }
+  if (!(deckLenM > 0)) return null;
+  return { latlngs, endA, endB, deckLenM, kind: "bridge", layer: 0, name: "drawn", eleA: null, eleB: null, drawn: true };
+}
+
+// Re-append the user-drawn portals to state.bridges (called after any OSM/bundle
+// pull that REPLACES state.bridges, so drawings survive).
+function reappendDrawnPortals() {
+  if (!state.drawnPortals || !state.drawnPortals.length) return;
+  state.bridges = state.bridges || [];
+  for (const p of state.drawnPortals) { const br = makePortalBridge(p.latlngs); if (br) state.bridges.push(br); }
+}
+
+function startDraw(mode) {
+  if (!state.dem || !state.dem.isGeographic) {
+    status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("draw.need_dem"))}</span>`;
+    return;
+  }
+  if (!map.pm) return;
+  drawMode = mode;
+  const shape = mode === "portal" ? "Line" : "Polygon";
+  map.pm.enableDraw(shape, { templineStyle: DRAW_STYLE[mode], hintlineStyle: DRAW_STYLE[mode], pathOptions: DRAW_STYLE[mode] });
+  status.textContent = t("draw.drawing");
+  if (window.innerWidth <= 860 && window.__simuDrawer) window.__simuDrawer.close();
+}
+
+// Render a barrier/corridor ring as a clickable polygon (delete popup wired to
+// remove THIS ring from state + rebuild). Reused by draw + restore.
+function addDrawnPolygon(mode, ring) {
+  const key = mode === "barrier" ? "drawnImpassable" : "drawnPassable";
+  const groups = ensureDrawLayers();
+  const layer = L.polygon(ring, { ...DRAW_STYLE[mode], pane: "drawnPane", renderer: state.drawnRenderer }).addTo(groups[mode]);
+  bindDeletePopup(layer, () => {
+    state[key] = (state[key] || []).filter((r) => r !== ring);
+    layer.remove();
+    rebuildDrawnMasks();
+    status.textContent = t("draw.cleared");
+  });
+  return layer;
+}
+
+// Render a drawn portal as a clickable polyline (delete popup removes THIS
+// portal + its bridge). Drawn portals live in their own layer group;
+// applyBridgeOverlay skips drawn bridges so they aren't double-drawn.
+function addDrawnPortalLayer(entry) {
+  const groups = ensureDrawLayers();
+  const layer = L.polyline(entry.latlngs, { ...DRAW_STYLE.portal, pane: "drawnPane", renderer: state.drawnRenderer }).addTo(groups.portal);
+  bindDeletePopup(layer, () => {
+    state.drawnPortals = (state.drawnPortals || []).filter((p) => p !== entry);
+    state.bridges = (state.bridges || []).filter((b) => !b.drawn);
+    reappendDrawnPortals();
+    layer.remove();
+    applyBridgeOverlay();
+    markBridgesDirty(true);
+    updateDrawMeta();
+    status.textContent = t("draw.cleared");
+  });
+  return layer;
+}
+
+function onDrawCreate(e) {
+  const mode = drawMode;
+  drawMode = null;
+  if (map.pm) map.pm.disableDraw();
+  const layer = e.layer;
+  if (!mode || !layer) { if (layer && layer.remove) layer.remove(); return; }
+  const ll = layer.getLatLngs ? layer.getLatLngs() : null;
+  if (layer.remove) layer.remove(); // drop Geoman's layer; we keep our own
+  if (!ll) return;
+  if (mode === "portal") {
+    const pts = ll.map((p) => [p.lat, p.lng]);
+    const br = makePortalBridge(pts);
+    if (!br) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("draw.portal_invalid"))}</span>`; return; }
+    state.drawnPortals = state.drawnPortals || [];
+    const entry = { latlngs: pts };
+    state.drawnPortals.push(entry);
+    state.bridges = state.bridges || [];
+    state.bridges.push(br);
+    addDrawnPortalLayer(entry);
+    markBridgesDirty(true);
+    updateDrawMeta();
+    status.textContent = t("draw.portal_added", state.drawnPortals.length);
+  } else {
+    const ring = (Array.isArray(ll[0]) ? ll[0] : ll).map((p) => [p.lat, p.lng]);
+    if (ring.length < 3) return;
+    const key = mode === "barrier" ? "drawnImpassable" : "drawnPassable";
+    state[key] = state[key] || [];
+    state[key].push(ring);
+    addDrawnPolygon(mode, ring);
+    rebuildDrawnMasks();
+    status.textContent = t(mode === "barrier" ? "draw.barrier_added" : "draw.corridor_added", state[key].length);
+  }
+}
+
+function clearDrawnImpassable() {
+  state.drawnImpassable = [];
+  state.drawnPassable = [];
+  const layers = ensureDrawLayers();
+  layers.barrier.clearLayers();
+  layers.corridor.clearLayers();
+  rebuildDrawnMasks();
+  status.textContent = t("draw.cleared");
+}
+
+function clearDrawnPortals() {
+  state.drawnPortals = [];
+  state.bridges = (state.bridges || []).filter((b) => !b.drawn);
+  ensureDrawLayers().portal.clearLayers();
+  applyBridgeOverlay();
+  markBridgesDirty(true);
+  updateDrawMeta();
+  status.textContent = t("draw.cleared");
+}
+
+// Re-create overlays + masks + portal bridges from restored state.drawn*
+// (after a config import or bundle load).
+function restoreDrawnGeometry() {
+  const layers = ensureDrawLayers();
+  layers.barrier.clearLayers();
+  layers.corridor.clearLayers();
+  layers.portal.clearLayers();
+  for (const ring of state.drawnImpassable || []) addDrawnPolygon("barrier", ring);
+  for (const ring of state.drawnPassable || []) addDrawnPolygon("corridor", ring);
+  state.bridges = (state.bridges || []).filter((b) => !b.drawn);
+  reappendDrawnPortals();
+  for (const entry of state.drawnPortals || []) addDrawnPortalLayer(entry);
+  state.drawnImpassableMask = rasterizeRingsToMask(state.drawnImpassable);
+  state.drawnPassableMask = rasterizeRingsToMask(state.drawnPassable);
+  updateDrawMeta();
+  applyBridgeOverlay();
+}
+
+function setupDrawingTools() {
+  document.getElementById("draw-barrier")?.addEventListener("click", () => startDraw("barrier"));
+  document.getElementById("draw-corridor")?.addEventListener("click", () => startDraw("corridor"));
+  document.getElementById("draw-portal")?.addEventListener("click", () => startDraw("portal"));
+  document.getElementById("draw-impassable-clear")?.addEventListener("click", clearDrawnImpassable);
+  document.getElementById("draw-portal-clear")?.addEventListener("click", clearDrawnPortals);
+  if (map.pm) map.on("pm:create", onDrawCreate);
+  updateDrawMeta();
 }
 
 function bridgeOverlayOpacity() {
@@ -2750,6 +3346,7 @@ function applyBridgeOverlay() {
   const op = bridgeOverlayOpacity();
   const group = L.layerGroup();
   for (const br of state.bridges) {
+    if (br.drawn) continue; // user-drawn portals render in their own clickable group
     L.polyline(br.latlngs, {
       color: br.kind === "tunnel" ? "#a26bff" : "#ff7f0e",
       weight: 3, opacity: op, pane: "networkPane", interactive: false,
@@ -2786,7 +3383,9 @@ function clearVectorNetwork() {
   state.lastGraphResult = null;
   state.graphEnergyRaster = null;
   const meta = document.getElementById("vec-meta");
-  if (meta) meta.innerHTML = "No network loaded.";
+  // Back to the empty state: translated text + restore data-i18n so a later
+  // language toggle re-translates it (the live-load path removed the attribute).
+  if (meta) { meta.textContent = t("net.no_network"); meta.setAttribute("data-i18n", "net.no_network"); }
   const inp = document.getElementById("vector-file");
   if (inp) inp.value = "";
   syncLoadedHighlights(); // group 1B no longer "loaded"
@@ -2815,6 +3414,7 @@ function markImpassableDirty(reprobe = false) {
     startCalibrationProbe();
   }
   estimateRunTime();
+  syncLoadedHighlights(); // 1C status (loaded/applied) may have changed
 }
 
 // ---- OSM water → impassable mask (group 1c) ------------------------------
@@ -3106,6 +3706,7 @@ function applyImpassableRaster(raster, name) {
   updateImpassableMeta();
   updateCorridorAvailability();
   markImpassableDirty(true);
+  setGroupOpen("bridges-group", true); // mask loaded → next input step
 }
 
 function updateImpassableMeta() {
@@ -3562,6 +4163,8 @@ function renderGraphOverlay() {
 
   const passesRow = document.getElementById("passes-row");
   if (passesRow) passesRow.style.display = hasPasses ? "" : "none";
+  const passesVisRow = document.getElementById("passes-vis-row"); // modal vis/opacity row
+  if (passesVisRow) passesVisRow.style.display = hasPasses ? "" : "none";
 
   applyLayerControls();   // drive visibility + opacity from the Energy/Passes controls
   updateLegendTicks();
@@ -3569,6 +4172,9 @@ function renderGraphOverlay() {
 }
 
 map.on("click", (e) => {
+  // While a Geoman draw is armed, map clicks are placing polygon/line vertices —
+  // don't ALSO drop a source/reference point (the two were confounding).
+  if (drawMode || (map.pm && map.pm.globalDrawModeEnabled && map.pm.globalDrawModeEnabled())) return;
   if (!state.dem) {
     status.textContent = t("status.load_dem_first");
     return;
@@ -3631,6 +4237,7 @@ map.on("click", (e) => {
     document.getElementById("dst-display").textContent = `r=${r}, c=${c}`;
     document.getElementById("dst-display").classList.add("set");
     status.textContent = t("status.both_set");
+    updateRunButtonState(); // refresh 3B status (now src + dst → green)
   } else {
     // Reset and start over
     state.src = px;
@@ -3641,9 +4248,10 @@ map.on("click", (e) => {
       .addTo(map).bindTooltip("Source");
     state.dstMarker = null;
     document.getElementById("src-display").textContent = `r=${r}, c=${c}`;
-    document.getElementById("dst-display").textContent = "— click again —";
+    document.getElementById("dst-display").textContent = t("pts.click_again");
     document.getElementById("dst-display").classList.remove("set");
     status.textContent = t("status.src_replaced");
+    updateRunButtonState(); // refresh 3B status (src only → orange)
   }
 });
 
@@ -3653,8 +4261,8 @@ document.getElementById("clear-points").addEventListener("click", () => {
   if (state.srcMarker) { state.srcMarker.remove(); state.srcMarker = null; }
   if (state.dstMarker) { state.dstMarker.remove(); state.dstMarker = null; }
   if (state.pathLine) { state.pathLine.remove(); state.pathLine = null; }
-  document.getElementById("src-display").textContent = "— click map —";
-  document.getElementById("dst-display").textContent = "— optional —";
+  document.getElementById("src-display").textContent = t("pts.click_map");
+  document.getElementById("dst-display").textContent = t("pts.optional");
   document.getElementById("src-display").classList.remove("set");
   document.getElementById("dst-display").classList.remove("set");
   updateRunButtonState();
@@ -4012,6 +4620,29 @@ async function placeCensusRefPoints(want) {
   }
 }
 
+// Export the current reference points as a GeoJSON FeatureCollection (the
+// inverse of loadRefPointsFromFile). Cells → lon/lat via pixelToLatLng; only
+// works on a geographic DEM (same guard as the loader).
+function exportRefPoints() {
+  if (!state.refPoints || !state.refPoints.length) {
+    status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("ref.export_empty"))}</span>`;
+    return;
+  }
+  const features = [];
+  for (let i = 0; i < state.refPoints.length; i++) {
+    const ll = pixelToLatLng(state.refPoints[i][0], state.refPoints[i][1]);
+    if (!ll) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("ref.load.geographic"))}</span>`; return; }
+    features.push({ type: "Feature", properties: { index: i + 1 }, geometry: { type: "Point", coordinates: [ll.lng, ll.lat] } });
+  }
+  const blob = new Blob([JSON.stringify({ type: "FeatureCollection", features })], { type: "application/geo+json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "referencias.geojson";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  status.textContent = t("ref.export_done", features.length);
+}
+
 // Load reference points from a GeoJSON of Point / MultiPoint features. Each
 // coordinate is converted to a DEM pixel via latLngToPixel and placed through
 // addRefPoint (reusing its mask check / numbered marker / FIFO cap). Replaces
@@ -4070,8 +4701,8 @@ async function loadRefPointsFromFile(file) {
 function syncRefDisplay() {
   const el = document.getElementById("ref-display");
   if (el) el.textContent = state.refPoints.length
-    ? `${state.refPoints.length} reference${state.refPoints.length === 1 ? "" : "s"} placed`
-    : "no references placed";
+    ? t("ref.count", state.refPoints.length)
+    : t("ref.none");
   updateRunButtonState();
   estimateRunTime();
 }
@@ -4079,13 +4710,15 @@ function syncRefDisplay() {
 // Unified gate for the Compute button. In density mode it unlocks once at
 // least one reference point exists; otherwise it follows the src/dst rules.
 function updateRunButtonState() {
-  if (!state.dem) { runBtn.disabled = true; return; }
-  const densityOn = !!document.getElementById("want-density")?.checked;
-  if (densityOn) {
-    runBtn.disabled = !(state.refPoints && state.refPoints.length > 0);
+  if (!state.dem) {
+    runBtn.disabled = true;
   } else {
-    runBtn.disabled = !state.src;
+    const densityOn = !!document.getElementById("want-density")?.checked;
+    runBtn.disabled = densityOn
+      ? !(state.refPoints && state.refPoints.length > 0)
+      : !state.src;
   }
+  syncLoadedHighlights(); // refresh 3B/3C/4 status colours
 }
 
 // ------- Run -------
@@ -4230,6 +4863,7 @@ runBtn.addEventListener("click", async () => {
   // gives a usable ETA after the first few percent.
   state.computeStartedAt = performance.now();
   state.estimatedTotalMs = 0;
+  syncLoadedHighlights(); // 3C → running (orange)
   // Cache density's expected ref count so the progress text reads
   // "ref X/N" while the workers are iterating.
   state.computeRefTotal = wantDensity ? state.refPoints.length : 0;
@@ -4267,6 +4901,8 @@ runBtn.addEventListener("click", async () => {
     stampBridgeDeckPasses(m.passes); // deck cells carry the bridge flow (portals skip them)
     renderResult(m);
     status.textContent = t("status.done_ms", m.elapsedMs.toFixed(0));
+    setGroupOpen("result-group", true); // compute done → reveal results
+    syncLoadedHighlights();              // 3C → done (green), 4 → ready (orange)
     // Learn from this run: nudge the estimate toward reality (single runs
     // only — compare runs carry energyAlt and time ~2 scenarios). Compute and
     // interp phases are corrected separately (m.computeMs/m.interpMs when the
@@ -5181,6 +5817,8 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
   // Show/hide the passes layer controls based on whether passes was computed
   const passesRow = document.getElementById("passes-row");
   if (passesRow) passesRow.style.display = passes ? "" : "none";
+  const passesVisRow = document.getElementById("passes-vis-row"); // modal vis/opacity row
+  if (passesVisRow) passesVisRow.style.display = passes ? "" : "none";
 
   rerenderCachedResult();
 
@@ -5218,6 +5856,7 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
     meta.push(`length: <span class="v">${(pathLengthM / 1000).toFixed(2)} km</span>`);
   }
   resultMeta.innerHTML = meta.join("<br/>");
+  resultMeta.removeAttribute("data-i18n"); // live stats — don't let a lang toggle reset to "—"
 }
 
 // Re-render the cached energy + passes overlays with the currently-selected
@@ -5245,12 +5884,25 @@ function rerenderCachedResult() {
     ? r.energyAlt[energySel]
     : r.energy;
   const dualPasses = energySel === "difference" && r.passes && r.passesAlt?.unconstrained;
+  // Place the PRIMARY density tweaks (#passes-primary) under the sub-group that
+  // matches the displayed channel: terrain (unconstrained) → 3C.b "no terreno";
+  // network (constrained) / difference A-channel → 3C.a "na rede vetorial". The
+  // terrain B-channel overrides (#passes-dual-row) only show in the difference
+  // view (under 3C.b). Sub-groups hide when their channel isn't displayed.
+  const terrainOnly = energySel === "unconstrained";
+  const primaryCtl = document.getElementById("passes-primary");
+  const netGroup = document.getElementById("result-density-net-group");
+  const netBody = document.getElementById("density-net-body");
+  const terrGroup = document.getElementById("result-density-terrain-group");
+  const terrBody = document.getElementById("density-terrain-body");
   const dualRow = document.getElementById("passes-dual-row");
+  if (primaryCtl) {
+    const host = terrainOnly ? terrBody : netBody;
+    if (host && primaryCtl.parentElement !== host) host.insertBefore(primaryCtl, host.firstChild);
+  }
+  if (netGroup) netGroup.style.display = terrainOnly ? "none" : "";
+  if (terrGroup) terrGroup.style.display = (terrainOnly || dualPasses) ? "" : "none";
   if (dualRow) dualRow.style.display = dualPasses ? "" : "none";
-  // The "Network (constrained)" label sits above the shared A-channel controls;
-  // only meaningful in the difference view (where the B/terrain channel exists).
-  const netLabel = document.getElementById("passes-net-label");
-  if (netLabel) netLabel.style.display = dualPasses ? "flex" : "none";
   const passes = (r.passesAlt && energySel === "unconstrained" && r.passesAlt.unconstrained)
     ? r.passesAlt.unconstrained
     : r.passes;
@@ -5311,9 +5963,11 @@ function rerenderCachedResult() {
     const energyColor = blend === "energy" && energy && Number.isFinite(state.lastAutoMin);
     const out = renderFieldToDataURL(passes, W, H, {
       // p10/p90 default; passes counts are heavily long-tailed and a few
-      // "highway" cells would otherwise dominate the stretch.
+      // "highway" cells would otherwise dominate the stretch. maxAboveMin re-takes
+      // p90 over only the cells above auto-min (the near-zero tail washed it out).
       usePercentileBounds: true,
       percentiles: [10, 90],
+      maxAboveMin: true,
       userMin: readRangeInput("passes-vmin", null),
       userMax: readRangeInput("passes-vmax", null),
       gamma: Number.isFinite(gamma) ? gamma : 1,
@@ -5480,6 +6134,15 @@ function renderFieldToDataURL(field, W, H, opts) {
       const at = (p) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p / 100))];
       autoLo = at(pLo);
       autoHi = at(pHi);
+      // Passes density heuristic: the long low tail (near-zero cells) drags the
+      // pHi percentile down, washing the field out. Re-take pHi over only the
+      // cells STRICTLY above auto-min so the upper bound tracks the actual ridges.
+      if (opts.maxAboveMin) {
+        let s = 0;
+        while (s < sorted.length && sorted[s] <= autoLo) s++;
+        const len = sorted.length - s;
+        if (len > 0) autoHi = sorted[s + Math.min(len - 1, Math.floor(len * pHi / 100))];
+      }
     }
   }
   if (opts.autoMin != null) autoLo = opts.autoMin;
@@ -6069,8 +6732,8 @@ function syncRangePlaceholders() {
   // Passes absolute inputs — placeholders show the auto bounds.
   const pLo = document.getElementById("passes-vmin");
   const pHi = document.getElementById("passes-vmax");
-  if (pLo && state.lastPassesAutoMin != null) pLo.placeholder = formatEnergy(state.lastPassesAutoMin);
-  if (pHi && state.lastPassesAutoMax != null) pHi.placeholder = formatEnergy(state.lastPassesAutoMax);
+  if (pLo && state.lastPassesAutoMin != null) pLo.placeholder = formatSci(state.lastPassesAutoMin);
+  if (pHi && state.lastPassesAutoMax != null) pHi.placeholder = formatSci(state.lastPassesAutoMax);
 }
 
 // Density worker-pool size, shared by the runner and the time estimator so
@@ -6678,6 +7341,13 @@ function formatEnergy(v) {
   return v.toFixed(2);
 }
 
+// Always-scientific formatter — passes/density bounds span many orders of
+// magnitude (≈1e-9…1e-3), so fixed notation is unreadable; show e.g. "3.8e-9".
+function formatSci(v) {
+  if (!Number.isFinite(v) || v === 0) return "0";
+  return v.toExponential(1);
+}
+
 // ------- DEM metadata formatters -------
 function formatCellSize(dx, dy, originY, H, isGeographic) {
   if (isGeographic) {
@@ -7199,6 +7869,9 @@ function bridgesEnabled() { return document.getElementById("bridge-enabled")?.ch
 // clicks/refs can't land on blocked water that the compute would silently drop.
 function effectivePassableAt(idx) {
   if (!state.dem || !state.dem.mask[idx]) return false;
+  // Drawn geometry: a passable corridor wins; a barrier blocks (mirrors buildComputeGrid).
+  if (state.drawnPassableMask && state.drawnPassableMask[idx]) return true;
+  if (state.drawnImpassableMask && state.drawnImpassableMask[idx]) return false;
   if (state.impassable && impassableEnabled() && state.impassable[idx]) {
     return !!(state.corridorSet && state.corridorSet.has(idx));
   }
@@ -7231,6 +7904,17 @@ function buildComputeGrid(opts = {}) {
         mask[i] = 1;                                  // reopen the corridor (even over nodata water)
         if (!maskOnly) height[i] = base[k] + off * ramp[k]; // smooth bridge profile
       }
+    }
+  }
+  // Drawn geometry (1C): barriers block valid cells; passable corridors reopen
+  // them (override). Applied AFTER the file/OSM mask so a drawn corridor wins.
+  const dImp = state.drawnImpassableMask, dPass = state.drawnPassableMask;
+  if (dImp || dPass) {
+    const N = mask.length;
+    for (let i = 0; i < N; i++) {
+      if (!dem.mask[i]) continue;                     // never touch true nodata
+      if (dImp && dImp[i]) mask[i] = 0;
+      if (dPass && dPass[i]) mask[i] = 1;
     }
   }
   return maskOnly
@@ -7522,6 +8206,10 @@ function buildMetadata(result, withOutputs = true) {
     // engine is always "js" now (wasm removed). Kept in the metadata for
     // round-trip compatibility with older bundle readers.
     engine:               "js",
+    // Full control state (every persisted toggle/value + layer order, compute
+    // source, max-workers, language) so a bundle round-trips the WHOLE UI, not
+    // just the params/viz subset below. applyMetadataToUI applies it first.
+    config:               collectConfig(),
     elapsedMs:            result?.elapsedMs ?? null,
     dem: {
       label:        state.demLabel || null,
@@ -7734,9 +8422,12 @@ async function downloadBundle() {
     if (state.impassable) {
       zip.file("impassable.tif", new Uint8Array(writeRasterAsGeoTIFF(state.impassable, dem, "uint8")));
     }
-    // OSM bridges/tunnels as GeoJSON — re-derived into decks on reload.
-    if (state.bridges && state.bridges.length) {
-      zip.file("bridges.geojson", JSON.stringify(bridgesToFC(state.bridges), null, 2));
+    // OSM/loaded bridges/tunnels as GeoJSON — re-derived into decks on reload.
+    // EXCLUDE user-drawn portals: they round-trip via config.drawn.portals, and
+    // including them here would double-add on restore (reappend + reinstall).
+    const exportBridges = (state.bridges || []).filter((b) => !b.drawn);
+    if (exportBridges.length) {
+      zip.file("bridges.geojson", JSON.stringify(bridgesToFC(exportBridges), null, 2));
     }
     if (r.routes && r.routes.length && !graphMode) {
       zip.file("routes.geojson", JSON.stringify(routesFCFromList(r.routes, dem), null, 2));
@@ -7842,6 +8533,14 @@ function applyMetadataToUI(md, bin = {}) {
   const p = md.params || {};
   const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
   const check = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.checked = !!v; };
+
+  // Restore the FULL control state first (every persisted toggle/value + layer
+  // order, compute source, max-workers, language). The result-specific blocks
+  // below (src/dst, refPoints, energy/passes ranges, DEM-gated binaries) then
+  // refine on top. Older bundles without md.config fall through unchanged.
+  // persist:false — a bundle restores the session UI but must not overwrite the
+  // user's saved language / params / layer order / max-workers on disk.
+  if (md.config) { try { applyConfig(md.config, { persist: false }); } catch (e) { console.warn("[bundle] applyConfig failed", e); } }
 
   // ---- DEM dimension check -----------------------------------------------
   // Binary outputs (energy/passes/network) are sized to the bundle's DEM.
@@ -8117,6 +8816,7 @@ function applyMetadataToUI(md, bin = {}) {
         passesAlt,
       };
       renderResult(synth);
+      setGroupOpen("result-group", true); // bundle loaded a result → reveal it
       restored = true;
     }
   }

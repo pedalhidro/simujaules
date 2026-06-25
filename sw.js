@@ -278,7 +278,24 @@
 //              same token gates control + data planes; ephemeral IP with dynamic
 //              DNS; the VM is deleted after 30 days idle (cost → 0).
 //              No engine changes.
-const VERSION  = "v35";
+//   v35 → v36: Big UI overhaul (the former feature/ui-overhaul "v33", renumbered
+//              to land after the domain/cloud v35). Sidebar restructured into
+//              nested collapsible groups (0 Import/Export · 1 Inputs [1A-1D] ·
+//              2 Compute [2A-2C] · 3 Results [3A-3D]) with per-group status
+//              colours, auto-expand, and a draggable 1-4-column resizer; layer
+//              visibility/opacity/order + basemap (+ Esri satellite) moved to a
+//              non-blocking on-map "Controle de camadas" panel with unified
+//              per-layer rows; compute progress/log floats in a dismissable
+//              bottom pill. Full config persistence + export/import/reset
+//              (Group 0) and bundles now embed the whole UI state. On-map drawing
+//              (Leaflet-Geoman): barrier/passable-corridor polygons (1C) + portal
+//              lines (1D) feed the compute. Plus: density tweaks follow the
+//              displayed channel, passes auto-max p90-above-min, scientific-
+//              notation density bounds, desktop sidebar collapse, locate
+//              marker+accuracy circle, credit in the help modal. Adds the
+//              leaflet-geoman CDN lib (runtime-cached). JS/UI only; engine +
+//              worker + backend untouched (bit-parity preserved).
+const VERSION  = "v36";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

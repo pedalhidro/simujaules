@@ -71,10 +71,18 @@
   <meta name="apple-mobile-web-app-title" content="Simujaules" />
   <meta name="mobile-web-app-capable" content="yes" />
   <link
-    rel="stylesheet" 
+    rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
+  />
+  <!-- Leaflet-Geoman Free — on-map drawing of impassable/passable polygons (1C)
+       and portal lines (1D). SRI + crossorigin so sw.js can runtime-cache it. -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.18.3/dist/leaflet-geoman.css"
+    integrity="sha384-gSVA7ZQriVGEfOMW54uY96acRPyZy0cleKq9KVWNxYYR+GWzYmr/o51k9iA5pfQA"
+    crossorigin="anonymous"
   />
   <style>
     :root {
@@ -90,7 +98,7 @@
     html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
     /* Use 100dvh (dynamic viewport) where supported so the layout doesn't
        jump under the iOS Safari URL bar. Falls back to 100vh elsewhere. */
-    #app { display: grid; grid-template-columns: 320px 1fr; height: 100vh; height: 100dvh; }
+    #app { display: grid; grid-template-columns: calc(var(--sidebar-cols, 1) * 320px) 1fr; height: 100vh; height: 100dvh; }
     #panel {
       background: var(--panel);
       border-right: 1px solid var(--border);
@@ -99,6 +107,18 @@
       /* iOS momentum scrolling — without this the panel feels stuck on touch. */
       -webkit-overflow-scrolling: touch;
     }
+    /* Multi-column sidebar (desktop/landscape): the groups flow into N fixed-
+       width (320px) columns; the right-border resizer snaps N between 1 and 4
+       (discrete — column width is fixed, only the count changes). */
+    .panel-cols { column-count: var(--sidebar-cols, 1); column-gap: 14px; }
+    .panel-cols > * { break-inside: avoid; }
+    #sidebar-resizer {
+      position: fixed; top: 0; bottom: 0;
+      left: calc(var(--sidebar-cols, 1) * 320px - 3px);
+      width: 6px; cursor: col-resize; z-index: 905;
+      background: transparent; transition: background 0.12s ease;
+    }
+    #sidebar-resizer:hover, #sidebar-resizer.dragging { background: var(--accent-2); opacity: 0.45; }
     #map { height: 100vh; height: 100dvh; }
 
     /* ---- Mobile drawer ----------------------------------------------------
@@ -111,7 +131,7 @@
        The panel itself is repositioned with `position: fixed` and animated
        on transform — cheap on the GPU, no layout reflow. */
     .drawer-toggle {
-      display: none; /* desktop hides it */
+      display: flex; /* shown on desktop (collapse) + mobile (drawer) */
       position: fixed;
       top: 8px;
       left: 8px;
@@ -173,6 +193,18 @@
     }
     .locate-button:hover { color: var(--accent-2); border-color: var(--accent-2); }
     .locate-button:disabled { opacity: 0.5; cursor: progress; }
+    /* On-map layer-control button — sits just below the locate button. */
+    .layer-ctrl-button {
+      position: fixed; top: 56px; right: 8px; z-index: 950; pointer-events: auto;
+      width: 40px; height: 40px; padding: 0; display: flex; align-items: center;
+      justify-content: center; background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3); cursor: pointer; font-size: 18px;
+    }
+    .layer-ctrl-button:hover { color: var(--accent-2); border-color: var(--accent-2); }
+    /* Active (modal open): clearly highlight the toggle(s). */
+    .layer-ctrl-button.active { color: #0d0f12; background: var(--accent-2); border-color: var(--accent-2); }
+    #layer-ctrl-open.active { color: var(--accent-2); border-color: var(--accent-2); box-shadow: inset 0 0 0 1px var(--accent-2); }
     /* SVG and its children must not intercept clicks — without this,
        Safari/iOS sometimes routes the click to the inner <circle> or
        <line> instead of bubbling up to the <button>. */
@@ -184,6 +216,9 @@
          remaining child (#map) would auto-place into column 1 (0 px wide)
          and render as a black void. One column → map fills the only cell. */
       #app { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+      /* Drawer mode: force a single column and hide the resizer. */
+      .panel-cols { column-count: 1; }
+      #sidebar-resizer { display: none; }
       #panel {
         position: fixed;
         top: 0; left: 0;
@@ -268,6 +303,38 @@
        (see syncLoadedHighlights). Style-only — never affects compute. */
     .group.loaded { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
     .group h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 5px 0; font-weight: 500; }
+    /* Title row: app name + lang/help actions on one line. */
+    /* padding-left clears the fixed top-left hamburger (collapse) toggle. */
+    .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; padding-left: 40px; }
+    .panel-header h1 { margin: 0; }
+    /* Desktop sidebar collapse: hamburger toggles #app.panel-collapsed. */
+    #app.panel-collapsed { grid-template-columns: 0 1fr; }
+    #app.panel-collapsed > #panel { display: none; }
+    #app.panel-collapsed #sidebar-resizer { display: none; }
+    /* Collapsible groups (native <details>). The <summary> replaces the old
+       <h2> and carries a rotating caret + the status colour bar. */
+    details.group > summary {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+      color: var(--muted); font-weight: 500; cursor: pointer; list-style: none;
+      display: flex; align-items: center; gap: 6px; user-select: none; margin: 0;
+    }
+    details.group > summary::-webkit-details-marker { display: none; }
+    details.group > summary::before { content: "▸"; font-size: 9px; transition: transform 0.15s ease; opacity: 0.7; }
+    details.group[open] > summary::before { transform: rotate(90deg); }
+    details.group[open] > summary { margin-bottom: 6px; }
+    /* Parent group-of-groups: a thin section wrapper holding child groups. */
+    details.group-parent { border: none; padding: 0; margin-bottom: 8px; }
+    details.group-parent > summary { font-size: 12px; color: var(--text); font-weight: 600; padding: 4px 2px; }
+    details.group-parent[open] > summary { margin-bottom: 6px; }
+    details.group-parent > .group { margin-left: 8px; }
+    /* Per-group status accents (style-only; set from JS). Left bar + summary tint. */
+    .group.st-green,  .group-parent.st-green  { border-color: #3fb56a; box-shadow: inset 3px 0 0 #3fb56a; }
+    .group.st-orange, .group-parent.st-orange { border-color: #e08a2e; box-shadow: inset 3px 0 0 #e08a2e; }
+    .group.st-yellow, .group-parent.st-yellow { border-color: #d6c12e; box-shadow: inset 3px 0 0 #d6c12e; }
+    .group.st-red,    .group-parent.st-red    { border-color: #d6493e; box-shadow: inset 3px 0 0 #d6493e; }
+    /* group-parent has no padding, so pad the status bar away from the text. */
+    .group-parent.st-green, .group-parent.st-orange,
+    .group-parent.st-yellow, .group-parent.st-red { padding-left: 7px; }
     /* Keyboard focus ring. There was none before — custom-styled controls on
        the near-black theme relied on the faint UA outline. accent-2 (#4cc9f0)
        reads ~8.8:1 on the panel. :focus-visible keeps it off mouse clicks. */
@@ -323,6 +390,27 @@
     }
     .point-display.set { color: var(--accent-2); }
     #status { font-size: 11px; color: var(--muted); margin-top: 5px; min-height: 1.3em; }
+    /* Floating compute-feedback pill (progress + status) over the map. */
+    #status-float {
+      position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+      z-index: 906; max-width: min(620px, 92vw); width: max-content; min-width: 160px;
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45); padding: 7px 8px 7px 14px;
+      display: flex; align-items: center; gap: 8px;
+      pointer-events: none; opacity: 0; visibility: hidden; transition: opacity 0.15s ease;
+    }
+    #status-float.show { opacity: 1; visibility: visible; }
+    #status-float .sf-body { flex: 1 1 auto; min-width: 0; text-align: center; }
+    #status-float #status { margin: 0; min-height: 0; color: var(--text); }
+    #status-float .progress { margin: 0 0 5px; }
+    .status-float-close {
+      flex: none; pointer-events: auto; width: 18px; height: 18px; padding: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: transparent; border: none; color: var(--muted);
+      font-size: 14px; line-height: 1; cursor: pointer; border-radius: 4px;
+    }
+    .status-float-close:hover { color: var(--text); background: var(--border); }
     .legend { margin-top: 5px; }
     .swatch {
       display: block;
@@ -490,6 +578,19 @@
       padding: 24px;
     }
     .modal-backdrop.active { display: flex; }
+    /* The layer-control modal is a NON-BLOCKING floating panel anchored top-
+       right (dropdown from the on-map layer button): the map and sidebar stay
+       interactive while it's open. pointer-events:none on the container (auto
+       on the panel) lets clicks pass through everywhere except the panel. */
+    #layer-order-modal {
+      inset: auto; top: 104px; right: 8px; left: auto; bottom: auto;
+      background: transparent; padding: 0; display: none; pointer-events: none;
+    }
+    #layer-order-modal.active { display: block; }
+    #layer-order-modal > .modal {
+      pointer-events: auto; width: min(320px, calc(100vw - 16px));
+      max-height: calc(100vh - 116px); padding: 14px 16px; margin: 0;
+    }
     .modal {
       background: var(--panel);
       border: 1px solid var(--border);
@@ -589,9 +690,25 @@
     </svg>
   </button>
 
+  <!-- On-map layer-control button (opens the #layer-order-modal). -->
+  <button type="button" class="layer-ctrl-button" id="layer-ctrl-btn"
+          data-i18n-title="layer.ctrl_open" title="Layer control" aria-label="Layer control">
+    <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M10 2 18 6 10 10 2 6 Z"/>
+      <path d="M2 10 10 14 18 10"/>
+      <path d="M2 14 10 18 18 14"/>
+    </svg>
+  </button>
+
   <div id="app">
     <aside id="panel">
-      <h1 data-i18n="title">Simulador bici-geo-energético</h1>
+      <div class="panel-header">
+        <h1 data-i18n="title">Simulador bici-geo-energético</h1>
+        <div class="header-actions">
+          <button type="button" class="engine-tag" id="lang-tag" data-i18n-title="lang.toggle.title" title="Language — click to switch">EN</button>
+          <button type="button" class="help-button" id="help-btn" aria-label="Help" data-i18n-title="help.title" title="How it works">?</button>
+        </div>
+      </div>
       <noscript>
         <p>Simulador de campos de energia para ciclismo sobre modelos digitais
         de elevação (DEM). Calcula campos de custo assimétrico subida/descida
@@ -603,13 +720,28 @@
         JavaScript. See <a href="./llms.txt">llms.txt</a> for a full
         machine-readable description.</p>
       </noscript>
-      <div class="header-actions">
-        <button type="button" class="engine-tag" id="lang-tag" data-i18n-title="lang.toggle.title" title="Language — click to switch">EN</button>
-        <button type="button" class="help-button" id="help-btn" aria-label="Help" data-i18n-title="help.title" title="How it works">?</button>
-      </div>
 
-      <div class="group" id="load-dem-group">
-        <h2 data-i18n="group.load_dem">1. Load DEM</h2>
+      <div class="panel-cols">
+      <details class="group" id="io-group">
+        <summary data-i18n="group.io">0. Importar / Exportar dados</summary>
+        <div class="hint" data-i18n="bundle.reload_hint" style="margin-bottom: 3px;">Reload a saved bundle (.zip) or .jsonld:</div>
+        <input type="file" id="bundle-file" accept=".zip,.jsonld,.json" />
+        <button type="button" id="download-bundle" data-i18n="btn.download_bundle" style="margin-top: 5px;">Download bundle (.zip)</button>
+        <button type="button" class="secondary" id="export-rendered" data-i18n="btn.export_rendered" style="margin-top: 4px;">Export rendered images (.zip)</button>
+        <div class="hint" data-i18n="config.hint" style="margin-top: 8px;">Settings (all toggles &amp; values):</div>
+        <div class="row" style="margin-top: 3px;">
+          <button type="button" class="secondary" id="config-export" data-i18n="config.export">Export config</button>
+          <button type="button" class="secondary" id="config-import-btn" data-i18n="config.import">Import config</button>
+        </div>
+        <input type="file" id="config-file" accept=".json,.jsonld" style="display: none;" />
+        <button type="button" class="secondary" id="config-reset" data-i18n="config.reset" style="margin-top: 4px;">Reset to defaults</button>
+      </details>
+
+      <details class="group-parent" id="group-1" open>
+        <summary data-i18n="group.inputs">1. Dados de entrada</summary>
+
+      <details class="group" id="load-dem-group" open>
+        <summary data-i18n="group.load_dem">1A. Carregar DEM</summary>
         <input type="file" id="dem-file" accept=".tif,.tiff" />
         <div class="examples">
           <div class="hint" data-i18n="examples.heading" style="margin-bottom: 4px;">or download (locally) an example:</div>
@@ -627,14 +759,10 @@
           </button>
         </div>
         <div class="meta" id="dem-meta" data-i18n="dem.no_dem">No DEM loaded.</div>
-        <div class="hint" data-i18n="bundle.reload_hint" style="margin-top: 6px;">
-          Reload a saved bundle (.zip) or .jsonld:
-        </div>
-        <input type="file" id="bundle-file" accept=".zip,.jsonld,.json" style="margin-top: 3px;" />
-      </div>
+      </details>
 
-      <div class="group" id="network-group">
-        <h2 data-i18n="group.network">1b. Optional vector network (.gpkg)</h2>
+      <details class="group" id="network-group">
+        <summary data-i18n="group.network">1B. Rede vetorial opcional (.gpkg)</summary>
         <input type="file" id="vector-file" accept=".gpkg" />
         <button type="button" class="secondary" id="vec-osm" data-i18n="net.osm" style="margin-top: 4px;">Pull streets from OSM (highway=*)</button>
         <div class="row" style="margin-top: 5px;">
@@ -698,10 +826,10 @@
           </div>
         </div>
         <div class="meta" id="vec-meta" data-i18n="net.no_network">No network loaded.</div>
-      </div>
+      </details>
 
-      <div class="group" id="impassable-group">
-        <h2 data-i18n="group.impassable">1c. Optional impassable mask (water, GeoTIFF)</h2>
+      <details class="group" id="impassable-group">
+        <summary data-i18n="group.impassable">1C. Máscara de barreira opcional (água)</summary>
         <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 11px; color: var(--text);">
           <input type="checkbox" id="imp-enabled" checked />
           <span data-i18n="imp.enabled">Apply to compute</span>
@@ -717,6 +845,13 @@
           <span data-i18n="imp.invert">Invert (raster marks passable cells)</span>
         </label>
         <button type="button" class="secondary" id="impassable-clear" data-i18n="imp.clear" style="margin-top: 4px;">Clear mask</button>
+        <!-- On-map drawing: barrier polygons (block) + passable corridors (open). -->
+        <div class="row" style="margin-top: 4px;">
+          <button type="button" class="secondary" id="draw-barrier" data-i18n="draw.barrier">Draw barrier</button>
+          <button type="button" class="secondary" id="draw-corridor" data-i18n="draw.corridor">Draw corridor</button>
+        </div>
+        <button type="button" class="secondary" id="draw-impassable-clear" data-i18n="draw.erase" style="margin-top: 4px;">Erase drawings</button>
+        <div class="meta" id="draw-impassable-meta" style="margin-top: 2px;"></div>
         <label id="imp-corridor-row" style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text); opacity: 0.55;">
           <input type="checkbox" id="imp-corridor" disabled />
           <span data-i18n="imp.corridor">Network carves passable corridors across the mask</span>
@@ -738,10 +873,10 @@
           </div>
         </div>
         <div class="meta" id="imp-meta" data-i18n="imp.none">No impassable mask loaded.</div>
-      </div>
+      </details>
 
-      <div class="group" id="bridges-group">
-        <h2 data-i18n="group.bridges">1d. Optional bridges &amp; tunnels (OSM)</h2>
+      <details class="group" id="bridges-group">
+        <summary data-i18n="group.bridges">1D. Pontes e túneis opcionais (OSM)</summary>
         <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 11px; color: var(--text);">
           <input type="checkbox" id="bridge-enabled" checked />
           <span data-i18n="bridge.enabled">Apply to compute</span>
@@ -753,6 +888,12 @@
           <span data-i18n="bridge.tunnels">Include tunnels (tunnel=yes)</span>
         </label>
         <button type="button" class="secondary" id="bridge-clear" data-i18n="bridge.clear" style="margin-top: 4px;">Clear bridges</button>
+        <!-- On-map drawing: portal lines (a shortcut between the two endpoints). -->
+        <div class="row" style="margin-top: 4px;">
+          <button type="button" class="secondary" id="draw-portal" data-i18n="draw.portal">Draw portal</button>
+          <button type="button" class="secondary" id="draw-portal-clear" data-i18n="draw.erase">Erase drawings</button>
+        </div>
+        <div class="meta" id="draw-portal-meta" style="margin-top: 2px;"></div>
         <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
           <input type="checkbox" id="bridge-show" checked />
           <span data-i18n="bridge.show">Show decks on map</span>
@@ -764,32 +905,14 @@
           </div>
         </div>
         <div class="meta" id="bridge-meta" data-i18n="bridge.none">No bridges loaded.</div>
-      </div>
+      </details>
+      </details>
 
-      <div class="group" id="pick-points-group">
-        <h2 data-i18n="group.pick_points">2. Pick points</h2>
-        <!-- src/dst picking. Faded out in density mode (references replace the
-             single src/dst there). Wrapped so the fade targets only this
-             block — the reference-action buttons below stay usable. -->
-        <div id="pick-points-srcdst">
-          <div class="point-row-inline">
-            <span class="point-cell"><span class="point-label">src</span><span class="point-display" id="src-display" data-i18n="pts.click_map">— click map —</span></span>
-            <span class="point-cell"><span class="point-label">dst</span><span class="point-display" id="dst-display" data-i18n="pts.optional">— optional —</span></span>
-          </div>
-          <button class="secondary" id="clear-points" data-i18n="pts.clear" style="margin-top: 5px;">Clear points</button>
-        </div>
-        <!-- Reference-point actions (density mode only). Moved up from the
-             density panel so the three point/reference buttons cluster
-             together with "Clear points" on top. Shown/hidden by the density
-             toggle's sync(). -->
-        <div class="row" id="ref-actions-row" style="display: none; margin-top: 5px;">
-          <button type="button" class="secondary" id="ref-place-random" data-i18n="ref.place_random">Place random</button>
-          <button type="button" class="secondary" id="ref-clear" data-i18n="ref.clear">Clear refs</button>
-        </div>
-      </div>
+      <details class="group-parent" id="group-3">
+        <summary data-i18n="group.compute">2. Configuração do cálculo</summary>
 
-      <div class="group">
-        <h2 data-i18n="group.parameters">3. Parameters</h2>
+      <details class="group" id="params-group">
+        <summary data-i18n="group.parameters">2A. Parâmetros</summary>
         <label data-i18n="param.mode">Mode</label>
         <select id="mode">
           <option value="from"  data-i18n="mode.from">From source</option>
@@ -843,37 +966,6 @@
           <label data-i18n="param.max_length">Path length L (edges, 0 = unconstrained)</label>
           <input type="number" id="maximize-length" value="0" min="0" max="5000" step="1" />
         </div>
-        <div id="density-extra" style="display: none;">
-          <div class="row">
-            <div>
-              <label data-i18n="param.n_refs">N references</label>
-              <input type="number" id="n-refs" value="10" min="1" max="2000" step="1" />
-            </div>
-            <div>
-              <label data-i18n="param.ref_source">Reference source</label>
-              <select id="ref-source">
-                <option value="click"  data-i18n="ref.click">click on map</option>
-                <option value="random" data-i18n="ref.random">random</option>
-              </select>
-            </div>
-          </div>
-          <label data-i18n="param.sampling" style="margin-top: 4px;">Sampling strategy</label>
-          <select id="ref-sampling">
-            <option value="random" data-i18n="sampling.random">pseudo-random</option>
-            <option value="sobol"  data-i18n="sampling.sobol">Sobol (quasi-random)</option>
-            <option value="halton" data-i18n="sampling.halton">Halton (quasi-random)</option>
-            <option value="census" data-i18n="sampling.census">IBGE 2022 census (population density)</option>
-          </select>
-          <div class="hint" id="ref-display" data-i18n="ref.none" style="margin-top: 3px;">no references placed</div>
-          <label style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
-            <input type="checkbox" id="refs-visible" checked />
-            <span data-i18n="ref.show_markers">Show reference markers</span>
-          </label>
-          <label data-i18n="ref.load_file" style="margin-top: 6px;">Load reference points (GeoJSON)</label>
-          <input type="file" id="ref-file" accept=".geojson,.json" />
-          <label data-i18n="param.max_workers" style="margin-top: 6px;">Max compute workers (0 = auto)</label>
-          <input type="number" id="max-workers" value="0" min="0" max="64" step="1" />
-        </div>
         <div id="topn-extra" style="display: none;">
           <div class="row">
             <div>
@@ -894,13 +986,54 @@
           <label data-i18n="param.routes_cmap">Routes colormap</label>
           <select id="routes-colormap"></select>
         </div>
+      </details>
 
-        <!-- Compute source (a general compute-engine option, not density-
-             specific — it accelerates multi-reference density AND single-source
-             energy fields). Three-way: Browser (in-page worker pool, default),
-             Localhost (native Rust backend), Cloud (a local orchestrator that
-             boots a pre-baked VM). Cloud is only offered when the applet is
-             served locally (the orchestrator listens on loopback). -->
+      <details class="group" id="pick-points-group">
+        <summary data-i18n="group.pick_points">2B. Pontos e referências</summary>
+        <div id="pick-points-srcdst">
+          <div class="point-row-inline">
+            <span class="point-cell"><span class="point-label">src</span><span class="point-display" id="src-display" data-i18n="pts.click_map">— click map —</span></span>
+            <span class="point-cell"><span class="point-label">dst</span><span class="point-display" id="dst-display" data-i18n="pts.optional">— optional —</span></span>
+          </div>
+          <button class="secondary" id="clear-points" data-i18n="pts.clear" style="margin-top: 5px;">Clear points</button>
+        </div>
+        <div class="row" id="ref-actions-row" style="display: none; margin-top: 5px;">
+          <button type="button" class="secondary" id="ref-place-random" data-i18n="ref.place_random">Place random</button>
+          <button type="button" class="secondary" id="ref-clear" data-i18n="ref.clear">Clear refs</button>
+        </div>
+        <div id="density-extra" style="display: none;">
+          <div class="row">
+            <div>
+              <label data-i18n="param.n_refs">N references</label>
+              <input type="number" id="n-refs" value="10" min="1" max="2000" step="1" />
+            </div>
+            <div>
+              <label data-i18n="param.ref_source">Reference source</label>
+              <select id="ref-source">
+                <option value="click"  data-i18n="ref.click">click on map</option>
+                <option value="random" data-i18n="ref.random">random</option>
+              </select>
+            </div>
+          </div>
+          <label data-i18n="param.sampling" style="margin-top: 4px;">Sampling strategy</label>
+          <select id="ref-sampling">
+            <option value="census" data-i18n="sampling.census" selected>IBGE 2022 census (population density)</option>
+            <option value="sobol"  data-i18n="sampling.sobol">Sobol (quasi-random)</option>
+            <option value="random" data-i18n="sampling.uniform">uniform (pseudo-random)</option>
+          </select>
+          <div class="hint" id="ref-display" data-i18n="ref.none" style="margin-top: 3px;">no references placed</div>
+          <label data-i18n="ref.load_file" style="margin-top: 6px;">Load reference points (GeoJSON)</label>
+          <input type="file" id="ref-file" accept=".geojson,.json" />
+          <button type="button" class="secondary" id="ref-export" data-i18n="btn.export_refs" style="margin-top: 4px;">Export references (GeoJSON)</button>
+        </div>
+      </details>
+
+      <details class="group" id="execution-group">
+        <summary data-i18n="group.execution">2C. Execução</summary>
+        <label data-i18n="param.max_workers">Max compute workers (0 = auto)</label>
+        <input type="number" id="max-workers" value="0" min="0" max="64" step="1" />
+        <!-- Compute source: Browser (default), Localhost (native Rust),
+             Cloud (local orchestrator boots a VM; offered only when served locally). -->
         <label id="compute-source-label" data-i18n="param.compute_source" style="margin-top: 8px;">Compute source</label>
         <div id="compute-source" role="radiogroup" aria-labelledby="compute-source-label">
           <label style="display: flex; align-items: center; gap: 6px;">
@@ -932,166 +1065,105 @@
           <div id="cloud-vm-status" style="font-size: 10px; color: var(--muted); margin-top: 3px;"></div>
           <div id="cloud-transfer" style="font-size: 10px; color: var(--muted); margin-top: 3px;"></div>
         </div>
-
-        <label data-i18n="param.field_cmap">Field colormap</label>
-        <select id="colormap"></select>
-      </div>
+      </details>
+      </details>
 
       <button id="run" data-i18n="btn.compute" disabled>Compute</button>
       <div id="time-estimate" style="font-size: 10px; color: var(--muted); margin-top: 3px; text-align: center;"></div>
-      <div class="progress" id="progress"><div class="bar"></div></div>
-      <!-- Primary feedback channel (load / compute / done / errors / point
-           picking). role=status + aria-live=polite so assistive tech
-           announces each update; aria-atomic re-reads the whole line. -->
-      <div id="status" role="status" aria-live="polite" aria-atomic="true"></div>
 
-      <div class="group" style="margin-top: 8px;">
-        <h2 data-i18n="group.result">Result</h2>
-        <button type="button" id="refresh-style" class="secondary" data-i18n="btn.refresh_style" style="margin-bottom: 5px;">Refresh style</button>
-        <div class="meta" id="result-meta" data-i18n="result.empty">—</div>
-        <div class="legend">
-          <div class="swatch"></div>
-          <div class="legend-ticks">
-            <span class="v" id="legend-lo">0</span>
-            <span class="v" id="legend-mid">—</span>
-            <span class="v" id="legend-hi">—</span>
-          </div>
-        </div>
+      <details class="group-parent" id="result-group" style="margin-top: 8px;">
+        <summary data-i18n="group.result">3. Resultados</summary>
 
-        <!-- Basemap selector: OSM, minimalist Carto styles, or a solid
-             colour with no tiles at all. -->
-        <div class="layer-block">
-          <label data-i18n="layer.basemap">Basemap</label>
-          <select id="basemap-select">
-            <option value="osm"         data-i18n="basemap.osm">OSM (default)</option>
-            <option value="carto-dark"  data-i18n="basemap.dark">OSM minimalist black</option>
-            <option value="carto-light" data-i18n="basemap.light">OSM minimalist white</option>
-            <option value="none-black"  data-i18n="basemap.black">no basemap (all black)</option>
-            <option value="none-white"  data-i18n="basemap.white">no basemap (all white)</option>
-            <option value="none-gray"   data-i18n="basemap.gray">no basemap (all gray)</option>
-          </select>
-          <button type="button" class="secondary" id="layer-order-btn" data-i18n="order.open" style="margin-top: 5px;">Layer stacking order…</button>
-        </div>
+        <!-- 3A. Statistics -->
+        <details class="group" id="result-stats-group" open>
+          <summary data-i18n="group.result_stats">3A. Estatísticas</summary>
+          <div class="meta" id="result-meta" data-i18n="result.empty">—</div>
+        </details>
 
-        <!-- rmsampa-v2 tilemap (XYZ tiles from telhas.pedalhidrografi.co) -->
-        <div class="layer-block">
-          <div class="layer-head">
-            <label class="layer-toggle">
-              <input type="checkbox" id="tile-visible" checked />
-              <span data-i18n="layer.tiles">rmsampa-v2 tiles</span>
-            </label>
-            <input type="range" id="tile-opacity" min="0" max="1" step="0.05" value="0.85" data-i18n-aria="aria.opacity_tiles" />
-          </div>
-        </div>
-
-        <!-- DEM relief (cmo.phase elevation + B/W slope, fixed style).
-             Hidden until a DEM is loaded; loadDemFromArrayBuffer flips
-             the display and renders the PNG. -->
-        <div class="layer-block" id="relief-row" style="display: none;">
-          <div class="layer-head">
-            <label class="layer-toggle">
-              <input type="checkbox" id="relief-visible" />
-              <span data-i18n="layer.relief">Relief (DEM)</span>
-            </label>
-            <input type="range" id="relief-opacity" min="0" max="1" step="0.05" value="0.85" data-i18n-aria="aria.opacity_relief" />
-          </div>
-        </div>
-
-        <!-- Energy layer controls -->
-        <div class="layer-block">
-          <div class="layer-head">
-            <label class="layer-toggle">
-              <input type="checkbox" id="energy-visible" checked />
-              <span data-i18n="layer.energy">Energy</span>
-            </label>
-            <input type="range" id="energy-opacity" min="0" max="1" step="0.05" value="0.85" data-i18n-aria="aria.opacity_energy" />
-          </div>
-          <!-- Shown only when a compare run produced both scenarios. -->
-          <div id="energy-source-row" style="display: none;">
-            <label data-i18n="layer.energy_source">Displayed scenario (energy & passes)</label>
-            <select id="energy-source">
-              <option value="constrained"   data-i18n="esrc.constrained">network-constrained</option>
-              <option value="unconstrained" data-i18n="esrc.unconstrained">unconstrained</option>
-              <option value="difference"    data-i18n="esrc.difference">difference (network cost; passes overlaid)</option>
-            </select>
-          </div>
-          <div class="row">
-            <div>
-              <label data-i18n="vmin.label">min (auto = p1)</label>
-              <input type="number" id="vmin" placeholder="auto" step="any" />
-            </div>
-            <div>
-              <label data-i18n="vmax.label">max (auto = p80)</label>
-              <input type="number" id="vmax" placeholder="auto" step="any" />
-            </div>
-          </div>
-        </div>
-
-        <!-- Passes layer controls (overlaid above energy) -->
-        <div class="layer-block" id="passes-row" style="display: none;">
-          <div class="layer-head">
-            <label class="layer-toggle">
-              <input type="checkbox" id="passes-visible" checked />
-              <span data-i18n="layer.passes">Passes (overlay)</span>
-            </label>
-            <input type="range" id="passes-opacity" min="0" max="1" step="0.05" value="0.7" data-i18n-aria="aria.opacity_passes" />
-          </div>
-          <!-- Shown only in the "difference" view: labels the A (orange =
-               constrained/network) channel that the controls below drive. -->
-          <div id="passes-net-label" style="display:none; align-items:center; gap:5px; font-size:11px; font-weight:600; margin:4px 0 2px;">
-            <span style="width:11px;height:11px;border-radius:2px;background:#ffa53c;display:inline-block;"></span>
-            <span data-i18n="passes.chan_net">Rede (com restrição)</span>
-          </div>
-          <div class="row">
-            <div>
-              <label data-i18n="vmin.passes">min (auto = p10)</label>
-              <input type="number" id="passes-vmin" placeholder="p10" step="any" />
-            </div>
-            <div>
-              <label data-i18n="vmax.passes">max (auto = p90)</label>
-              <input type="number" id="passes-vmax" placeholder="p90" step="any" />
-            </div>
-          </div>
-          <div class="row">
-            <div>
-              <label data-i18n="passes.gamma">γ gamma (1 = no change)</label>
-              <input type="number" id="passes-gamma" value="1" min="0.01" step="0.05" />
-            </div>
-            <div>
-              <label data-i18n="passes.mean_window">mean filter N</label>
-              <input type="number" id="passes-mean-window" value="5" min="1" max="200" step="1" />
-            </div>
-          </div>
-          <!-- Green-channel overrides for the dual (difference) passes view.
-               Shown only while the scenario selector is on "difference"; the
-               controls above drive the red (constrained) channel. Blank =
-               inherit the red channel's resolved value. -->
-          <div id="passes-dual-row" style="display: none;">
-            <div style="display:flex; align-items:center; gap:5px; font-size:11px; font-weight:600; margin:4px 0 2px;">
-              <span style="width:11px;height:11px;border-radius:2px;background:#005ac3;display:inline-block;"></span>
-              <span data-i18n="passes.chan_terrain">Terreno (livre)</span>
+        <!-- 3B. Energy field (min/max here are the ENERGY field bounds). -->
+        <details class="group" id="result-energy-group" open>
+          <summary data-i18n="group.result_energy">3B. Campo de energia</summary>
+          <label data-i18n="param.field_cmap">Field colormap</label>
+          <select id="colormap"></select>
+          <div class="layer-block">
+            <!-- Shown only when a compare run produced both scenarios. -->
+            <div id="energy-source-row" style="display: none;">
+              <label data-i18n="layer.energy_source">Displayed scenario (energy &amp; passes)</label>
+              <select id="energy-source">
+                <option value="constrained"   data-i18n="esrc.constrained">network-constrained</option>
+                <option value="unconstrained" data-i18n="esrc.unconstrained">unconstrained</option>
+                <option value="difference"    data-i18n="esrc.difference">difference (network cost; passes overlaid)</option>
+              </select>
             </div>
             <div class="row">
               <div>
-                <label>min</label>
-                <input type="number" id="passes-vmin-b" placeholder="=" step="any" />
+                <label data-i18n="vmin.label">min (auto = p1)</label>
+                <input type="number" id="vmin" placeholder="auto" step="any" />
               </div>
               <div>
-                <label>max</label>
-                <input type="number" id="passes-vmax-b" placeholder="=" step="any" />
-              </div>
-            </div>
-            <div class="row">
-              <div>
-                <label>γ</label>
-                <input type="number" id="passes-gamma-b" placeholder="=" min="0.01" step="0.05" />
-              </div>
-              <div>
-                <label>N</label>
-                <input type="number" id="passes-mean-window-b" placeholder="=" min="1" max="200" step="1" />
+                <label data-i18n="vmax.label">max (auto = p80)</label>
+                <input type="number" id="vmax" placeholder="auto" step="any" />
               </div>
             </div>
           </div>
+        </details>
+
+        <!-- 3C. Trajectory density (min/max here are the PASSES density bounds).
+             Shown only once a run produced passes (JS toggles #passes-row). -->
+        <details class="group" id="passes-row" open style="display: none;">
+          <summary data-i18n="group.result_density">3C. Densidade de trajetos</summary>
+
+          <!-- 3C.a. Density on the vector NETWORK. Holds the PRIMARY tweaks
+               (#passes-primary) whenever the displayed channel is the network
+               (constrained / difference). For a terrain-only run rerenderCachedResult
+               moves #passes-primary into 3C.b instead and hides this group. -->
+          <details class="group" id="result-density-net-group" open>
+            <summary data-i18n="group.result_density_net">3C.a. Densidade de trajetos na rede vetorial</summary>
+            <div id="density-net-body">
+              <div id="passes-primary">
+                <div class="row">
+                  <div>
+                    <label data-i18n="vmin.passes">min (auto = p10)</label>
+                    <input type="number" id="passes-vmin" placeholder="p10" step="any" />
+                  </div>
+                  <div>
+                    <label data-i18n="vmax.passes">max (auto = p90)</label>
+                    <input type="number" id="passes-vmax" placeholder="p90" step="any" />
+                  </div>
+                </div>
+                <div class="row">
+                  <div>
+                    <label data-i18n="passes.gamma">γ gamma (1 = no change)</label>
+                    <input type="number" id="passes-gamma" value="1" min="0.01" step="0.05" />
+                  </div>
+                  <div>
+                    <label data-i18n="passes.mean_window">mean filter N</label>
+                    <input type="number" id="passes-mean-window" value="5" min="1" max="200" step="1" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <!-- 3C.b. Density on the TERRAIN. Hosts #passes-primary for a
+               terrain-only run; in the difference view it instead shows the
+               green B-channel overrides (#passes-dual-row, blank = inherit A). -->
+          <details class="group" id="result-density-terrain-group" open style="display: none;">
+            <summary data-i18n="group.result_density_terrain">3C.b. Densidade de trajetos no terreno</summary>
+            <div id="density-terrain-body">
+              <div id="passes-dual-row" style="display: none;">
+                <div class="row">
+                  <div><label>min</label><input type="number" id="passes-vmin-b" placeholder="=" step="any" /></div>
+                  <div><label>max</label><input type="number" id="passes-vmax-b" placeholder="=" step="any" /></div>
+                </div>
+                <div class="row">
+                  <div><label>γ</label><input type="number" id="passes-gamma-b" placeholder="=" min="0.01" step="0.05" /></div>
+                  <div><label>N</label><input type="number" id="passes-mean-window-b" placeholder="=" min="1" max="200" step="1" /></div>
+                </div>
+              </div>
+            </div>
+          </details>
+
           <label data-i18n="passes.blend">Blend</label>
           <select id="passes-blend">
             <option value="plus-lighter" data-i18n="blend.add">add (plus-lighter)</option>
@@ -1101,22 +1173,51 @@
             <option value="overlay"      data-i18n="blend.overlay">overlay</option>
             <option value="energy"       data-i18n="blend.energy">energy color (passes = opacity)</option>
           </select>
-        </div>
+        </details>
 
+        <!-- 3D. Legend -->
+        <details class="group" id="result-legend-group" open>
+          <summary data-i18n="group.result_legend">3D. Legenda</summary>
+          <div class="legend" style="margin-top: 4px;">
+            <div class="swatch"></div>
+            <div class="legend-ticks">
+              <span class="v" id="legend-lo">0</span>
+              <span class="v" id="legend-mid">—</span>
+              <span class="v" id="legend-hi">—</span>
+            </div>
+          </div>
+        </details>
+
+        <button type="button" id="refresh-style" class="secondary" data-i18n="btn.refresh_style" style="margin-top: 6px;">Refresh style</button>
         <button class="secondary" id="range-reset" data-i18n="btn.range_reset" style="margin-top: 4px;">Reset ranges to auto</button>
-        <button type="button" id="download-bundle" data-i18n="btn.download_bundle" style="margin-top: 4px;">Download bundle (.zip)</button>
-        <button type="button" class="secondary" id="export-rendered" data-i18n="btn.export_rendered" style="margin-top: 4px;">Export rendered images (.zip)</button>
-      </div>
+      </details>
 
-      <div class="credit" data-i18n="credit">feito por Claúdio e dirigido pelos neogeógrafos geomorfológicos</div>
+      </div><!-- /.panel-cols -->
     </aside>
+    <div id="sidebar-resizer" data-i18n-title="resizer.title" title="Drag to set 1–4 columns" aria-hidden="true"></div>
     <div id="map"></div>
+    <!-- Floating compute feedback (progress bar + status/log) over the map, so
+         it stays visible regardless of the sidebar column layout / collapse.
+         Shown only while there's a message or active progress (see inline JS). -->
+    <div id="status-float" aria-hidden="true">
+      <div class="sf-body">
+        <div class="progress" id="progress"><div class="bar"></div></div>
+        <div id="status" role="status" aria-live="polite" aria-atomic="true"></div>
+      </div>
+      <button type="button" id="status-float-close" class="status-float-close" aria-label="Close" data-i18n-title="status.dismiss" title="Dismiss">×</button>
+    </div>
   </div>
 
   <script
     src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
+  ></script>
+  <!-- Leaflet-Geoman Free (loaded after Leaflet; it augments L.Map with .pm). -->
+  <script
+    src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.18.3/dist/leaflet-geoman.min.js"
+    integrity="sha384-poTDWI/tmUEt0KLQICK55no+TBavCdngfb6kTay+hdEmU0SkVrXiYpu8OBDmAHf3"
+    crossorigin="anonymous"
   ></script>
   <!-- 3.x is required for floating-point GeoTIFF writes — 2.x's writer
        silently truncates Float32/Float64 to uint8. Reader API also gained
@@ -1169,15 +1270,86 @@
         btn.setAttribute('aria-expanded', open ? 'true' : 'false');
         btn.textContent = open ? '×' : '☰';
       }
-      btn.addEventListener('click', () => setOpen(!panel.classList.contains('open')));
+      const app = document.getElementById('app');
+      const isDesktop = () => window.innerWidth > 860;
+      btn.addEventListener('click', () => {
+        if (isDesktop()) {
+          // Desktop: collapse/expand the docked sidebar (keep the ☰ glyph).
+          const collapsed = app.classList.toggle('panel-collapsed');
+          btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+          btn.textContent = '☰';
+        } else {
+          setOpen(!panel.classList.contains('open'));
+        }
+      });
       backdrop.addEventListener('click', () => setOpen(false));
-      // If the user rotates / resizes back to desktop, reset state so the
-      // panel doesn't sit half-translated on the desktop grid.
+      // On a viewport class change, drop the other mode's state so the panel
+      // doesn't get stuck (half-translated on desktop, or collapsed on mobile).
       window.addEventListener('resize', () => {
-        if (window.innerWidth > 860) setOpen(false);
+        if (isDesktop()) { setOpen(false); }
+        else { app.classList.remove('panel-collapsed'); btn.textContent = '☰'; btn.setAttribute('aria-expanded', 'false'); }
       });
       // Expose so app.js can close the drawer after a successful map click.
       window.__simuDrawer = { close: () => setOpen(false), open: () => setOpen(true) };
+
+      // ---- Sidebar column resizer (desktop / landscape) ------------------
+      // Drag the right border to snap the sidebar to 1-4 fixed-width (320px)
+      // columns. Discrete: column WIDTH is fixed, only the COUNT changes.
+      // Persisted per device; ignored in the mobile drawer (forced 1 column).
+      const resizer = document.getElementById('sidebar-resizer');
+      const COL = 320, MAXC = 4;
+      let cols = 1;
+      try { const s = parseInt(localStorage.getItem('simu-sidebar-cols'), 10); if (s >= 1 && s <= MAXC) cols = s; } catch {}
+      function applyCols(n) {
+        cols = Math.max(1, Math.min(MAXC, n));
+        document.documentElement.style.setProperty('--sidebar-cols', cols);
+        try { localStorage.setItem('simu-sidebar-cols', String(cols)); } catch {}
+      }
+      applyCols(cols);
+      if (resizer) {
+        let dragging = false;
+        resizer.addEventListener('pointerdown', (e) => {
+          if (window.innerWidth <= 860) return;
+          dragging = true; resizer.classList.add('dragging');
+          try { resizer.setPointerCapture(e.pointerId); } catch {}
+          e.preventDefault();
+        });
+        resizer.addEventListener('pointermove', (e) => {
+          if (!dragging) return;
+          applyCols(Math.round(e.clientX / COL)); // pointer x ≈ target right edge
+        });
+        const end = (e) => {
+          if (!dragging) return;
+          dragging = false; resizer.classList.remove('dragging');
+          try { resizer.releasePointerCapture(e.pointerId); } catch {}
+        };
+        resizer.addEventListener('pointerup', end);
+        resizer.addEventListener('pointercancel', end);
+        // Double-click cycles 1→2→3→4→1 (no-drag affordance).
+        resizer.addEventListener('dblclick', () => applyCols(cols >= MAXC ? 1 : cols + 1));
+      }
+
+      // ---- Floating compute feedback visibility --------------------------
+      // app.js writes #status / toggles #progress.active as before; we just
+      // show the bottom pill while either has content (no writer changes).
+      const floatEl = document.getElementById('status-float');
+      const statusEl = document.getElementById('status');
+      const progEl = document.getElementById('progress');
+      if (floatEl && statusEl && progEl) {
+        let dismissed = false; // manual close stays hidden until the next message
+        const syncFloat = () => {
+          const on = statusEl.textContent.trim().length > 0 || progEl.classList.contains('active');
+          floatEl.classList.toggle('show', on && !dismissed);
+          floatEl.setAttribute('aria-hidden', (on && !dismissed) ? 'false' : 'true');
+        };
+        const onContent = () => { dismissed = false; syncFloat(); }; // new content un-dismisses
+        new MutationObserver(onContent).observe(statusEl, { childList: true, characterData: true, subtree: true });
+        new MutationObserver(onContent).observe(progEl, { attributes: true, attributeFilter: ['class'] });
+        document.getElementById('status-float-close')?.addEventListener('click', () => {
+          dismissed = true; floatEl.classList.remove('show'); floatEl.setAttribute('aria-hidden', 'true');
+        });
+        syncFloat();
+      }
     })();
   </script>
 
@@ -1301,6 +1473,25 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v36</strong> — 2026-06-24<br/>
+              Big UI overhaul (JS/UI only — engine, worker and backend untouched,
+              bit-parity preserved). The sidebar is reorganised into nested,
+              collapsible numbered groups (<em>0</em> Import/Export · <em>1</em>
+              Inputs [1A–1D] · <em>2</em> Compute setup [2A–2C] · <em>3</em> Results
+              [3A–3D]) with per-group status colours, auto-expand, and a draggable
+              1–4-column resizer. Layer visibility/opacity/order + basemap (now with
+              an <em>Esri satellite</em> option) + reference markers moved into a
+              non-blocking on-map <em>Controle de camadas</em> panel (floating
+              button, unified per-layer rows). Compute progress/log float in a
+              dismissable bottom pill. Full config persistence + Export/Import/Reset
+              (Group 0), and bundles embed the entire UI state. On-map drawing
+              (Leaflet-Geoman): <em>barrier</em> + <em>passable corridor</em>
+              polygons (1C) and <em>portal</em> lines (1D) feed the compute and
+              round-trip through config/bundles. Smaller: density tweaks follow the
+              displayed channel (terrain vs network), passes auto-max = p90 above
+              auto-min, scientific-notation density bounds, desktop sidebar collapse,
+              locate marker + accuracy circle, credit moved here. Sampling order is
+              now Censo / Sobol / Uniforme (Halton dropped).</p>
               <p><strong>v35</strong> — 2026-06-24<br/>
               App moved to its own domain: now served from the root of
               <code>simujaules.pedalhidrografi.co</code> (dedicated bucket) instead of
@@ -1500,6 +1691,7 @@
               bundle export (GeoTIFF + JSON-LD), PT/EN, FABDEM viewport loader, PWA shell.</p>
             </div>
           </details>
+          <div class="credit" data-i18n="credit" style="margin-top: 14px; text-align: center; opacity: 0.8;">feito por Claúdio e dirigido pelos neogeógrafos geomorfológicos</div>
         </div>
       </div>
     </div>
@@ -1508,9 +1700,36 @@
   <!-- Layer stacking-order modal. Rows are rendered by app.js (top of the
        list = drawn on top); ↑/↓ apply immediately and persist. -->
   <div class="modal-backdrop" id="layer-order-modal" role="dialog" aria-modal="true" aria-labelledby="layer-order-title">
-    <div class="modal" style="max-width: 320px;">
+    <div class="modal" style="max-width: 340px;">
       <button type="button" class="modal-close" id="layer-order-close" aria-label="Close">×</button>
-      <h2 id="layer-order-title" data-i18n="order.title" style="margin: 0 0 6px; font-size: 15px;">Layer stacking order</h2>
+      <h2 id="layer-order-title" data-i18n="order.title" style="margin: 0 0 8px; font-size: 15px;">Controle de camadas</h2>
+
+      <label data-i18n="layer.basemap">Basemap</label>
+      <select id="basemap-select">
+        <option value="osm"            data-i18n="basemap.osm">OSM (default)</option>
+        <option value="carto-dark"     data-i18n="basemap.dark">OSM minimalist black</option>
+        <option value="carto-light"    data-i18n="basemap.light">OSM minimalist white</option>
+        <option value="esri-satellite" data-i18n="basemap.satellite">Satellite (Esri)</option>
+        <option value="none-black"     data-i18n="basemap.black">no basemap (all black)</option>
+        <option value="none-white"     data-i18n="basemap.white">no basemap (all white)</option>
+        <option value="none-gray"      data-i18n="basemap.gray">no basemap (all gray)</option>
+      </select>
+
+      <!-- Real per-layer inputs (hidden). The unified list below PROXIES these
+           by id so applyLayerControls() / persistence keep reading them. -->
+      <div id="layer-inputs-store" style="display: none;" aria-hidden="true">
+        <input type="checkbox" id="tile-visible"   checked />
+        <input type="range"    id="tile-opacity"   min="0" max="1" step="0.05" value="0.85" />
+        <input type="checkbox" id="relief-visible" />
+        <input type="range"    id="relief-opacity" min="0" max="1" step="0.05" value="0.85" />
+        <input type="checkbox" id="energy-visible" checked />
+        <input type="range"    id="energy-opacity" min="0" max="1" step="0.05" value="0.85" />
+        <input type="checkbox" id="passes-visible" checked />
+        <input type="range"    id="passes-opacity" min="0" max="1" step="0.05" value="0.7" />
+        <input type="checkbox" id="refs-visible"   checked />
+      </div>
+
+      <hr style="border: none; border-top: 1px solid var(--border); margin: 10px 0 6px;" />
       <div class="hint" data-i18n="order.hint" style="margin-bottom: 6px;">Top of the list is drawn on top. Markers and tooltips always stay above. Applied immediately; remembered on this device.</div>
       <div id="layer-order-list"></div>
       <button type="button" class="secondary" id="layer-order-reset" data-i18n="order.reset" style="margin-top: 8px;">Reset to default</button>
