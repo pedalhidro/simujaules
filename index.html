@@ -103,24 +103,25 @@
       background: var(--panel);
       border-right: 1px solid var(--border);
       padding: 10px 12px;
-      /* Flex column so .panel-cols fills the remaining height — the definite
-         height that column-fill:auto needs to fill column 1 before the next.
-         The scroll lives on .panel-cols now (not #panel). */
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
+      /* Vertical scroll only. The columns NEVER scroll horizontally:
+         fitPanelColumns() (JS) sizes .panel-cols's height so all content fits
+         in N columns, so column-fill:auto can never spill into an (N+1)th. */
+      overflow-y: auto;
+      overflow-x: hidden;
+      /* iOS momentum scrolling — without this the panel feels stuck on touch. */
+      -webkit-overflow-scrolling: touch;
     }
     /* Multi-column sidebar (desktop/landscape): the groups flow into N fixed-
        width (320px) columns; the right-border resizer snaps N between 1 and 4
        (discrete — column width is fixed, only the count changes). */
     .panel-cols {
       column-count: var(--sidebar-cols, 1); column-gap: 14px;
-      /* Fill the first column top-to-bottom before spilling to the next
-         (auto), instead of balancing evenly. flex:1 supplies the definite
-         height column-fill:auto needs; this is the scroll container. */
+      /* Fill the first column top-to-bottom before spilling to the next (auto),
+         instead of balancing evenly. column-fill:auto needs a definite height;
+         fitPanelColumns() sets it to max(viewport, content/N) so short content
+         packs into column 1 and tall content stays within N columns (the panel
+         scrolls vertically — never an (N+1)th column / horizontal scrollbar). */
       column-fill: auto;
-      flex: 1 1 auto; min-height: 0; overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
     }
     .panel-cols > * { break-inside: avoid; }
     /* …but let a PARENT group (1, 2, 3) split across columns so its sub-groups
@@ -1299,12 +1300,64 @@
       const COL = 320, MAXC = 4;
       let cols = 1;
       try { const s = parseInt(localStorage.getItem('simu-sidebar-cols'), 10); if (s >= 1 && s <= MAXC) cols = s; } catch {}
+      // Size .panel-cols so column-fill:auto fills column 1 first WITHOUT ever
+      // creating an (N+1)th column (which would scroll horizontally). Column
+      // height = max(visible height, content/N): short content packs into
+      // column 1; tall content fits exactly N columns and the panel scrolls
+      // vertically. Recomputed whenever the content or viewport changes.
+      const colsEl = document.querySelector('.panel-cols');
+      function fitPanelColumns() {
+        if (!panel || !colsEl) return;
+        const effCols = parseInt(getComputedStyle(colsEl).columnCount, 10) || 1;
+        if (effCols <= 1) { colsEl.style.height = ''; return; }   // single column → natural flow
+        if (colsEl.clientWidth < 50) return;                      // collapsed/hidden — nothing to size
+        const ps = getComputedStyle(panel);
+        const header = panel.querySelector('.panel-header');
+        const avail = Math.max(160, panel.clientHeight
+          - parseFloat(ps.paddingTop) - parseFloat(ps.paddingBottom)
+          - (header ? header.offsetHeight : 0) - 10);
+        const gap = parseFloat(getComputedStyle(colsEl).columnGap) || 14;
+        const colW = (colsEl.clientWidth - (effCols - 1) * gap) / effCols;
+        // Measure the content's height as a SINGLE column at the column width.
+        const savedW = colsEl.style.width, savedCC = colsEl.style.columnCount;
+        colsEl.style.height = 'auto';
+        colsEl.style.width = colW + 'px';
+        colsEl.style.columnCount = '1';
+        const contentH = colsEl.scrollHeight;
+        colsEl.style.width = savedW;
+        colsEl.style.columnCount = savedCC;
+        let H = Math.max(avail, Math.ceil(contentH / effCols) + 8);
+        colsEl.style.height = Math.round(H) + 'px';
+        // Unbreakable groups (break-inside:avoid) waste column space, so a tight
+        // content/N height can still spill into an extra column. Grow until the
+        // content fits in effCols columns (no horizontal overflow), bounded so
+        // it can never loop forever.
+        for (let i = 0; i < 6; i++) {
+          const used = Math.round((colsEl.scrollWidth + gap) / (colW + gap));
+          if (used <= effCols) break;
+          H = Math.ceil(H * used / effCols) + 8;
+          colsEl.style.height = Math.round(H) + 'px';
+        }
+      }
+      let fitPending = false;
+      function scheduleFit() {
+        if (fitPending) return;
+        fitPending = true;
+        requestAnimationFrame(() => { fitPending = false; fitPanelColumns(); });
+      }
       function applyCols(n) {
         cols = Math.max(1, Math.min(MAXC, n));
         document.documentElement.style.setProperty('--sidebar-cols', cols);
         try { localStorage.setItem('simu-sidebar-cols', String(cols)); } catch {}
+        scheduleFit();
       }
       applyCols(cols);
+      // Recompute on viewport resize, on any group expand/collapse (<details>
+      // 'toggle' does not bubble → capture phase), and on content changes inside
+      // the columns (result text, loaded-state rows, …).
+      window.addEventListener('resize', scheduleFit);
+      document.addEventListener('toggle', scheduleFit, true);
+      if (colsEl) new MutationObserver(scheduleFit).observe(colsEl, { childList: true, subtree: true, characterData: true });
       if (resizer) {
         let dragging = false;
         resizer.addEventListener('pointerdown', (e) => {
