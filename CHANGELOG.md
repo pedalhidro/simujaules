@@ -9,6 +9,44 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v37 — 2026-06-25
+
+UI refinements on top of v36. **JS/UI only — the compute engine, Web Worker and
+Rust backend are untouched and stay bit-parity.**
+
+### Changes
+
+- **Sidebar groups reordered & trimmed.** 1B–1D and 2A–2C controls were
+  regrouped/renamed; "maximizar energia" and the "origem das referências"
+  dropdown were removed.
+- **Multi-column sidebar.** Each column now fills top-to-bottom before content
+  spills into the next, and the panel scrolls **vertically only** — no
+  horizontal scrollbar when content is tall.
+- **Label tables.** The 1B network parameters and the 2A parameters are now
+  2-column **label | input** tables. Cost coefficients are labelled **J/m**
+  (α ≈ 0.008 J/m, β ≈ 1 J/m) and the budget in **kJ**; "recuperação na descida"
+  stays a 0–1 fraction (shown as %).
+- **Results styling moved to the layer panel.** The energy-field, trajectory-
+  density and legend controls (former 3B–3D) now live at the bottom of the
+  on-map **Controle de camadas** panel; its × button was removed (the layer
+  button toggles it and Esc closes it). Statistics (3A) stay in the sidebar.
+- **Group highlight.** Collapsed groups read grey, expanded groups white — the
+  same border + left-bar treatment as the green/orange/yellow/red status
+  colours, which still take priority. 1C/1D now turn **green** when you've drawn
+  barriers/corridors/portals, even with nothing else loaded.
+- **Branding.** The app title is now **Simujaules** with the tagline
+  *"Imaginador de caminhos fáceis para o encontro."*
+
+### Fixes
+
+- Collapsing the sidebar no longer blanks the map (the map cell now fills the
+  viewport and Leaflet re-fits).
+- The rmsampa-v2 hydrography overlay no longer requests (404) tiles past zoom 16
+  — it upscales the z16 tiles instead.
+- **Deploy:** `deploy.sh` now excludes the `census/` prefix from its
+  `--delete-unmatched-destination-objects` prune, so the out-of-band population
+  FlatGeobuf survives deploys.
+
 ## v36 — 2026-06-24
 
 A large UI/UX overhaul. **JS/UI only — the compute engine, Web Worker and Rust

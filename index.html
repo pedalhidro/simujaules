@@ -948,9 +948,9 @@
                 <option value="to"    data-i18n="mode.to">To source point</option>
                 <option value="round" data-i18n="mode.round">Round trip</option>
               </select></td></tr>
-          <tr><td class="kv-key"><label for="alpha" data-i18n="param.alpha">Horizontal cost (kJ/m)</label></td>
+          <tr><td class="kv-key"><label for="alpha" data-i18n="param.alpha">Horizontal cost (J/m)</label></td>
               <td class="kv-val"><input type="number" id="alpha" value="0.008" step="0.001" min="0" /></td></tr>
-          <tr><td class="kv-key"><label for="beta" data-i18n="param.beta">Vertical cost (kJ/m)</label></td>
+          <tr><td class="kv-key"><label for="beta" data-i18n="param.beta">Vertical cost (J/m)</label></td>
               <td class="kv-val"><input type="number" id="beta" value="1.0" step="0.1" min="0" /></td></tr>
           <tr><td class="kv-key"><label for="eta" data-i18n="param.eta">Downhill recovery (%)</label></td>
               <td class="kv-val"><input type="number" id="eta" value="0.1" step="0.05" min="0" max="1" title="fração 0–1 (0,1 = 10%)" /></td></tr>
@@ -1420,6 +1420,21 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v37</strong> — 2026-06-25<br/>
+              UI refinements on top of v36 (JS/UI only; engine untouched). Sidebar
+              groups reordered/renamed (1B–1D, 2A–2C; "maximizar energia" and
+              "origem das referências" removed); the multi-column sidebar fills
+              each column top-to-bottom before the next and scrolls vertically
+              only. The 1B network params and 2A parameters are now 2-col
+              label|input tables (cost coefficients in <em>J/m</em>, budget in kJ).
+              The energy-field / density / legend controls moved into the
+              <em>Controle de camadas</em> panel (its × removed — the layer button
+              toggles it, Esc closes it); Statistics stay in the sidebar. Collapsed
+              groups read grey, expanded white (under the green/orange/yellow/red
+              status colours); 1C/1D go green on drawn geometry alone. The app is
+              now titled <em>Simujaules</em> with a tagline. Fixes: collapsing the
+              sidebar no longer blanks the map; the rmsampa-v2 overlay no longer
+              404s tiles past zoom 16.</p>
               <p><strong>v36</strong> — 2026-06-24<br/>
               Big UI overhaul (JS/UI only — engine, worker and backend untouched,
               bit-parity preserved). The sidebar is reorganised into nested,

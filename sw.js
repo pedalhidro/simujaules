@@ -295,7 +295,20 @@
 //              marker+accuracy circle, credit in the help modal. Adds the
 //              leaflet-geoman CDN lib (runtime-cached). JS/UI only; engine +
 //              worker + backend untouched (bit-parity preserved).
-const VERSION  = "v36";
+//   v36 → v37: UI refinements on top of v36. Sidebar groups reordered/renamed
+//              (1B-1D, 2A-2C) with "maximizar energia" + "origem das referências"
+//              removed; multi-column sidebar fills each column top-to-bottom
+//              before the next and scrolls VERTICALLY only (no horizontal spill).
+//              1B network params + 2A parameters are now 2-col label|input tables
+//              (cost coefficients in J/m, budget in kJ). Results styling (energy
+//              field / density / legend) moved INTO the "Controle de camadas"
+//              panel; its × removed (toggle/Esc close it). Collapse/expand group
+//              highlight (grey/white, under the status colours); 1C/1D go green on
+//              drawn geometry alone. App title is now the brand "Simujaules" + a
+//              tagline. Fixes: collapsing the sidebar no longer blanks the map;
+//              the rmsampa-v2 overlay no longer 404s tiles past z16. JS/UI only;
+//              engine + worker + backend untouched (bit-parity preserved).
+const VERSION  = "v37";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
