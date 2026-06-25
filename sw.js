@@ -262,24 +262,23 @@
 //              drops points inside them with a 2-D Sobol rejection draw. Adds
 //              the flatgeobuf CDN lib (runtime-cached, like geotiff/jszip).
 //              Brazil-only, online-only (like Overpass/FABDEM); JS-only.
-//   v32 → v33: App moved to its own domain — now served from the root of
+//   v32 → v35: Two changes, numbered v35 to dodge a clash with the in-flight
+//              feature/ui-overhaul branch's v33.
+//              (a) App moved to its own domain — served from the root of
 //              https://simujaules.pedalhidrografi.co/ (dedicated gs://simujaules
-//              bucket) instead of telhas.pedalhidrografi.co/simujoules/. Brand
-//              spelled "Simujaules" (affective typo of joules). Absolute URLs
-//              (canonical/og/schema, example DEMs, census FGB, sitemap, llms.txt)
-//              repoint to the new root; the RDF @vocab namespace IRI stays on
-//              telhas (stable identifier) and resolves via a redirect. Shared
-//              raster assets (rmsampa-v2, FABDEM tiles) stay on telhas. No engine
-//              changes.
-//   v33 → v34: Cloud compute now works when the app is accessed REMOTELY (not
-//              just localhost). The orchestrator is a public, password-gated
-//              Cloud Run service that creates/starts/stops/deletes the VM; the
+//              bucket) instead of telhas.pedalhidrografi.co/simujoules/; brand
+//              spelled "Simujaules" (affective typo of joules); absolute URLs
+//              repoint to the new root; the RDF @vocab IRI stays on telhas
+//              (stable identifier, resolved via redirect); rmsampa-v2/FABDEM
+//              tiles stay on telhas.
+//              (b) Cloud compute now works REMOTELY: a public, password-gated
+//              Cloud Run orchestrator creates/starts/stops/deletes the VM; the
 //              browser sends the big compute payloads DIRECT to the VM over
-//              HTTPS (Caddy, TLS via DNS-01). New "Cloud password" field; the
-//              same token gates control + data planes. The VM uses an ephemeral
-//              IP (DNS rewritten on each start) and is deleted after 30 days
-//              idle (cost → 0). No engine changes.
-const VERSION  = "v34";
+//              HTTPS (Caddy, TLS via DNS-01); new "Cloud password" field; the
+//              same token gates control + data planes; ephemeral IP with dynamic
+//              DNS; the VM is deleted after 30 days idle (cost → 0).
+//              No engine changes.
+const VERSION  = "v35";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
