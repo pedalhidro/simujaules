@@ -47,6 +47,13 @@ backend are untouched and stay bit-parity.**
 - **Mobile**: the locate button hides while the drawer is open and the layer
   button moves to the bottom stack; the drawer gains bottom padding.
 
+### Example datasets
+
+- **1B** gains a one-click **"Viário RMSampa"** loader (the ~145 MB RMSampa road
+  network `.gpkg`) and **1C** an **"Águas RMSampa"** water-mask loader (`.tif`),
+  both fetched from the bucket. `deploy.sh` now excludes the `vector/` and `mask/`
+  prefixes from the bucket prune (same out-of-band pattern as `census/`).
+
 ## v37 — 2026-06-25
 
 UI refinements on top of v36. **JS/UI only — the compute engine, Web Worker and

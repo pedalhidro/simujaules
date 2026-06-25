@@ -90,15 +90,18 @@ fi
 #                                            staging dir (the whole dedicated
 #                                            simujaules bucket) so renames
 #                                            don't leave orphans.
-#    --exclude='^census(/|$)'                ...EXCEPT the census/ prefix. The
-#                                            ~454 MB census FlatGeobuf
-#                                            (census/setores_br_pop.fgb, fetched
-#                                            by app.js's CENSUS_FGB_URL) is built
-#                                            and uploaded OUT-OF-BAND by
-#                                            census/build_fgb.py — it is never
-#                                            staged here, so without this exclude
-#                                            --delete-unmatched would prune it on
-#                                            every deploy (it 404s afterwards).
+#    --exclude='^(census|vector|mask)(/|$)'  ...EXCEPT these OUT-OF-BAND prefixes,
+#                                            uploaded by hand and fetched directly
+#                                            by the app — never staged here, so
+#                                            without the exclude --delete-unmatched
+#                                            would prune them on every deploy
+#                                            (they 404 afterwards):
+#                                              census/setores_br_pop.fgb (~454 MB,
+#                                                CENSUS_FGB_URL, built by build_fgb.py)
+#                                              vector/sampa-viario.gpkg (~145 MB,
+#                                                "Viário RMSampa" example network)
+#                                              mask/water_mask.tif (~0.7 MB,
+#                                                "Águas RMSampa" example barrier mask)
 #                                            gcloud's --exclude is a Python regex
 #                                            (re.match, start-anchored) on the
 #                                            RELATIVE object path and is applied
@@ -112,7 +115,7 @@ fi
 #                                            looks changed and re-uploads.
 echo ">> Uploading to $BUCKET …"
 gcloud storage rsync -r --checksums-only --delete-unmatched-destination-objects \
-  --exclude='^census(/|$)' \
+  --exclude='^(census|vector|mask)(/|$)' \
   "$STAGE" "$BUCKET/" 2>&1 | tee "$RSYNC_LOG"
 
 # 4. Set headers (metadata-only — cheap, so run every deploy). HTML gets a short

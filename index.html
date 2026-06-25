@@ -845,6 +845,9 @@
           <span data-i18n="net.compare">Compare with unconstrained</span>
         </label>
         <input type="file" id="vector-file" accept=".gpkg" data-i18n-aria="aria.vector_file" />
+        <button type="button" class="ex-link" id="ex-viario" style="margin-top: 4px;">
+          <span data-i18n="net.example_viario">Viário RMSampa</span> <span class="ex-tag" data-i18n="net.example_viario_tag">~145 MB · nuvem</span>
+        </button>
         <button type="button" class="secondary" id="vec-osm" data-i18n="net.osm" style="margin-top: 4px;">Pull streets from OSM (highway=*)</button>
         <button type="button" class="secondary" id="vec-clear" data-i18n="net.clear" style="margin-top: 4px;">Clear network</button>
         <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
@@ -885,6 +888,9 @@
           <span data-i18n="imp.enabled">Apply to compute</span>
         </label>
         <input type="file" id="impassable-file" accept=".tif,.tiff" data-i18n-aria="aria.mask_file" />
+        <button type="button" class="ex-link" id="ex-water" style="margin-top: 4px;">
+          <span data-i18n="imp.example_water">Águas RMSampa</span> <span class="ex-tag" data-i18n="imp.example_water_tag">~0,7 MB · nuvem</span>
+        </button>
         <button type="button" class="secondary" id="impassable-osm" data-i18n="imp.osm" style="margin-top: 4px;">Pull water from OSM</button>
         <label id="imp-corridor-row" style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text); opacity: 0.55;">
           <input type="checkbox" id="imp-corridor" checked disabled />
@@ -1457,7 +1463,9 @@
               accessible names on the icon buttons, file pickers and layer-panel
               rows, accent-color on native controls, ≥24px touch targets,
               reduced-motion support. Plus i18n/copy fixes, shorter (non-clipping)
-              select options, and mobile button placement fixes.</p>
+              select options, and mobile button placement fixes. New cloud example
+              datasets: <em>Viário RMSampa</em> (road network, 1B) and
+              <em>Águas RMSampa</em> (water mask, 1C).</p>
               <p><strong>v37</strong> — 2026-06-25<br/>
               UI refinements on top of v36 (JS/UI only; engine untouched). Sidebar
               groups reordered/renamed (1B–1D, 2A–2C; "maximizar energia" and

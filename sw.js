@@ -320,7 +320,9 @@
 //              Interaction: draw "armed" state + Esc-cancel, auto-dismissing
 //              success pill, disabled-Calcular reason, density auto-opens the
 //              refs group. i18n/copy leaks fixed + shorter select options +
-//              mobile button fixes. JS/UI only; engine untouched (bit-parity).
+//              mobile button fixes + cloud example datasets ("Viário RMSampa"
+//              network in 1B, "Águas RMSampa" water mask in 1C). JS/UI only;
+//              engine untouched (bit-parity).
 const VERSION  = "v38";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;

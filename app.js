@@ -166,6 +166,8 @@ const STRINGS = {
   "net.junctions_crossings": { pt: "nos cruzamentos", en: "at crossings" },
   "net.junctions_shared":    { pt: "extremos comuns", en: "shared endpoints" },
   "net.osm":             { pt: "Puxar ruas do OSM (highway=*)", en: "Pull streets from OSM (highway=*)" },
+  "net.example_viario":  { pt: "Viário RMSampa", en: "RMSampa road network" },
+  "net.example_viario_tag": { pt: "~145 MB · nuvem", en: "~145 MB · cloud" },
   "help.p.network_osm":  { pt: "Consulta o Overpass sobre a vista atual ∩ extensão do DEM. Áreas grandes podem demorar ou estourar limites do Overpass — aproxime o zoom primeiro.", en: "Queries Overpass over the current map view ∩ DEM extent. Large areas can take a while or hit Overpass limits — zoom in first." },
   "net.compare":         { pt: "Comparar com cenário sem rede", en: "Compare with unconstrained" },
   "net.graph_constrain_locked": { pt: "No modo grafo o cálculo é sempre sobre a rede — \"restringir\" fica sempre ativo. \"Comparar\" continua disponível: compara com o cenário em raster sem a rede.", en: "In graph mode the compute is always on the network — \"constrain\" stays on. \"Compare\" is still available: it compares against the raster scenario without the network." },
@@ -184,6 +186,8 @@ const STRINGS = {
   "imp.invert":          { pt: "Inverter (raster marca células passáveis)", en: "Invert (raster marks passable cells)" },
   "imp.clear":           { pt: "Limpar máscara", en: "Clear mask" },
   "imp.osm":             { pt: "Puxar água do OSM", en: "Pull water from OSM" },
+  "imp.example_water":   { pt: "Águas RMSampa", en: "RMSampa water mask" },
+  "imp.example_water_tag": { pt: "~0,7 MB · nuvem", en: "~0.7 MB · cloud" },
   "imp.rivers":          { pt: "Rios (linhas) intransponíveis", en: "Rivers (lines) impassable" },
   "imp.corridor":        { pt: "Rede abre corredores passáveis sobre a máscara", en: "Network carves passable corridors across the mask" },
   "imp.offset":          { pt: "deslocamento no centro da ponte (m, −5…+15)", en: "bridge centre offset (m, −5…+15)" },
@@ -1275,6 +1279,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const vecClearBtn = document.getElementById("vec-clear");
   if (vecClearBtn) vecClearBtn.addEventListener("click", clearVectorNetwork);
   document.getElementById("vec-osm")?.addEventListener("click", loadOsmNetwork);
+  document.getElementById("ex-viario")?.addEventListener("click", () =>
+    loadVectorFromUrl("https://simujaules.pedalhidrografi.co/vector/sampa-viario.gpkg", t("net.example_viario")));
 
   // --- Impassable mask (group 1c) ---
   const impFile = document.getElementById("impassable-file");
@@ -1287,6 +1293,8 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   document.getElementById("impassable-clear")?.addEventListener("click", clearImpassableMask);
   document.getElementById("impassable-osm")?.addEventListener("click", loadOsmWater);
+  document.getElementById("ex-water")?.addEventListener("click", () =>
+    loadImpassableFromUrl("https://simujaules.pedalhidrografi.co/mask/water_mask.tif", t("imp.example_water")));
   document.getElementById("imp-rivers")?.addEventListener("change", rebuildOsmWaterMask);
   document.getElementById("imp-enabled")?.addEventListener("change", () => markImpassableDirty(true));
   // 1B "Aplicar ao cálculo" toggle updates its green/orange status.
@@ -1919,6 +1927,32 @@ async function loadDemFromUrl(url, label) {
     const buf = await resp.arrayBuffer();
     state.demSourceUrl = url;
     await loadDemFromArrayBuffer(buf, label);
+  } catch (err) {
+    console.error(err);
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.error_generic", escapeHtml(err.message))}</span>`;
+  }
+}
+
+// Cloud-hosted example datasets: fetch the file → hand it to the normal File
+// loader (which gates on a loaded DEM and shows its own progress). Used by the
+// "Viário RMSampa" (1B network) and water-mask (1C) example buttons.
+async function loadVectorFromUrl(url, label) {
+  status.textContent = t("status.fetching", label);
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${url}`);
+    await loadVectorNetwork(new File([await resp.blob()], "sampa-viario.gpkg"));
+  } catch (err) {
+    console.error(err);
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.gpkg_failed", escapeHtml(err.message))}</span>`;
+  }
+}
+async function loadImpassableFromUrl(url, label) {
+  status.textContent = t("status.fetching", label);
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${url}`);
+    await loadImpassableMaskFromFile(new File([await resp.blob()], "water_mask.tif"));
   } catch (err) {
     console.error(err);
     status.innerHTML = `<span style="color:#ff6b6b">${t("status.error_generic", escapeHtml(err.message))}</span>`;
