@@ -1888,6 +1888,10 @@ state.tileOverlay = L.tileLayer(RMSAMPA_URL, {
   // rmsampa-v2 only has tiles up to z16 — upscale them past that instead of
   // requesting z>=17 (which 404s).
   maxNativeZoom: 16,
+  // HiDPI/retina: fetch one zoom higher and draw at half size so the hydrography
+  // is crisp instead of 2× upscaled+blurred. The URL zoom is min(z+1,
+  // maxNativeZoom)=16, so this never reintroduces z>16 404s.
+  detectRetina: true,
   opacity: 0.85,
   // Keep the hydrography overlay ABOVE the basemap within the tile pane,
   // regardless of add order (the basemap is re-added on the persistence
