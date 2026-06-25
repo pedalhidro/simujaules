@@ -1884,13 +1884,20 @@ const resultMeta = document.getElementById("result-meta");
 // toggle so we don't pay tile fetches when it's hidden.
 const RMSAMPA_URL = "https://telhas.pedalhidrografi.co/rmsampa-v2/{z}/{x}/{y}.png";
 state.tileOverlay = L.tileLayer(RMSAMPA_URL, {
-  maxZoom: 19,
-  // rmsampa-v2 only has tiles up to z16 — upscale them past that instead of
-  // requesting z>=17 (which 404s).
-  maxNativeZoom: 16,
+  // 21, above the map's z20 ceiling, because detectRetina (below) drops a layer's
+  // maxZoom by 1 on HiDPI — at 19 that capped the layer at z18 and the hydrography
+  // VANISHED when zoomed past it. 21→20 (retina) keeps it visible (upscaled from
+  // z16) across the whole zoomable range.
+  maxZoom: 21,
+  // rmsampa-v2 only has tiles up to z16. With detectRetina (below) this Leaflet
+  // build adds the +1 retina offset AFTER clamping to maxNativeZoom, so a flat
+  // cap of 16 fetched z17 on HiDPI (404 → blank hydrography when zoomed in). On
+  // retina cap at 15 so the +1 lands exactly on z16; on non-retina (no offset)
+  // keep 16 so it still gets full z16 detail. Either way: crisp where real tiles
+  // exist, upscaled (never 404) above it.
+  maxNativeZoom: L.Browser.retina ? 15 : 16,
   // HiDPI/retina: fetch one zoom higher and draw at half size so the hydrography
-  // is crisp instead of 2× upscaled+blurred. The URL zoom is min(z+1,
-  // maxNativeZoom)=16, so this never reintroduces z>16 404s.
+  // is crisp instead of 2× upscaled+blurred (capped at z16 by maxNativeZoom 15).
   detectRetina: true,
   opacity: 0.85,
   // Keep the hydrography overlay ABOVE the basemap within the tile pane,
