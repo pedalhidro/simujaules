@@ -103,14 +103,25 @@
       background: var(--panel);
       border-right: 1px solid var(--border);
       padding: 10px 12px;
-      overflow-y: auto;
-      /* iOS momentum scrolling — without this the panel feels stuck on touch. */
-      -webkit-overflow-scrolling: touch;
+      /* Flex column so .panel-cols fills the remaining height — the definite
+         height that column-fill:auto needs to fill column 1 before the next.
+         The scroll lives on .panel-cols now (not #panel). */
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
     /* Multi-column sidebar (desktop/landscape): the groups flow into N fixed-
        width (320px) columns; the right-border resizer snaps N between 1 and 4
        (discrete — column width is fixed, only the count changes). */
-    .panel-cols { column-count: var(--sidebar-cols, 1); column-gap: 14px; }
+    .panel-cols {
+      column-count: var(--sidebar-cols, 1); column-gap: 14px;
+      /* Fill the first column top-to-bottom before spilling to the next
+         (auto), instead of balancing evenly. flex:1 supplies the definite
+         height column-fill:auto needs; this is the scroll container. */
+      column-fill: auto;
+      flex: 1 1 auto; min-height: 0; overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
     .panel-cols > * { break-inside: avoid; }
     /* …but let a PARENT group (1, 2, 3) split across columns so its sub-groups
        (1A-1D, 2A-2C, 3A-3D) flow into the next column instead of staying glued
@@ -318,8 +329,11 @@
     /* padding-left clears the fixed top-left hamburger (collapse) toggle. */
     .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
     .panel-header h1 { margin: 0; }
-    /* Desktop sidebar collapse: hamburger toggles #app.panel-collapsed. */
-    #app.panel-collapsed { grid-template-columns: 0 1fr; }
+    /* Desktop sidebar collapse: hamburger toggles #app.panel-collapsed.
+       ONE column (not "0 1fr"): with #panel display:none the only remaining
+       in-flow child is #map, which would auto-place into the 0-width first
+       column and vanish. A single 1fr column makes #map fill it. */
+    #app.panel-collapsed { grid-template-columns: 1fr; }
     #app.panel-collapsed > #panel { display: none; }
     #app.panel-collapsed #sidebar-resizer { display: none; }
     /* Collapsible groups (native <details>). The <summary> replaces the old
@@ -594,13 +608,15 @@
        interactive while it's open. pointer-events:none on the container (auto
        on the panel) lets clicks pass through everywhere except the panel. */
     #layer-order-modal {
-      inset: auto; top: 104px; right: 8px; left: auto; bottom: auto;
+      /* Opens BELOW the layer-control button (top-right stack ends at ~144px),
+         so it doesn't cover the button that opens it. */
+      inset: auto; top: 152px; right: 8px; left: auto; bottom: auto;
       background: transparent; padding: 0; display: none; pointer-events: none;
     }
     #layer-order-modal.active { display: block; }
     #layer-order-modal > .modal {
       pointer-events: auto; width: min(320px, calc(100vw - 16px));
-      max-height: calc(100vh - 116px); padding: 14px 16px; margin: 0;
+      max-height: calc(100vh - 164px); padding: 14px 16px; margin: 0;
     }
     .modal {
       background: var(--panel);
@@ -1256,6 +1272,9 @@
           btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
           btn.textContent = '☰';
           btn.classList.toggle('active', !collapsed);
+          // The map cell just resized — let Leaflet (trackResize) re-fit so it
+          // doesn't render at the old width.
+          window.dispatchEvent(new Event('resize'));
         } else {
           setOpen(!panel.classList.contains('open'));
         }

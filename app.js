@@ -1841,6 +1841,9 @@ const resultMeta = document.getElementById("result-meta");
 const RMSAMPA_URL = "https://telhas.pedalhidrografi.co/rmsampa-v2/{z}/{x}/{y}.png";
 state.tileOverlay = L.tileLayer(RMSAMPA_URL, {
   maxZoom: 19,
+  // rmsampa-v2 only has tiles up to z16 — upscale them past that instead of
+  // requesting z>=17 (which 404s).
+  maxNativeZoom: 16,
   opacity: 0.85,
   // Keep the hydrography overlay ABOVE the basemap within the tile pane,
   // regardless of add order (the basemap is re-added on the persistence
