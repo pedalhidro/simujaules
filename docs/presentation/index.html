@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Simujoules — Asymmetric-cost cycling energy fields over DEMs, in the browser</title>
+
+  <!-- reveal.js from CDN — mirrors the project's "no build step, CDN libraries" ethos.
+       To present fully offline, vendor these five files locally (see README.md). -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reset.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/monokai.css" />
+
+  <style>
+    :root {
+      --bg:       #0f1115;
+      --panel:    #1a1d23;
+      --panel-2:  #20242c;
+      --text:     #e8e8ea;
+      --muted:    #8a8f98;
+      --accent:   #ff8c42;   /* uphill / warm */
+      --accent-2: #4cc9f0;   /* downhill / cool */
+      --green:    #7ed957;
+      --red:      #ff5d6c;
+      --border:   #2a2e36;
+    }
+
+    .reveal { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--text); font-size: 30px; }
+    .reveal .slides { text-align: left; }
+    .reveal section { line-height: 1.4; }
+
+    .reveal h1, .reveal h2, .reveal h3 { color: var(--accent); font-weight: 700; letter-spacing: -0.01em; text-transform: none; line-height: 1.1; }
+    .reveal h1 { font-size: 1.9em; }
+    .reveal h2 { font-size: 1.35em; margin-bottom: .5em; }
+    .reveal h3 { font-size: 1.05em; color: var(--accent-2); }
+    .reveal h2 .lead { color: var(--muted); font-weight: 400; font-size: .62em; display:block; letter-spacing:.02em; }
+
+    .reveal strong { color: var(--accent-2); }
+    .reveal em { color: var(--accent); font-style: normal; }
+    .reveal a { color: var(--accent-2); text-decoration: none; }
+    .reveal a:hover { text-decoration: underline; }
+    .reveal ul, .reveal ol { margin-left: 1em; }
+    .reveal li { margin: .28em 0; }
+    .reveal li::marker { color: var(--accent); }
+    .muted { color: var(--muted); }
+    .accent { color: var(--accent); }
+    .accent2 { color: var(--accent-2); }
+    .green { color: var(--green); }
+    .red { color: var(--red); }
+    .small { font-size: .8em; }
+    .smaller { font-size: .66em; }
+    .center { text-align: center; }
+
+    /* equation / formula box */
+    .eq {
+      font-family: "SF Mono", "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, monospace;
+      background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+      border-radius: 8px; padding: .55em .8em; margin: .5em 0; font-size: .9em; line-height: 1.6;
+    }
+    .eq.big { font-size: 1.15em; text-align:center; }
+    code, .mono { font-family: "SF Mono","JetBrains Mono", ui-monospace, Menlo, monospace; }
+    .reveal pre { box-shadow: none; font-size: .55em; width: 100%; }
+    .reveal pre code { border-radius: 8px; padding: 1em; max-height: 460px; }
+
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: .7em .9em; }
+    .card.hi { border-color: var(--accent); }
+    .cols { display: flex; gap: 1.1em; align-items: flex-start; }
+    .cols > * { flex: 1; min-width: 0; }
+    .cols.tight { gap: .7em; }
+
+    .tag { display:inline-block; font-size:.62em; font-weight:600; padding:.15em .6em; border-radius:999px;
+           border:1px solid var(--border); color:var(--muted); background:var(--panel); margin-right:.3em; }
+    .tag.warm { color: var(--accent); border-color: var(--accent); }
+    .tag.cool { color: var(--accent-2); border-color: var(--accent-2); }
+
+    .reveal table { font-size: .74em; border-collapse: collapse; width: 100%; }
+    .reveal table th, .reveal table td { border: 1px solid var(--border); padding: .3em .5em; }
+    .reveal table th { color: var(--accent-2); background: var(--panel); }
+    .reveal table td.num { text-align: right; font-family: "SF Mono", monospace; }
+
+    .kpi { display:flex; gap:1.2em; justify-content:center; margin:.4em 0; flex-wrap:wrap; }
+    .kpi .k { text-align:center; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:.5em .9em; min-width: 4.5em; }
+    .kpi .k b { display:block; font-size:1.7em; color:var(--accent); font-family:"SF Mono",monospace; }
+    .kpi .k span { font-size:.62em; color:var(--muted); }
+
+    /* timeline */
+    .timeline { list-style:none; margin:.4em 0 0 0; padding:0; }
+    .timeline li { display:flex; gap:.8em; align-items:flex-start; margin:.18em 0; }
+    .timeline .ver { flex:0 0 4.1em; font-family:"SF Mono",monospace; color:var(--accent); font-size:.8em; padding-top:.1em; }
+    .timeline .what { font-size:.82em; }
+    .timeline .date { color:var(--muted); font-size:.66em; }
+
+    .deck-footer { position: fixed; bottom: 10px; left: 18px; right: 18px; display:flex; justify-content:space-between;
+                   font-size: 13px; color: var(--muted); z-index: 5; pointer-events:none; font-family:"SF Mono",monospace; }
+    .reveal .slide-number { background: transparent; color: var(--muted); font-family:"SF Mono",monospace; }
+
+    .reveal section[data-background-color] h1,
+    .reveal section[data-background-color] h2 { color: var(--accent); }
+
+    .title-wrap { text-align:center; }
+    svg.diagram { display:block; margin: 0 auto; max-width: 100%; height:auto; }
+    .legend { font-size:.7em; color:var(--muted); }
+    hr.sep { border:0; border-top:1px solid var(--border); margin:.6em 0; }
+  </style>
+</head>
+
+<body>
+<div class="reveal">
+  <div class="slides">
+
+    <!-- ================= 1. TITLE ================= -->
+    <section data-background-color="#0f1115">
+      <div class="title-wrap">
+        <svg class="diagram" width="300" height="220" viewBox="0 0 300 220" aria-label="Skewed concentric energy isolines around a source">
+          <g fill="none" stroke="#4cc9f0" stroke-width="2.4" opacity="0.6">
+            <ellipse cx="120" cy="110" rx="26" ry="22"/>
+            <ellipse cx="125" cy="113" rx="52" ry="44"/>
+            <ellipse cx="132" cy="117" rx="80" ry="68"/>
+            <ellipse cx="141" cy="122" rx="110" ry="93"/>
+          </g>
+          <g fill="none" stroke="#4cc9f0" stroke-width="1.6" opacity="0.28">
+            <ellipse cx="152" cy="128" rx="140" ry="116"/>
+          </g>
+          <circle cx="120" cy="110" r="11" fill="#ff8c42"/>
+          <circle cx="120" cy="110" r="4.5" fill="#0f1115"/>
+          <path d="M 150 130 L 192 163" stroke="#ff8c42" stroke-width="4" stroke-linecap="round" fill="none"/>
+          <path d="M 182 156 L 195 166 L 187 152" stroke="#ff8c42" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+        <h1 style="margin:.1em 0 0;">Simujoules</h1>
+        <p style="font-size:1.0em; color:var(--accent-2); margin:.2em 0 .1em;">Asymmetric-cost cycling <em>energy fields</em> over digital elevation models — entirely in the browser</p>
+        <p class="muted small" style="margin:.6em 0 .2em;">Simulador bici-geo-energético · part of the <strong>pedalhidrografia</strong> effort for São Paulo</p>
+        <p class="small" style="margin-top:1.1em;">Danilo Lessa Bernardineli &nbsp;·&nbsp; <span class="muted">v24 (2026-06-21)</span></p>
+        <p class="smaller muted">telhas.pedalhidrografi.co/simujoules</p>
+      </div>
+      <aside class="notes">
+        Welcome. Simujoules is a free, build-step-free web app that computes the *energy* it costs to cycle across real terrain.
+        The motif is the app's own icon — concentric energy isolines, deliberately skewed south-east because the cost of cycling is
+        asymmetric: climbing is expensive, descending is nearly free. That asymmetry is the whole talk in one picture.
+        Everything runs client-side; the elevation data never leaves your machine.
+      </aside>
+    </section>
+
+    <!-- ================= 2. ROADMAP ================= -->
+    <section>
+      <h2>Roadmap</h2>
+      <div class="cols">
+        <div>
+          <ol>
+            <li><strong>Motivation</strong> — why <em>energy</em>, not distance or time</li>
+            <li><strong>The cost model</strong> — an asymmetric, directed graph</li>
+            <li><strong>Origin &amp; evolution</strong> — QGIS plugin → PWA</li>
+            <li><strong>Methodology</strong> — fields, corridors, density, routes</li>
+          </ol>
+        </div>
+        <div>
+          <ol start="5">
+            <li><strong>Systems</strong> — dual engine, bit-parity, scale</li>
+            <li><strong>The 2.5-D problem</strong> — bridges &amp; passability</li>
+            <li><strong>A performance model</strong> — predicting compute time</li>
+            <li><strong>Validation</strong>, reproducibility &amp; open science</li>
+            <li><strong>Limitations</strong> &amp; future work</li>
+          </ol>
+        </div>
+      </div>
+      <aside class="notes">Quick map of the talk. The two parts I'd flag as the genuine research contributions are section 6 (2.5-D multi-level routing) and section 7 (a validated analytic performance model). Everything else is the foundation that makes those possible.</aside>
+    </section>
+
+    <!-- ================= 3. MOTIVATION ================= -->
+    <section>
+      <h2>Motivation <span class="lead">A cyclist's real cost is effort, not kilometres</span></h2>
+      <div class="cols">
+        <div class="card">
+          <p>On hilly terrain — São Paulo is the home case — the shortest or fastest route can be the <em>most exhausting</em>.</p>
+          <ul class="small">
+            <li><strong>Flat</strong> is cheap.</li>
+            <li><strong>Climbing</strong> is expensive — you fight gravity.</li>
+            <li><strong>Descending</strong> partly <em>refunds</em> energy (coasting), but only partly.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <p>So the natural objective is <strong>mechanical energy</strong>, and the cost is:</p>
+          <ul class="small">
+            <li><em>Directional</em> — A→B ≠ B→A.</li>
+            <li><em>Asymmetric</em> — up and down are not mirror images.</li>
+          </ul>
+          <p class="small muted">Distance- and time-models miss exactly this. Energy captures the effort a rider actually feels.</p>
+        </div>
+      </div>
+      <p class="center small" style="margin-top:.6em;">Out of this falls a richer question: <span class="accent2">where does terrain itself force cyclists to converge?</span></p>
+      <aside class="notes">
+        The framing question. A flat 6 km route can be easier than a hilly 4 km one. Because climbing and descending are not symmetric,
+        the cost graph is *directed* — and that single fact drives the whole design: the "to-source" reverse field, the round-trip mode, the
+        directed bridge portals. Keep the asymmetry in mind; it recurs everywhere.
+      </aside>
+    </section>
+
+    <!-- ================= 4. ASYMMETRIC INSIGHT (diagram) ================= -->
+    <section>
+      <h2>The asymmetric insight</h2>
+      <svg class="diagram" width="760" height="280" viewBox="0 0 760 280">
+        <!-- ground profile: a hill -->
+        <path d="M 40 230 L 250 230 L 400 70 L 560 70 L 720 230" fill="none" stroke="#2a2e36" stroke-width="3"/>
+        <path d="M 40 230 L 250 230 L 400 70 L 560 70 L 720 230 L 720 260 L 40 260 Z" fill="#1a1d23" opacity="0.6"/>
+        <!-- flat segment cost -->
+        <text x="145" y="222" fill="#8a8f98" font-size="15" font-family="monospace">flat: α·d</text>
+        <!-- uphill arrow -->
+        <line x1="300" y1="170" x2="350" y2="110" stroke="#ff8c42" stroke-width="4" marker-end="url(#arrUp)"/>
+        <text x="250" y="120" fill="#ff8c42" font-size="16" font-family="monospace">+ β·Δh</text>
+        <text x="232" y="142" fill="#ff8c42" font-size="13" font-family="monospace">(pay to climb)</text>
+        <!-- downhill arrow -->
+        <line x1="610" y1="110" x2="660" y2="170" stroke="#4cc9f0" stroke-width="4" marker-end="url(#arrDn)"/>
+        <text x="600" y="120" fill="#4cc9f0" font-size="16" font-family="monospace">− η·β·|Δh|</text>
+        <text x="588" y="142" fill="#4cc9f0" font-size="13" font-family="monospace">(refund a fraction)</text>
+        <!-- riders -->
+        <circle cx="295" cy="178" r="7" fill="#ff8c42"/>
+        <circle cx="615" cy="118" r="7" fill="#4cc9f0"/>
+        <defs>
+          <marker id="arrUp" markerWidth="10" markerHeight="10" refX="6" refY="5" orient="auto"><path d="M0,0 L8,5 L0,10 Z" fill="#ff8c42"/></marker>
+          <marker id="arrDn" markerWidth="10" markerHeight="10" refX="6" refY="5" orient="auto"><path d="M0,0 L8,5 L0,10 Z" fill="#4cc9f0"/></marker>
+        </defs>
+      </svg>
+      <p class="center small">Every metre travelled costs <span class="accent">α·d</span>. Climbing adds <span class="accent">β·Δh</span>. A descent <em>gives back</em> only <span class="accent2">η</span> of what the climb cost — never more, never below zero.</p>
+      <aside class="notes">
+        Three forces. A baseline cost per metre travelled (rolling resistance, air, the act of pedalling) — that's α·d, always positive.
+        Climbing adds β·Δh, proportional to height gained. A descent refunds, but only a fraction η of the equivalent climb, and the edge cost
+        is clamped at zero — you can coast for free but the terrain can never *pay* you to ride. η is typically small (0.1), reflecting that
+        most of a descent's potential energy is lost to braking, drag and not-pedalling.
+      </aside>
+    </section>
+
+    <!-- ================= 5. COST MODEL ================= -->
+    <section>
+      <h2>The cost model <span class="lead">one equation, shared by every algorithm and both engines</span></h2>
+      <p class="small">For a directed edge <span class="mono">u → v</span> over ground distance <span class="mono">d</span>, with <span class="mono">Δh = h<sub>v</sub> − h<sub>u</sub></span>:</p>
+      <div class="eq big">
+        cost = <span class="accent">α·d + β·Δh</span> &nbsp; if Δh ≥ 0 &nbsp;<span class="muted">(uphill / flat)</span><br>
+        cost = <span class="accent2">max(0, &nbsp;α·d − η·β·|Δh|)</span> &nbsp; if Δh &lt; 0 &nbsp;<span class="muted">(downhill)</span>
+      </div>
+      <div class="cols tight" style="margin-top:.5em;">
+        <div class="card small"><span class="tag warm">α</span> cost per <strong>flat metre</strong><br><span class="muted">default 0.008 (≈ 8 mJ/m)</span></div>
+        <div class="card small"><span class="tag warm">β</span> cost per <strong>metre climbed</strong><br><span class="muted">default 1.0 (≈ 1 J/m)</span></div>
+        <div class="card small"><span class="tag cool">η ∈ [0,1]</span> descent <strong>recovery</strong><br><span class="muted">default 0.1 (10% refunded)</span></div>
+      </div>
+      <p class="center small muted" style="margin-top:.5em;">One energy unit ≈ the work to climb 1 m ≈ <span class="accent2">0.8–1 kJ</span> mechanical, for an ~85 kg rider + bike. A deliberately <em>rough</em> cyclist model — not a calibrated physiological one.</p>
+      <aside class="notes">
+        This is the heart. Note the model is honest about its scope: a rough effort proxy, not a physiological power model. The defaults make
+        β=1 the natural unit — one unit of energy is one metre of climb — and α=0.008 means flat distance is cheap relative to climbing, so the
+        optimiser will happily take a longer flat detour over a short steep one. This exact code appears in *every* routine: Dijkstra, the density
+        engine, A*, the max-cost DP, the bridge portals, and the graph engine. One model, reused — which is what makes cross-mode consistency provable.
+      </aside>
+    </section>
+
+    <!-- ================= 6. ORIGIN ================= -->
+    <section>
+      <h2>Origin <span class="lead">"a static-site, no-backend port of a QGIS Processing algorithm"</span></h2>
+      <div class="cols">
+        <div>
+          <ul class="small">
+            <li>Began <strong>2026-05-05</strong>: load a GeoTIFF DEM, click two points, render the asymmetric energy field. ~1,380 lines.</li>
+            <li>First architecture bet: a <strong>Rust→WebAssembly</strong> inner loop with a pure-JS fallback (for speed at scale).</li>
+            <li>The wasm bet was <em>abandoned</em> 8 days later (2026-05-13) — JS Web Workers became the sole engine.</li>
+            <li>Part of <strong>pedalhidrografi.co</strong>; deploys to a GCS bucket behind Cloud CDN.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Two roads to "native"</h3>
+          <p class="small"><span class="accent">Dropped:</span> wasm <em>in-page</em> engine — complexity for a speed-up that the pure-JS path, once tuned, mostly recovered.</p>
+          <p class="small"><span class="accent2">Kept (later):</span> an <em>opt-in</em> Rust+rayon HTTP backend — native speed when you want it, never required.</p>
+        </div>
+      </div>
+      <p class="center small muted">A research prototype that turned into a maintained tool — with the engineering discipline to match.</p>
+      <aside class="notes">
+        The lineage matters for an academic audience: this started life as a QGIS Processing algorithm. The web port was meant to remove the
+        install barrier. The wasm story is instructive — the first instinct was "drop to native for speed," but they backed it out and instead
+        invested in making the JS engine fast (typed arrays, a hand-rolled binary heap, later a radix heap). Native came back, but as an *optional*
+        server, never a dependency. That "optional, with automatic fallback" pattern recurs across every heavy feature.
+      </aside>
+    </section>
+
+    <!-- ================= 7. EVOLUTION TIMELINE ================= -->
+    <section>
+      <h2>Evolution <span class="lead">prototype churn → a disciplined, versioned tool</span></h2>
+      <ul class="timeline">
+        <li><span class="ver">v1–v3</span><span class="what"><span class="date">2026-05-08 ·</span> First public shell: α/β/η Dijkstra, passes, top-N, density, .gpkg networks, IDW fill, bundle export, PT/EN, FABDEM loader, PWA</span></li>
+        <li><span class="ver">v4–v11</span><span class="what"><span class="date">May ·</span> Relief layer, OOM fixes for 100M-cell DEMs, maximize + length-constrained DP — wasm removed</span></li>
+        <li><span class="ver">v12</span><span class="what"><span class="date">06-12 ·</span> <strong>Relaunch (+3,253 lines):</strong> worker pool, optional Rust+rayon backend, radix-heap density, calibrated estimator, QMC sampling, OSM streets, scenario compare</span></li>
+        <li><span class="ver">v13–v14</span><span class="what"><span class="date">06-19 ·</span> Graph mode ("follow the vectors") · the compute-time <strong>performance model</strong> (≈3× error → ±20%)</span></li>
+        <li><span class="ver">v15–v17</span><span class="what"><span class="date">06-19 ·</span> Lossless bundle round-trip · persistence · accessibility pass</span></li>
+        <li><span class="ver">v18–v19</span><span class="what"><span class="date">06-19 ·</span> <strong>Impassable mask</strong> (water) · <strong>OSM bridges &amp; tunnels with hybrid portal edges</strong> (2.5-D)</span></li>
+        <li><span class="ver">v20–v24</span><span class="what"><span class="date">06-21 ·</span> Deck passes · OSM water mask (areas/sea/rivers) · OSM <span class="mono">ele</span> on decks</span></li>
+      </ul>
+      <aside class="notes">
+        Two phases. May 2026: rapid "sync" commits, a working prototype, no version discipline. Then a month of silence. June 12 is the relaunch —
+        the single biggest commit — where it grows the dual-engine architecture, the documentation discipline (CLAUDE.md, CHANGELOG, parity tests),
+        and SEO/LLM metadata. From v14 it adopts strict versioned releases. Worth noting: much of this was authored with an AI coding agent under a
+        strict invariant-and-parity regime — I'll come back to that as a process point under validation.
+      </aside>
+    </section>
+
+    <!-- ================= 8. METHODOLOGY: FIELD ================= -->
+    <section>
+      <section>
+        <h2>Methodology I <span class="lead">the energy field</span></h2>
+        <div class="cols">
+          <div>
+            <p class="small">Run <strong>Dijkstra</strong> on an <strong>8-connected grid</strong> (4 cardinal + 4 diagonal) from an anchor point. For every passable cell you get the <em>minimum energy</em> to reach it.</p>
+            <p class="small">Three modes — all needed <em>because</em> the graph is directed:</p>
+            <ul class="small">
+              <li><span class="tag warm">from</span> forward field — cost to ride <em>out</em> to each cell</li>
+              <li><span class="tag cool">to</span> reverse search — cost to ride <em>back</em> to the anchor</li>
+              <li><span class="tag">round</span> forward + reverse, summed per cell</li>
+            </ul>
+          </div>
+          <div class="card smaller">
+            <h3>Numerical care</h3>
+            <p>Energies stored as <strong>Float32</strong> (memory), but heap priorities and comparisons are <strong>Float64</strong>.</p>
+            <p>A per-cell <code>settled</code> byte — <em>not</em> <code>g &gt; E[idx]</code> — filters stale heap entries. Drop either guard and the f32/f64 mismatch corrupts the passes counts and caps the field at ~200 m.</p>
+          </div>
+        </div>
+        <aside class="notes">
+          Standard Dijkstra, but the "to" mode is the non-obvious one: because cost is directional, the energy to get *back* is a genuinely different
+          field, so it gets its own reverse search (edges flipped). Round-trip sums them. The numerical-care box is a real war story: storing energy in
+          f32 halves memory on a 135-million-cell grid, but then your heap priorities (f64) disagree with stored values at the bit level, so you must
+          gate on an explicit settled flag, not on comparing tentative-vs-stored. They learned that the hard way.
+        </aside>
+      </section>
+      <section>
+        <h2>Methodology II <span class="lead">passes &amp; "natural corridors"</span></h2>
+        <div class="cols">
+          <div>
+            <p class="small"><strong>Passes count</strong> at a cell = its <em>subtree size</em> in the shortest-path tree: how many optimal paths cross it.</p>
+            <p class="small">Computed by walking the settle order in <em>reverse</em>, adding each cell's count to its parent.</p>
+            <p class="small accent2">It reveals the terrain's <em>natural highways</em> — saddles, valley floors, the places topology forces movement to funnel through — without ever prescribing a road network.</p>
+          </div>
+          <div>
+            <svg class="diagram" width="320" height="230" viewBox="0 0 320 230">
+              <!-- a little tree converging into a corridor -->
+              <g stroke="#2a2e36" stroke-width="2" fill="none">
+                <path d="M40,30 C120,60 130,90 160,110"/>
+                <path d="M40,80 C120,90 130,100 160,110"/>
+                <path d="M40,130 C120,120 130,112 160,110"/>
+                <path d="M40,200 C120,170 130,140 160,110"/>
+              </g>
+              <g stroke="#ff8c42" stroke-width="5" fill="none">
+                <path d="M160,110 C210,115 240,170 280,200"/>
+              </g>
+              <circle cx="160" cy="110" r="9" fill="#4cc9f0"/>
+              <text x="120" y="100" fill="#4cc9f0" font-size="13" font-family="monospace">saddle</text>
+              <text x="210" y="160" fill="#ff8c42" font-size="13" font-family="monospace">corridor (high passes)</text>
+            </svg>
+          </div>
+        </div>
+        <aside class="notes">
+          This is the conceptual payoff. A single energy field tells you the cost to one anchor. But passes — betweenness-like subtree sizes — tell you
+          where *many* paths converge. In hilly terrain that's the saddles and valley floors. It's an emergent property of topography, not an input.
+          That's why I call them "natural corridors." Round-trip mode only counts destinations you could actually complete within budget.
+        </aside>
+      </section>
+      <section>
+        <h2>Methodology III <span class="lead">multi-reference density + quasi-random sampling</span></h2>
+        <div class="cols">
+          <div>
+            <p class="small"><strong>Density</strong> = passes counts <em>accumulated over K reference points</em> and normalised. A <em>(quasi-)Monte-Carlo</em> estimate of how strongly terrain channels movement, region-wide.</p>
+            <p class="small">References can be clicked, pseudo-random, or <strong>quasi-random (QMC)</strong> — <em>Sobol</em> or <em>Halton</em> sequences.</p>
+          </div>
+          <div class="card small">
+            <h3>Why QMC?</h3>
+            <p>Sobol/Halton cover the area <em>evenly</em>, without the clumps and gaps of pseudo-random — so the density field <strong>converges with fewer references</strong>. Successive batches continue the same sequence.</p>
+          </div>
+        </div>
+        <p class="center small muted">Density is the perf-critical path — and the reason the whole compute architecture (next) exists.</p>
+        <aside class="notes">
+          Quasi-Monte-Carlo is a small but genuine bit of rigour. Pseudo-random points clump; Sobol and Halton are low-discrepancy, so they tile the
+          area evenly and the density estimate converges faster — fewer Dijkstra runs for the same picture. The implementation builds Sobol direction
+          numbers from a primitive polynomial; Halton uses bases 2 and 3. Each reference is an independent Dijkstra, which is exactly why it parallelises.
+        </aside>
+      </section>
+      <section>
+        <h2>Methodology IV <span class="lead">alternatives, and the opposite question</span></h2>
+        <div class="cols">
+          <div class="card small">
+            <h3>Top-N routes</h3>
+            <p>Run A* repeatedly with a <em>repulsion penalty</em> on already-used cells (per-cell / linear / quadratic) so alternatives genuinely diverge.</p>
+            <p class="muted">The penalty multiplies only the <span class="accent">α·dist</span> term — <em>climb is never penalised</em> (it's unavoidable). Admissible heuristic: <span class="mono">α·straight + β·max(0, Δh<sub>goal</sub>)</span>.</p>
+          </div>
+          <div class="card small">
+            <h3>Maximize mode</h3>
+            <p>Invert the objective — find the <em>most expensive</em> routes — by relaxing on <span class="mono">maxEdgeCost − cost</span>.</p>
+            <p>Optionally <strong>length-constrained</strong>: a layered DP finds the max-cost path of <em>exactly L edges</em> (Bellman-Ford-style, capped at 256 MB of parent pointers).</p>
+          </div>
+        </div>
+        <p class="small muted center">Plus <strong>energy budgets</strong> (<span class="mono">eMax</span>) that prune the search — per-leg or round-trip-total.</p>
+        <aside class="notes">
+          Two extras. Top-N uses iterative penalisation — re-run A*, charge more for cells you've already used, get a spatially distinct alternative.
+          Crucially the penalty hits only the distance term, never the climb, because you can't wish a hill away. Maximize is the dual problem — the
+          hardest ride the terrain affords — useful for stress-testing or "what's the worst case." The length-constrained version is a layered DP, and
+          it's memory-bounded because exactly-L-edge tables get huge fast.
+        </aside>
+      </section>
+    </section>
+
+    <!-- ================= 9. SYSTEMS: TIERS ================= -->
+    <section>
+      <h2>Systems — two compute tiers</h2>
+      <div class="cols">
+        <div class="card">
+          <h3>One worker</h3>
+          <p class="small">Point-to-point runs (from/to/round, top-N, maximize): a single Web Worker. Simple, responsive.</p>
+        </div>
+        <div class="card hi">
+          <h3>A memory-budgeted pool</h3>
+          <p class="small">Density fans <em>K independent Dijkstras</em> across a worker pool. Each worker returns raw accumulators; the main thread merges &amp; normalises.</p>
+          <div class="eq smaller">poolSize = min( K, cores−1, <span class="accent">memCap</span> )</div>
+          <p class="smaller muted">memCap budgets ~38 B/cell (≈55 round) against <code>navigator.deviceMemory</code> — which the spec caps at 8 GB.</p>
+        </div>
+      </div>
+      <div class="card small" style="margin-top:.5em; border-color:var(--accent);">
+        <strong class="accent">The 135 M-cell ceiling.</strong> On <span class="mono">sampa_geral</span> (14913×9055 ≈ 135 M cells), one density worker needs ≈ 5 GB; two won't fit 16 GB — so the pool honestly collapses to <strong>one worker</strong>. A <code>#max-workers</code> override exists for big-RAM machines the spec can't see.
+      </div>
+      <aside class="notes">
+        The split is principled: a single point-to-point query doesn't parallelise (it's one Dijkstra), but density is K independent Dijkstras —
+        embarrassingly parallel. The pool sizing is memory-aware, not just core-aware, because each worker needs its own copy of grid-sized scratch.
+        The "honest ceiling" point is one I like: on the biggest DEM the tool tells you the truth — it's one worker, because two would OOM. It doesn't
+        pretend to parallelism it can't deliver. deviceMemory being capped at 8 GB by the spec is why the manual override exists.
+      </aside>
+    </section>
+
+    <!-- ================= 10. SYSTEMS: BACKEND ================= -->
+    <section>
+      <h2>Systems — the optional native backend</h2>
+      <div class="cols">
+        <div>
+          <ul class="small">
+            <li><strong>Rust + rayon</strong> HTTP server — <em>off by default</em>, enabled per-session, with automatic fallback to browser workers on any failure.</li>
+            <li>References split into per-thread slices, each <strong>reusing one set of scratch buffers</strong> (no per-ref allocation).</li>
+            <li>Priority queue: a <strong>radix heap on raw f64 bits</strong> — exact minima, no quantisation.</li>
+            <li>Concurrent slices <strong>capped to a memory budget</strong> — high ref counts run more serially rather than OOM-crash.</li>
+          </ul>
+        </div>
+        <div class="card small">
+          <h3>Speed-up (measured)</h3>
+          <div class="kpi">
+            <div class="k"><b>2–4×</b><span>per Dijkstra<br>vs JS worker</span></div>
+            <div class="k"><b>3–10×</b><span>over the<br>browser pool</span></div>
+          </div>
+          <p class="smaller muted center">At full saturation both are <em>memory-bandwidth-bound</em>, so native and JS converge on huge frontiers.</p>
+        </div>
+      </div>
+      <aside class="notes">
+        The backend is an opt-in accelerator, never required — tick a box, it streams the grid over a binary protocol, computes on all cores, streams
+        the field back; the moment it's unreachable the app silently uses browser workers. The radix heap on raw IEEE-754 bits is a nice trick: f64
+        keys are order-preserving as unsigned ints, so you get exact-minimum extraction in O(1) push / amortised O(64) pop with no float quantisation.
+        The honest caveat: on the biggest grids both engines are limited by memory bandwidth, not CPU, so the native advantage shrinks toward ~1.3×.
+      </aside>
+    </section>
+
+    <!-- ================= 11. SYSTEMS: PARITY ================= -->
+    <section>
+      <h2>One model, two engines — <span class="accent2">bit-parity by construction</span></h2>
+      <p class="small"><code>backend/src/main.rs</code> is a line-for-line <strong>port</strong> of <code>energy-worker.js</code>'s <code>dijkstra()</code>. The optimisation must never change the science — only the speed.</p>
+      <div class="cols tight">
+        <div class="card small center">
+          <div style="font-size:1.6em;" class="accent2">|Δenergy| &lt; 1e-3</div>
+          <p class="smaller muted">the Float32 storage floor</p>
+        </div>
+        <div class="card small center">
+          <div style="font-size:1.6em;" class="accent2">|Δdensity| &lt; 1e-15</div>
+          <p class="smaller muted">machine epsilon</p>
+        </div>
+        <div class="card small center">
+          <div style="font-size:1.6em;" class="green">0 mismatches</div>
+          <p class="smaller muted">finite ↔ infinite</p>
+        </div>
+      </div>
+      <p class="small">Passes counts may differ <em>only</em> where two paths have <strong>exactly equal f64 cost</strong> — the radix heap and the binary heap break ties in different orders, and <em>either</em> optimal tree is valid.</p>
+      <p class="smaller muted center"><code>node backend/test-backend.mjs</code> enforces this across from/to/round × budgets × bridge portals.</p>
+      <aside class="notes">
+        This is the engineering thesis of the project: you can have a fast native path *and* trust it, because it's provably the same computation.
+        Energies match to the f32 storage floor (1e-3); density matches to machine epsilon. The only permitted divergence is passes counts on *exact*
+        f64 ties — where two distinct shortest-path trees are both genuinely optimal and the two heaps just pick different parents. The test asserts
+        this on every mode. The discipline is written into CLAUDE.md: change one engine, you must change the other, and the test gates the commit.
+      </aside>
+    </section>
+
+    <!-- ================= 12. THE 2.5-D PROBLEM ================= -->
+    <section>
+      <section data-background-color="#13161c">
+        <h2>The 2.5-D problem <span class="lead">the project's deepest contribution</span></h2>
+        <p class="small">A bare-earth DEM stores <strong>one elevation per cell</strong>. Two things it cannot represent:</p>
+        <div class="cols">
+          <div class="card small"><span class="tag red">water</span> The grid happily routes a bike <em>across a lake</em>. There's nothing marking "you can't go here."</div>
+          <div class="card small"><span class="tag warm">bridges</span> A viaduct deck is ~flat, but the DEM shows the <em>valley under it</em>. Routing over the bridge <em>dives into the gap</em> and pays a phantom climb.</div>
+        </div>
+        <p class="center small accent2" style="margin-top:.5em;">The crux: a bridge over a road is <strong>two routable surfaces at the same (row, col)</strong>.</p>
+        <aside class="notes">
+          Here's where it gets genuinely hard and genuinely novel. A DEM is 2.5-D — a heightfield, one z per (x,y). That's fine until you have water
+          (an absence of a "no-go" concept) or a bridge (a place where two surfaces coexist vertically — the deck and the ground beneath). The viaduct
+          case is the killer: the deck should read flat, but a bare-earth model shows the saddle below it, so the optimiser thinks crossing the bridge
+          means descending into a gully and climbing out. Both problems were solved in v18 and v19.
+        </aside>
+      </section>
+      <section>
+        <h2>Three approaches, one winner</h2>
+        <table>
+          <tr><th>Approach</th><th>Idea</th><th>Verdict</th></tr>
+          <tr><td>Raster cell-override</td><td>Overwrite the deck cells' height to the deck</td><td class="red">✗ raises the ground at the crossing — breaks the road <em>underneath</em></td></tr>
+          <tr><td>Graph mode</td><td>Route on the vector network, deck &amp; road as separate edges</td><td class="muted">◐ works, JS-only — kept for "follow the vectors", deferred for raster</td></tr>
+          <tr><td><strong>Hybrid portal edges</strong></td><td>Keep the dense raster <em>and</em> inject one shortcut per bridge</td><td class="green">✓ both levels stay correct simultaneously</td></tr>
+        </table>
+        <p class="small" style="margin-top:.5em;">The hybrid is the <em>only</em> raster approach where the route <strong>over</strong> the bridge and the route <strong>under</strong> it are both correct — on the same grid, at once.</p>
+        <aside class="notes">
+          They investigated three options. Cell-override is the naive fix — just raise the deck cells — and it's wrong precisely at the interesting
+          cell: raising the deck raises the ground for the road passing underneath, breaking that route. Graph mode works but is a different engine
+          (the vector path). The winner is the hybrid: keep the full ground raster so the under-route is untouched, and add a *portal*.
+        </aside>
+      </section>
+      <section>
+        <h2>The portal model</h2>
+        <svg class="diagram" width="720" height="280" viewBox="0 0 720 280">
+          <!-- ground: a valley/cut dipping in the middle -->
+          <path d="M 40 110 C 200 120 250 230 360 230 C 470 230 520 120 680 110" fill="none" stroke="#2a2e36" stroke-width="3"/>
+          <path d="M 40 110 C 200 120 250 230 360 230 C 470 230 520 120 680 110 L 680 270 L 40 270 Z" fill="#1a1d23" opacity="0.55"/>
+          <!-- deck A-B flat across the top -->
+          <line x1="120" y1="110" x2="600" y2="110" stroke="#ff8c42" stroke-width="5"/>
+          <circle cx="120" cy="110" r="8" fill="#ff8c42"/><text x="108" y="100" fill="#ff8c42" font-size="16" font-family="monospace">A</text>
+          <circle cx="600" cy="110" r="8" fill="#ff8c42"/><text x="600" y="100" fill="#ff8c42" font-size="16" font-family="monospace">B</text>
+          <!-- portal arc A=>B -->
+          <path d="M 130 96 C 300 40 440 40 590 96" fill="none" stroke="#ff8c42" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#pArr)"/>
+          <text x="300" y="48" fill="#ff8c42" font-size="14" font-family="monospace">portal: α·L + β·Δh  (one directed shortcut)</text>
+          <!-- road C-D crossing UNDER, on the ground -->
+          <line x1="300" y1="252" x2="420" y2="200" stroke="#4cc9f0" stroke-width="4"/>
+          <circle cx="300" cy="252" r="7" fill="#4cc9f0"/><text x="280" y="270" fill="#4cc9f0" font-size="15" font-family="monospace">C</text>
+          <circle cx="420" cy="200" r="7" fill="#4cc9f0"/><text x="424" y="196" fill="#4cc9f0" font-size="15" font-family="monospace">D</text>
+          <defs><marker id="pArr" markerWidth="10" markerHeight="10" refX="6" refY="5" orient="auto"><path d="M0,0 L8,5 L0,10 Z" fill="#ff8c42"/></marker></defs>
+        </svg>
+        <p class="small center">A directed shortcut <span class="accent">A↔B</span> at the flat-deck cost, relaxed <em>alongside</em> the 8 grid edges. The cells <strong>under the deck are never touched</strong> — so the ground line <span class="accent2">C–D</span> still routes through the valley, unchanged.</p>
+        <aside class="notes">
+          The portal is one directed edge between the two abutment cells, priced at the flat-deck cost using the *same* asymmetric model. It's relaxed
+          right after the eight grid neighbours, with the same settled/budget/maximize guards. The genius is what it *doesn't* do: it never modifies the
+          cells beneath the deck. So the over-route (A→B) gets its cheap flat crossing, and the under-route (C→D) still sees the real ground. Two levels,
+          one raster. And because the portal cost is derived from the same shared inputs in JS and Rust, it stays bit-parity — the test has +portals cases.
+        </aside>
+      </section>
+      <section>
+        <h2>Passability — pulling the world from OpenStreetMap</h2>
+        <div class="cols">
+          <div class="card small">
+            <h3>Bridges &amp; tunnels (v19/v23)</h3>
+            <p>Overpass query for highway bridges (<code>way[bridge][highway]</code>) / tunnels over the DEM extent. OSM splits a bridge way <em>exactly at its abutments</em> — free endpoints. v23 also reads node <code>ele</code> tags for true deck heights.</p>
+          </div>
+          <div class="card small">
+            <h3>Impassable water (v18/v22)</h3>
+            <p>Upload a binary mask, <em>or</em> pull from OSM:</p>
+            <ul class="smaller">
+              <li>water <strong>areas</strong> — even-odd polygon fill, islands → holes</li>
+              <li>open <strong>sea</strong> — from coastlines (land-left/water-right) via an orientation <em>sweep</em>, so gaps never leak</li>
+              <li><strong>rivers</strong> — supercover lines an 8-connected route can't slip across</li>
+            </ul>
+          </div>
+        </div>
+        <p class="smaller muted center">All composed app-side, so the parity-locked engine stays untouched — the <strong>no-op invariant</strong>: no mask, no bridges ⇒ byte-identical to before.</p>
+        <aside class="notes">
+          You don't need to bring your own GIS data — the tool pulls bridges and water straight from OpenStreetMap over the DEM's footprint. Two nice
+          details: OSM conveniently splits bridge ways at the abutments, so the geometry hands you the ground endpoints for free; and the sea fill can't
+          just flood-fill (a single coastline gap would leak the ocean across all land), so it uses the coastline's directed orientation — water is always
+          to the right — swept horizontally and vertically. The whole passability layer is composed before the engine sees it, preserving bit-parity.
+        </aside>
+      </section>
+      <section data-background-color="#13161c">
+        <h2>Real-data proof <span class="lead">Avenida Doutor Arnaldo viaduct, São Paulo</span></h2>
+        <p class="small">A <span class="mono">bridge=viaduct</span> over a multi-level interchange (metro + cross-streets). Driven headlessly on the real <code>sampa_centro.tif</code>:</p>
+        <div class="kpi">
+          <div class="k"><b>814 m</b><span>deck abutments</span></div>
+          <div class="k"><b>788.7 m</b><span>bare-earth dip<br>under the deck</span></div>
+          <div class="k"><b>25.18→1.33</b><span>E[B] with portal<br>(≈ 18.9× cheaper)</span></div>
+          <div class="k"><b class="green">Δ = 0</b><span>orthogonal ground<br>line C→D</span></div>
+        </div>
+        <p class="center small" style="margin-top:.4em;">The crossing got <strong>18.9× cheaper</strong> over the bridge — while the road <em>underneath</em> is <span class="green">byte-identical</span>. <span class="accent2">Multi-level coexistence, proven on real terrain.</span></p>
+        <aside class="notes">
+          This is the money slide for the 2.5-D claim. A real viaduct on Av. Dr. Arnaldo: the deck sits at 814 m, but the bare-earth DEM dips to 788.7 m
+          in the gap below — a 25-metre phantom valley. Add the portal and the energy to reach the far abutment drops from 25.18 to 1.33 units — about
+          18.9× — which is exactly α times the 173-metre flat deck. And the orthogonal ground line crossing underneath? Bit-for-bit unchanged. That Δ=0
+          is the proof that the two levels genuinely coexist; we fixed the over-route without touching the under-route. About 44% of the wider field
+          shifts too — expected, because the bridge is a real shortcut that opens cheap downstream access.
+        </aside>
+      </section>
+    </section>
+
+    <!-- ================= 13. PERFORMANCE MODEL ================= -->
+    <section>
+      <section>
+        <h2>A performance model <span class="lead">predicting compute time before you run</span></h2>
+        <p class="small">Density runs can take seconds to many minutes. The app shows a pre-flight estimate — backed by a <em>validated analytic model</em>, not a fudge factor.</p>
+        <div class="eq big">T ≈ c<sub>alloc</sub>·N &nbsp;+&nbsp; <span class="accent">R · τ<sub>ref</sub>(e)</span> / <span class="accent2">S(P<sub>eff</sub>)</span></div>
+        <div class="cols tight smaller">
+          <div class="card">τ<sub>ref</sub>(e) = (N/r) · <span class="accent">min(1, (e/e<sub>full</sub>)²)</span> · ν<br><span class="muted">per-reference cost — quadratic in budget, then saturates</span></div>
+          <div class="card">S(P) = P / (1 + b(P−1))<br><span class="muted">parallel speed-up with bandwidth contention b</span></div>
+        </div>
+        <p class="center small">Time is <strong>linear in references R</strong>, <strong>quadratic-then-flat in the energy budget</strong>, and <strong>divided by threads</strong>.</p>
+        <aside class="notes">
+          The estimator is itself a small research result. Density cost decomposes into a one-time scratch allocation (c_alloc·N) plus per-reference
+          Dijkstra work, divided by parallelism. The interesting term is τ_ref: exploration grows quadratically with the energy budget — because reachable
+          *area* scales as reach-squared and reach scales with budget over α — until it saturates the whole grid. The measured exponent is 2.0–2.1, right
+          on the geometric prediction. So doubling the budget quadruples the work, until you've filled the DEM and it flatlines.
+        </aside>
+      </section>
+      <section>
+        <h2>The coupling that fooled the estimate</h2>
+        <div class="eq big">P<sub>eff</sub> = min( P, &nbsp; R, &nbsp; <span class="accent">⌊(M − 21N) / 38N⌋</span> )</div>
+        <p class="small">Usable threads are capped not by <em>cores</em> but by <strong>memory</strong> — each worker/slice needs grid-sized scratch. On 135 M cells: 1 worker ≈ 8 GB, 2 ≈ 13 GB → two won't fit 16 GB.</p>
+        <div class="card small" style="border-color:var(--accent);">
+          <strong class="accent">Anatomy of a 3.63× bug.</strong> The old backend estimate assumed 8-way parallelism — but the server only fits <strong>2 memory-bounded slices</strong> on a huge DEM. Combined with a too-low native constant, it under-estimated by 3.63×. The fix: <em>replicate the slice cap</em> in the estimate.
+        </div>
+        <aside class="notes">
+          Here's the bug that motivated the whole investigation. Users reported the estimate reading ~3× low on the big DEM with the native backend. The
+          root cause: the estimate assumed parallelism scaled with core count, but each rayon slice needs ~5 GB of scratch, so only 2 fit in the memory
+          budget regardless of having 10 cores. The model divided work by 8 when reality divided by 2 — a 4× error, partly offset, netting 3.63×. The lesson
+          is that memory, not cores, governs parallelism at scale — the P↔M coupling — and the estimate has to model it.
+        </aside>
+      </section>
+      <section>
+        <h2>Validation — the model is real</h2>
+        <table>
+          <tr><th>Scenario</th><th>Predicted</th><th>Measured</th></tr>
+          <tr><td>50 refs, e=300, 1 thread, JS</td><td class="num">426 s</td><td class="num">427 s</td></tr>
+          <tr><td>50 refs, e=300, 2 threads, native</td><td class="num">180 s</td><td class="num">177 s</td></tr>
+          <tr><td>Reported case — old estimate</td><td class="num">20.9 s</td><td class="num red">76.0 s (3.63× off)</td></tr>
+          <tr><td>Reported case — new, first run</td><td class="num">82.6 s</td><td class="num green">76.0 s (0.92)</td></tr>
+        </table>
+        <p class="small" style="margin-top:.5em;">In production: a per-DEM <strong>calibration probe</strong> at load (3 refs, capped by <em>settled cells</em> not budget → always under ~1.5 s and always <em>unsaturated</em>), plus a per-engine <strong>online EMA correction</strong>.</p>
+        <p class="center small">First-run accuracy <span class="accent2">±20%</span> → converges to <span class="accent2">~1%</span> within a run or two. Residual ±30% is dominated by <em>which references you place</em>, not the machine.</p>
+        <aside class="notes">
+          And it validates: 426 predicted vs 427 measured is almost suspiciously good, but it holds across the matrix. The production system can't hardcode
+          constants like r or e_full because they're terrain-dependent, so it runs a tiny calibration probe when you load a DEM — three spread references,
+          stopped after a fixed *cell count* rather than a budget, which guarantees it finishes fast and, crucially, anchors at an unsaturated point. Then a
+          per-engine exponential-moving-average correction learns the residual from each completed run. First estimate within 20%, then ~1%. The honest
+          caveat: the dominant remaining error is *which* references you pick — a flat-valley reference explores far more than a ridge-boxed one.
+        </aside>
+      </section>
+    </section>
+
+    <!-- ================= 14. VALIDATION & PROCESS ================= -->
+    <section>
+      <h2>Validation &amp; verification</h2>
+      <div class="cols">
+        <div>
+          <p class="small">Four test suites, run before every engine commit (<em>there is no CI</em>):</p>
+          <ul class="smaller">
+            <li><code>test-worker-pool.mjs</code> — invariants + <strong>pooled ≡ single-run</strong> density (maxΔ = 0) + portal regression</li>
+            <li><code>test-backend.mjs</code> — <strong>JS↔Rust bit-parity</strong>, all modes × portals</li>
+            <li><code>test-water-raster.mjs</code> — OSM water rasterisation vs pure mirrors</li>
+            <li><code>test-graph-engine.mjs</code> — planarisation + a 400-trial crossing fuzz</li>
+          </ul>
+        </div>
+        <div class="card small">
+          <h3>Two keystones</h3>
+          <p><strong class="accent2">The no-op invariant.</strong> A run with no mask and no bridges is <em>byte-identical</em> to the pre-feature engine — so passability could ship without re-validating the parity-locked core.</p>
+          <p><strong class="accent2">Adversarial review as process.</strong> The v18 engine change was reviewed by <strong>11 agents → 6 real issues, 0 false positives.</strong></p>
+        </div>
+      </div>
+      <p class="smaller muted center">Correctness is treated as <em>bit-level parity</em>, not approximate agreement — verified structurally, not just sampled.</p>
+      <aside class="notes">
+        Validation philosophy: correctness here means *bit parity*, not "close enough." The pooled-vs-single test proves that fanning density across a
+        worker pool introduces literally zero error (maxΔ = 0). The no-op invariant is the architectural keystone — every new feature is built so that
+        with it switched off, the output is byte-identical to before, which means you never have to re-validate the core. And the development process
+        itself is part of the evidence: much of this was built with an AI coding agent, but under a strict regime of parity tests and adversarial
+        multi-agent review — 11 reviewers on the v18 change found 6 real bugs and raised zero false alarms. That's the kind of rigour that makes me trust it.
+      </aside>
+    </section>
+
+    <!-- ================= 15. REPRODUCIBILITY ================= -->
+    <section>
+      <h2>Reproducibility &amp; open science</h2>
+      <div class="cols">
+        <div class="card small">
+          <h3>One run → one bundle (.zip)</h3>
+          <ul class="smaller">
+            <li><code>energy.tif</code> (Float32), <code>passes.tif</code> (Float64), <code>network/impassable.tif</code> (Uint8)</li>
+            <li><code>routes / path / bridges</code> GeoJSON</li>
+            <li><code>metadata.jsonld</code> — <strong>every parameter</strong></li>
+          </ul>
+          <p class="smaller accent2">Reproducible from the JSON-LD + the same DEM. Opens directly in QGIS.</p>
+        </div>
+        <div class="card small">
+          <h3>A real ontology</h3>
+          <p class="smaller">The bundle's terms are a published <strong>OWL / JSON-LD vocabulary</strong> (schema v3, <em>CC-BY-4.0</em>) with QUDT units and xsd ranges — machine-readable Linked Data.</p>
+          <h3 style="margin-top:.5em;">Privacy by architecture</h3>
+          <p class="smaller">Pure client-side compute — <strong>your DEM never leaves the browser</strong>. No account, no upload, works offline after first load.</p>
+        </div>
+      </div>
+      <p class="smaller muted center">Build-step-free PWA: <code>index.html</code> + <code>app.js</code> + Web Workers · five CDN libraries, SRI-pinned · service-worker offline · PT/EN.</p>
+      <aside class="notes">
+        The open-science story. Every run exports a self-contained zip: georeferenced GeoTIFFs that drop straight into QGIS, GeoJSON for the vector
+        layers, and a JSON-LD metadata file capturing every single parameter — so anyone with the same DEM can reproduce the run exactly. The metadata
+        isn't ad-hoc: there's a published OWL ontology with QUDT units and a CC-BY licence. And the whole thing is privacy-preserving by construction —
+        no server-side compute, your elevation data never leaves your machine, and it's a no-build PWA that works offline. For a research tool, that
+        combination — reproducible, interoperable, private, zero-install — is the contribution as much as the algorithms are.
+      </aside>
+    </section>
+
+    <!-- ================= 16. LIMITATIONS ================= -->
+    <section>
+      <h2>Limitations <span class="lead">stated honestly</span></h2>
+      <div class="cols">
+        <div>
+          <ul class="small">
+            <li><strong>Geographic-CRS bias.</strong> Map/click/overlays assume EPSG:4326; degrees→metres is a flat-earth approximation (good to ~0.3% under 50 km).</li>
+            <li><strong>Rough cost model.</strong> α/β/η is an effort proxy, not a calibrated power/physiology model.</li>
+            <li><strong>Portals are scoped.</strong> A* top-N, the max-cost DP, and maximize mode <em>don't</em> use portals (admissibility / degeneracy).</li>
+          </ul>
+        </div>
+        <div>
+          <ul class="small">
+            <li><strong>Memory-bound at scale.</strong> 135 M cells = one worker on 16 GB. Bigger needs more RAM or tiling.</li>
+            <li><strong>Estimate caveats.</strong> ±20% first run; reference placement dominates the residual.</li>
+            <li><strong>OSM-dependence.</strong> Bridge/water quality is OSM quality; the pull needs a geographic DEM.</li>
+          </ul>
+        </div>
+      </div>
+      <aside class="notes">
+        I want to be upfront about scope. The CRS handling is the biggest one — it's really a WGS84 tool, and horizontal distances use a flat-earth
+        cosine approximation that's fine at city scale but not for large or high-latitude extents. The cost model is a proxy, deliberately. Portals are
+        powerful but they're only wired into the Dijkstra-based modes, not A* or the DP, because a shortcut breaks an admissible straight-line heuristic.
+        And it's memory-bound at the top end. None of these are hidden — they're documented in the README and CLAUDE.md.
+      </aside>
+    </section>
+
+    <!-- ================= 17. FUTURE WORK ================= -->
+    <section>
+      <h2>Future work</h2>
+      <div class="cols">
+        <div class="card small">
+          <h3>Routing</h3>
+          <ul class="smaller">
+            <li>Graph-mode portals (carry bridge/layer tags fully into "follow the vectors")</li>
+            <li>Portals in A*/DP via an admissible shortcut-aware heuristic</li>
+            <li>Layer-aware portals (filter by span length / layer)</li>
+          </ul>
+        </div>
+        <div class="card small">
+          <h3>Modelling &amp; scale</h3>
+          <ul class="smaller">
+            <li>Calibrate α/β/η against measured rider power / Strava data</li>
+            <li>Model remote-backend HTTP transfer explicitly in the estimate</li>
+            <li>Tiling / hierarchical Dijkstra beyond the single-worker ceiling</li>
+          </ul>
+        </div>
+      </div>
+      <p class="center small muted">The architecture — composed app-side, bit-parity engines, no-op invariants — is built to absorb these without destabilising the core.</p>
+      <aside class="notes">
+        Where it goes next. On the routing side: extend the portal model fully into graph mode, find an admissible heuristic so A* and the DP can use
+        portals, and make portals selective by span/layer. On the modelling side, the most scientifically interesting one is calibrating α, β, η against
+        real rider data — Strava, power meters — to turn the effort proxy into something quantitative. And to break the memory ceiling you'd want tiling
+        or a hierarchical Dijkstra. The point of the careful architecture is that all of these can be added behind the same no-op-invariant discipline.
+      </aside>
+    </section>
+
+    <!-- ================= 18. TAKEAWAYS ================= -->
+    <section>
+      <h2>Takeaways</h2>
+      <ol>
+        <li><strong>Energy, asymmetric and directional</strong>, is the right cost for cycling on terrain — and it makes "natural corridors" computable.</li>
+        <li><strong>Hybrid portal edges</strong> solve genuine 2.5-D multi-level routing on a bare-earth raster — proven Δ=0 under a real viaduct.</li>
+        <li><strong>A validated analytic performance model</strong> turns "it'll be a while" into a calibrated, self-correcting ±20% estimate.</li>
+        <li><strong>Bit-parity, no-op invariants, reproducible JSON-LD bundles</strong> — fast, optional acceleration that never changes the science.</li>
+      </ol>
+      <p class="center small muted" style="margin-top:.4em;">A privacy-preserving, zero-install, reproducible geospatial energy-field tool — that scales to 135 M cells in a browser tab.</p>
+      <aside class="notes">
+        Four things to remember. One: energy is the right objective for cycling, and asymmetry is the load-bearing idea. Two: the portal trick is a clean,
+        verifiable answer to 2.5-D routing on raster DEMs. Three: the performance model is a real, validated result, not a guess. Four: the whole thing is
+        built so that speed never costs correctness, and every run is reproducible. Thank you — questions welcome.
+      </aside>
+    </section>
+
+    <!-- ================= 19. THANKS / LINKS ================= -->
+    <section data-background-color="#0f1115">
+      <div class="title-wrap">
+        <h1 style="font-size:1.5em;">Obrigado · Thank you</h1>
+        <p class="small accent2">telhas.pedalhidrografi.co/simujoules</p>
+        <hr class="sep" style="max-width:420px; margin:.8em auto;">
+        <p class="smaller muted">App (PWA, works offline) · <a href="https://telhas.pedalhidrografi.co/simujoules/CHANGELOG.md">Changelog</a> · <a href="https://telhas.pedalhidrografi.co/simujoules/vocab/simujoules.jsonld">JSON-LD vocabulary</a></p>
+        <p class="smaller muted">Danilo Lessa Bernardineli · pedalhidrografia · v24</p>
+        <p class="smaller muted" style="margin-top:1em;">Press <span class="mono accent">S</span> for speaker notes · <span class="mono accent">F</span> fullscreen · <span class="mono accent">ESC</span> overview</p>
+      </div>
+      <aside class="notes">Closing. The app is live and free — try it on your own city's DEM. Everything I showed is reproducible from the exported bundles. Happy to dig into any of the engine internals, the parity testing, or the performance model in questions.</aside>
+    </section>
+
+  </div>
+</div>
+
+<div class="deck-footer">
+  <span>Simujoules · asymmetric-cost cycling energy fields</span>
+  <span>pedalhidrografia · v24</span>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
+<script>
+  Reveal.initialize({
+    hash: true,
+    slideNumber: 'c/t',
+    transition: 'fade',
+    transitionSpeed: 'fast',
+    width: 1280,
+    height: 760,
+    margin: 0.06,
+    center: false,
+    plugins: [ RevealNotes, RevealHighlight ],
+  });
+</script>
+</body>
+</html>
