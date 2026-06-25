@@ -797,19 +797,12 @@
           <input type="checkbox" id="vec-compare" />
           <span data-i18n="net.compare">Compare with unconstrained</span>
         </label>
-        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
-          <input type="checkbox" id="vec-render" />
-          <span data-i18n="net.render">Draw network (black lines)</span>
-        </label>
-        <div class="row" style="margin-top: 3px;">
-          <div>
-            <label data-i18n="net.render_width">line width (m)</label>
-            <input type="number" id="vec-render-width" value="4" min="0.5" max="100" step="0.5" />
-          </div>
-          <div>
-            <label data-i18n="net.render_opacity">line opacity</label>
-            <input type="range" id="vec-render-opacity" min="0" max="1" step="0.05" value="1" />
-          </div>
+        <!-- Network visibility + opacity now live in the on-map layer-control
+             panel (network row); only the line WIDTH stays here. vec-render +
+             vec-render-opacity moved to #layer-inputs-store. -->
+        <div style="margin-top: 5px;">
+          <label data-i18n="net.render_width">line width (m)</label>
+          <input type="number" id="vec-render-width" value="4" min="0.5" max="100" step="0.5" />
         </div>
         <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
           <input type="checkbox" id="net-interp" checked />
@@ -862,16 +855,8 @@
             <input type="number" id="imp-offset" value="0" min="-5" max="15" step="0.5" />
           </div>
         </div>
-        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
-          <input type="checkbox" id="imp-show" />
-          <span data-i18n="imp.show">Show mask + corridors on map</span>
-        </label>
-        <div class="row" id="imp-opacity-row" style="margin-top: 3px; display: none;">
-          <div>
-            <label data-i18n="imp.opacity">overlay opacity</label>
-            <input type="range" id="imp-opacity" min="0" max="1" step="0.05" value="0.5" data-i18n-aria="aria.opacity_impassable" />
-          </div>
-        </div>
+        <!-- Mask visibility + opacity now live in the on-map layer-control panel
+             (impassable row); the inputs are in #layer-inputs-store. -->
         <div class="meta" id="imp-meta" data-i18n="imp.none">No impassable mask loaded.</div>
       </details>
 
@@ -894,16 +879,8 @@
           <button type="button" class="secondary" id="draw-portal-clear" data-i18n="draw.erase">Erase drawings</button>
         </div>
         <div class="meta" id="draw-portal-meta" style="margin-top: 2px;"></div>
-        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
-          <input type="checkbox" id="bridge-show" checked />
-          <span data-i18n="bridge.show">Show decks on map</span>
-        </label>
-        <div class="row" id="bridge-opacity-row" style="margin-top: 3px;">
-          <div>
-            <label data-i18n="bridge.opacity">deck opacity</label>
-            <input type="range" id="bridge-opacity" min="0" max="1" step="0.05" value="0.9" data-i18n-aria="aria.opacity_bridge" />
-          </div>
-        </div>
+        <!-- Deck visibility + opacity now live in the on-map layer-control panel
+             (bridges row); the inputs are in #layer-inputs-store. -->
         <div class="meta" id="bridge-meta" data-i18n="bridge.none">No bridges loaded.</div>
       </details>
       </details>
@@ -1727,6 +1704,14 @@
         <input type="checkbox" id="passes-visible" checked />
         <input type="range"    id="passes-opacity" min="0" max="1" step="0.05" value="0.7" />
         <input type="checkbox" id="refs-visible"   checked />
+        <!-- moved out of 1B / 1C / 1D — proxied by the network / impassable /
+             bridges rows of the layer-control panel -->
+        <input type="checkbox" id="vec-render" />
+        <input type="range"    id="vec-render-opacity" min="0" max="1" step="0.05" value="1" />
+        <input type="checkbox" id="imp-show" />
+        <input type="range"    id="imp-opacity"    min="0" max="1" step="0.05" value="0.5" />
+        <input type="checkbox" id="bridge-show"    checked />
+        <input type="range"    id="bridge-opacity" min="0" max="1" step="0.05" value="0.9" />
       </div>
 
       <hr style="border: none; border-top: 1px solid var(--border); margin: 10px 0 6px;" />

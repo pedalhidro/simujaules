@@ -347,6 +347,7 @@ const STRINGS = {
   "btn.refresh_style":   { pt: "Atualizar estilo", en: "Refresh style" },
   "result.empty":        { pt: "—", en: "—" },
   "layer.tiles":         { pt: "rmsampa-v2 tiles", en: "rmsampa-v2 tiles" },
+  "layer.bridges":       { pt: "Pontes e túneis", en: "Bridges & tunnels" },
   "help.p.tiles":        { pt: '<a href="https://telhas.pedalhidrografi.co/rmsampa-v2/" target="_blank" rel="noopener" style="color: var(--accent-2);">Tiles XYZ</a> de pedalhidrografi.co.', en: '<a href="https://telhas.pedalhidrografi.co/rmsampa-v2/" target="_blank" rel="noopener" style="color: var(--accent-2);">XYZ tiles</a> from pedalhidrografi.co.' },
   "layer.relief":        { pt: "Relevo (DEM)", en: "Relief (DEM)" },
   "help.p.relief":       { pt: "Camada de relevo do DEM: cmocean.phase, p5–p80 · declividade 0–p80 (γ=1.2) multiplicada.", en: "DEM relief layer: cmocean.phase, p5–p80 · slope 0–p80 (γ=1.2) multiplied." },
@@ -1363,8 +1364,9 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   // Fixed (non-reorderable) layers shown after the stacking list.
   const FIXED_ROWS = [
-    { labelKey: "layer.tiles",      vis: "tile-visible", op: "tile-opacity" },
-    { labelKey: "ref.show_markers", vis: "refs-visible", op: null },
+    { labelKey: "layer.tiles",      vis: "tile-visible",   op: "tile-opacity" },
+    { labelKey: "layer.bridges",    vis: "bridge-show",    op: "bridge-opacity" },
+    { labelKey: "ref.show_markers", vis: "refs-visible",   op: null },
   ];
   const fireInput = (el) => {
     el.dispatchEvent(new Event("input",  { bubbles: true }));
@@ -3840,6 +3842,32 @@ function networkConstraintActive() {
   return !!state.networkMask && (document.getElementById("vec-constrain")?.checked ?? true);
 }
 
+// Place the PRIMARY density tweaks (#passes-primary) under the sub-group that
+// matches the DISPLAYED passes channel, and show/hide 3C.a / 3C.b accordingly:
+//   - terrain (unconstrained selection, OR a compute with no network) → 3C.b
+//   - network (constrained / difference A-channel)                    → 3C.a
+//   - difference with both passes channels (dualPasses) → 3C.b also shows the
+//     terrain B-channel overrides (#passes-dual-row).
+// `networkUsed` must reflect whether THIS result is network-constrained (NOT just
+// the energy-source value, which is "constrained" by default even for a plain
+// terrain compute — that was the bug).
+function applyDensityChannelGroups(energySel, networkUsed, dualPasses) {
+  const primaryIsTerrain = energySel === "unconstrained" || (energySel !== "difference" && !networkUsed);
+  const primaryCtl = document.getElementById("passes-primary");
+  const netGroup = document.getElementById("result-density-net-group");
+  const netBody  = document.getElementById("density-net-body");
+  const terrGroup = document.getElementById("result-density-terrain-group");
+  const terrBody  = document.getElementById("density-terrain-body");
+  const dualRow   = document.getElementById("passes-dual-row");
+  if (primaryCtl) {
+    const host = primaryIsTerrain ? terrBody : netBody;
+    if (host && primaryCtl.parentElement !== host) host.insertBefore(primaryCtl, host.firstChild);
+  }
+  if (netGroup)  netGroup.style.display  = primaryIsTerrain ? "none" : "";
+  if (terrGroup) terrGroup.style.display = (primaryIsTerrain || dualPasses) ? "" : "none";
+  if (dualRow)   dualRow.style.display   = dualPasses ? "" : "none";
+}
+
 // Snap a (row, col) pixel to the nearest network cell. Expanding-ring
 // search with NO hard cutoff (capped only by the grid): the old version
 // gave up at the snap-radius input, which on sparse networks turned every
@@ -4163,8 +4191,9 @@ function renderGraphOverlay() {
 
   const passesRow = document.getElementById("passes-row");
   if (passesRow) passesRow.style.display = hasPasses ? "" : "none";
-  const passesVisRow = document.getElementById("passes-vis-row"); // modal vis/opacity row
-  if (passesVisRow) passesVisRow.style.display = hasPasses ? "" : "none";
+  // Graph mode is always network-constrained and its passes are the network-graph
+  // passes — place them under 3C.a, no terrain channel.
+  applyDensityChannelGroups("constrained", true, false);
 
   applyLayerControls();   // drive visibility + opacity from the Energy/Passes controls
   updateLegendTicks();
@@ -5817,8 +5846,6 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
   // Show/hide the passes layer controls based on whether passes was computed
   const passesRow = document.getElementById("passes-row");
   if (passesRow) passesRow.style.display = passes ? "" : "none";
-  const passesVisRow = document.getElementById("passes-vis-row"); // modal vis/opacity row
-  if (passesVisRow) passesVisRow.style.display = passes ? "" : "none";
 
   rerenderCachedResult();
 
@@ -5884,25 +5911,11 @@ function rerenderCachedResult() {
     ? r.energyAlt[energySel]
     : r.energy;
   const dualPasses = energySel === "difference" && r.passes && r.passesAlt?.unconstrained;
-  // Place the PRIMARY density tweaks (#passes-primary) under the sub-group that
-  // matches the displayed channel: terrain (unconstrained) → 3C.b "no terreno";
-  // network (constrained) / difference A-channel → 3C.a "na rede vetorial". The
-  // terrain B-channel overrides (#passes-dual-row) only show in the difference
-  // view (under 3C.b). Sub-groups hide when their channel isn't displayed.
-  const terrainOnly = energySel === "unconstrained";
-  const primaryCtl = document.getElementById("passes-primary");
-  const netGroup = document.getElementById("result-density-net-group");
-  const netBody = document.getElementById("density-net-body");
-  const terrGroup = document.getElementById("result-density-terrain-group");
-  const terrBody = document.getElementById("density-terrain-body");
-  const dualRow = document.getElementById("passes-dual-row");
-  if (primaryCtl) {
-    const host = terrainOnly ? terrBody : netBody;
-    if (host && primaryCtl.parentElement !== host) host.insertBefore(primaryCtl, host.firstChild);
-  }
-  if (netGroup) netGroup.style.display = terrainOnly ? "none" : "";
-  if (terrGroup) terrGroup.style.display = (terrainOnly || dualPasses) ? "" : "none";
-  if (dualRow) dualRow.style.display = dualPasses ? "" : "none";
+  // Network-constrained if this result carries a compare (energyAlt ⇒ a network
+  // was used) OR the network is currently constraining the grid. (energySel alone
+  // is "constrained" by default even for a plain terrain compute — the old bug.)
+  const networkUsed = !!r.energyAlt || networkConstraintActive();
+  applyDensityChannelGroups(energySel, networkUsed, dualPasses);
   const passes = (r.passesAlt && energySel === "unconstrained" && r.passesAlt.unconstrained)
     ? r.passesAlt.unconstrained
     : r.passes;
