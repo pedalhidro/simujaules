@@ -112,6 +112,11 @@
        (discrete — column width is fixed, only the count changes). */
     .panel-cols { column-count: var(--sidebar-cols, 1); column-gap: 14px; }
     .panel-cols > * { break-inside: avoid; }
+    /* …but let a PARENT group (1, 2, 3) split across columns so its sub-groups
+       (1A-1D, 2A-2C, 3A-3D) flow into the next column instead of staying glued
+       to the parent. Each sub-group box itself stays whole. */
+    .panel-cols > .group-parent { break-inside: auto; }
+    .panel-cols .group { break-inside: avoid; }
     #sidebar-resizer {
       position: fixed; top: 0; bottom: 0;
       left: calc(var(--sidebar-cols, 1) * 320px - 3px);
@@ -133,14 +138,16 @@
     .drawer-toggle {
       display: flex; /* shown on desktop (collapse) + mobile (drawer) */
       position: fixed;
-      top: 8px;
-      left: 8px;
+      /* Desktop: top-right, BETWEEN the locate (top:8) and layer-control
+         (top:104) buttons. Mobile overrides this to a bottom corner. */
+      top: 56px;
+      right: 8px;
       /* Strictly above the panel (z-index 900) so the user can tap the
          hamburger to close the drawer once it's open. Same DOM position
          + same z-index would lose to the later-in-DOM panel. */
       z-index: 950;
-      width: 44px;
-      height: 44px;
+      width: 40px;
+      height: 40px;
       padding: 0;
       align-items: center;
       justify-content: center;
@@ -193,9 +200,10 @@
     }
     .locate-button:hover { color: var(--accent-2); border-color: var(--accent-2); }
     .locate-button:disabled { opacity: 0.5; cursor: progress; }
-    /* On-map layer-control button — sits just below the locate button. */
+    /* On-map layer-control button — third in the top-right stack (locate :8,
+       hamburger :56, layer-control :104). */
     .layer-ctrl-button {
-      position: fixed; top: 56px; right: 8px; z-index: 950; pointer-events: auto;
+      position: fixed; top: 104px; right: 8px; z-index: 950; pointer-events: auto;
       width: 40px; height: 40px; padding: 0; display: flex; align-items: center;
       justify-content: center; background: var(--panel); color: var(--text);
       border: 1px solid var(--border); border-radius: 6px;
@@ -205,6 +213,8 @@
     /* Active (modal open): clearly highlight the toggle(s). */
     .layer-ctrl-button.active { color: #0d0f12; background: var(--accent-2); border-color: var(--accent-2); }
     #layer-ctrl-open.active { color: var(--accent-2); border-color: var(--accent-2); box-shadow: inset 0 0 0 1px var(--accent-2); }
+    /* Hamburger highlighted while the sidebar is visible (desktop: not collapsed). */
+    .drawer-toggle.active { color: #0d0f12; background: var(--accent-2); border-color: var(--accent-2); }
     /* SVG and its children must not intercept clicks — without this,
        Safari/iOS sometimes routes the click to the inner <circle> or
        <line> instead of bubbling up to the <button>. */
@@ -237,6 +247,7 @@
       .drawer-toggle {
         display: inline-flex;
         top: auto;
+        right: auto; /* base uses right:8 (desktop); mobile anchors bottom-left */
         bottom: 16px;
         left: 16px;
         box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.4);
@@ -305,7 +316,7 @@
     .group h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 5px 0; font-weight: 500; }
     /* Title row: app name + lang/help actions on one line. */
     /* padding-left clears the fixed top-left hamburger (collapse) toggle. */
-    .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; padding-left: 40px; }
+    .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
     .panel-header h1 { margin: 0; }
     /* Desktop sidebar collapse: hamburger toggles #app.panel-collapsed. */
     #app.panel-collapsed { grid-template-columns: 0 1fr; }
@@ -763,6 +774,14 @@
 
       <details class="group" id="network-group">
         <summary data-i18n="group.network">1B. Rede vetorial opcional (.gpkg)</summary>
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
+          <input type="checkbox" id="vec-constrain" checked />
+          <span data-i18n="net.constrain">Constrain compute to network</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 6px; margin: 5px 0; font-size: 11px; color: var(--text);">
+          <input type="checkbox" id="vec-compare" />
+          <span data-i18n="net.compare">Compare with unconstrained</span>
+        </label>
         <input type="file" id="vector-file" accept=".gpkg" />
         <button type="button" class="secondary" id="vec-osm" data-i18n="net.osm" style="margin-top: 4px;">Pull streets from OSM (highway=*)</button>
         <div class="row" style="margin-top: 5px;">
@@ -777,10 +796,6 @@
         </div>
         <button type="button" class="secondary" id="vec-clear" data-i18n="net.clear" style="margin-top: 4px;">Clear network</button>
         <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
-          <input type="checkbox" id="vec-constrain" checked />
-          <span data-i18n="net.constrain">Constrain compute to network</span>
-        </label>
-        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
           <input type="checkbox" id="vec-graph-mode" />
           <span data-i18n="net.graph_mode">Compute on network graph (follow vectors)</span>
         </label>
@@ -793,10 +808,6 @@
             </select>
           </div>
         </div>
-        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
-          <input type="checkbox" id="vec-compare" />
-          <span data-i18n="net.compare">Compare with unconstrained</span>
-        </label>
         <!-- Network visibility + opacity now live in the on-map layer-control
              panel (network row); only the line WIDTH stays here. vec-render +
              vec-render-opacity moved to #layer-inputs-store. -->
@@ -829,6 +840,16 @@
         </label>
         <input type="file" id="impassable-file" accept=".tif,.tiff" />
         <button type="button" class="secondary" id="impassable-osm" data-i18n="imp.osm" style="margin-top: 4px;">Pull water from OSM</button>
+        <label id="imp-corridor-row" style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text); opacity: 0.55;">
+          <input type="checkbox" id="imp-corridor" checked disabled />
+          <span data-i18n="imp.corridor">Network carves passable corridors across the mask</span>
+        </label>
+        <div class="row" id="imp-offset-row" style="margin-top: 3px; display: none;">
+          <div>
+            <label data-i18n="imp.offset">bridge centre offset (m, −5…+15)</label>
+            <input type="number" id="imp-offset" value="0" min="-5" max="15" step="0.5" />
+          </div>
+        </div>
         <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
           <input type="checkbox" id="imp-rivers" checked />
           <span data-i18n="imp.rivers">Rivers (lines) impassable</span>
@@ -843,18 +864,8 @@
           <button type="button" class="secondary" id="draw-barrier" data-i18n="draw.barrier">Draw barrier</button>
           <button type="button" class="secondary" id="draw-corridor" data-i18n="draw.corridor">Draw corridor</button>
         </div>
-        <button type="button" class="secondary" id="draw-impassable-clear" data-i18n="draw.erase" style="margin-top: 4px;">Erase drawings</button>
+        <button type="button" class="secondary" id="draw-impassable-clear" data-i18n="draw.erase_imp" style="margin-top: 4px;">Erase drawn barriers/corridors</button>
         <div class="meta" id="draw-impassable-meta" style="margin-top: 2px;"></div>
-        <label id="imp-corridor-row" style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text); opacity: 0.55;">
-          <input type="checkbox" id="imp-corridor" disabled />
-          <span data-i18n="imp.corridor">Network carves passable corridors across the mask</span>
-        </label>
-        <div class="row" id="imp-offset-row" style="margin-top: 3px; display: none;">
-          <div>
-            <label data-i18n="imp.offset">bridge centre offset (m, −5…+15)</label>
-            <input type="number" id="imp-offset" value="0" min="-5" max="15" step="0.5" />
-          </div>
-        </div>
         <!-- Mask visibility + opacity now live in the on-map layer-control panel
              (impassable row); the inputs are in #layer-inputs-store. -->
         <div class="meta" id="imp-meta" data-i18n="imp.none">No impassable mask loaded.</div>
@@ -866,17 +877,17 @@
           <input type="checkbox" id="bridge-enabled" checked />
           <span data-i18n="bridge.enabled">Apply to compute</span>
         </label>
-        <button type="button" class="secondary" id="bridge-osm" data-i18n="bridge.osm">Pull bridges &amp; tunnels from OSM</button>
-        <button type="button" class="secondary" id="bridge-from-network" data-i18n="bridge.from_network" style="margin-top: 4px;" disabled>Extract from loaded network</button>
-        <label style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text);">
+        <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 11px; color: var(--text);">
           <input type="checkbox" id="bridge-tunnels" checked />
           <span data-i18n="bridge.tunnels">Include tunnels (tunnel=yes)</span>
         </label>
+        <button type="button" class="secondary" id="bridge-osm" data-i18n="bridge.osm">Pull bridges &amp; tunnels from OSM</button>
+        <button type="button" class="secondary" id="bridge-from-network" data-i18n="bridge.from_network" style="margin-top: 4px;" disabled>Extract from loaded network</button>
         <button type="button" class="secondary" id="bridge-clear" data-i18n="bridge.clear" style="margin-top: 4px;">Clear bridges</button>
         <!-- On-map drawing: portal lines (a shortcut between the two endpoints). -->
         <div class="row" style="margin-top: 4px;">
           <button type="button" class="secondary" id="draw-portal" data-i18n="draw.portal">Draw portal</button>
-          <button type="button" class="secondary" id="draw-portal-clear" data-i18n="draw.erase">Erase drawings</button>
+          <button type="button" class="secondary" id="draw-portal-clear" data-i18n="draw.erase_portal">Erase drawn portals</button>
         </div>
         <div class="meta" id="draw-portal-meta" style="margin-top: 2px;"></div>
         <!-- Deck visibility + opacity now live in the on-map layer-control panel
@@ -890,6 +901,18 @@
 
       <details class="group" id="params-group">
         <summary data-i18n="group.parameters">2A. Parâmetros</summary>
+        <label style="display: flex; align-items: center; gap: 6px;">
+          <input type="checkbox" id="want-passes" />
+          <span data-i18n="param.want_passes">Compute passes count (route density)</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 3px;">
+          <input type="checkbox" id="want-topn" />
+          <span data-i18n="param.want_topn">Compute top-N routes</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 3px; margin-bottom: 8px;">
+          <input type="checkbox" id="want-density" />
+          <span data-i18n="param.want_density">Compute multi-reference density</span>
+        </label>
         <label data-i18n="param.mode">Mode</label>
         <select id="mode">
           <option value="from"  data-i18n="mode.from">From source</option>
@@ -922,26 +945,6 @@
             <option value="leg"   data-i18n="budget.leg">each leg (out OR back)</option>
             <option value="total" data-i18n="budget.total">round trip (total)</option>
           </select>
-        </div>
-        <label style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
-          <input type="checkbox" id="want-passes" />
-          <span data-i18n="param.want_passes">Compute passes count (route density)</span>
-        </label>
-        <label style="display: flex; align-items: center; gap: 6px; margin-top: 3px;">
-          <input type="checkbox" id="want-topn" />
-          <span data-i18n="param.want_topn">Compute top-N routes</span>
-        </label>
-        <label style="display: flex; align-items: center; gap: 6px; margin-top: 3px;">
-          <input type="checkbox" id="want-density" />
-          <span data-i18n="param.want_density">Compute multi-reference density</span>
-        </label>
-        <label style="display: flex; align-items: center; gap: 6px; margin-top: 3px;">
-          <input type="checkbox" id="maximize" />
-          <span data-i18n="param.maximize">Maximize energy (reverse optimization)</span>
-        </label>
-        <div id="maximize-extra" style="display: none;">
-          <label data-i18n="param.max_length">Path length L (edges, 0 = unconstrained)</label>
-          <input type="number" id="maximize-length" value="0" min="0" max="5000" step="1" />
         </div>
         <div id="topn-extra" style="display: none;">
           <div class="row">
@@ -979,18 +982,9 @@
           <button type="button" class="secondary" id="ref-clear" data-i18n="ref.clear">Clear refs</button>
         </div>
         <div id="density-extra" style="display: none;">
-          <div class="row">
-            <div>
-              <label data-i18n="param.n_refs">N references</label>
-              <input type="number" id="n-refs" value="10" min="1" max="2000" step="1" />
-            </div>
-            <div>
-              <label data-i18n="param.ref_source">Reference source</label>
-              <select id="ref-source">
-                <option value="click"  data-i18n="ref.click">click on map</option>
-                <option value="random" data-i18n="ref.random">random</option>
-              </select>
-            </div>
+          <div>
+            <label data-i18n="param.n_refs">N references</label>
+            <input type="number" id="n-refs" value="10" min="1" max="2000" step="1" />
           </div>
           <label data-i18n="param.sampling" style="margin-top: 4px;">Sampling strategy</label>
           <select id="ref-sampling">
@@ -1007,8 +1001,6 @@
 
       <details class="group" id="execution-group">
         <summary data-i18n="group.execution">2C. Execução</summary>
-        <label data-i18n="param.max_workers">Max compute workers (0 = auto)</label>
-        <input type="number" id="max-workers" value="0" min="0" max="64" step="1" />
         <!-- Compute source: Browser (default), Localhost (native Rust),
              Cloud (local orchestrator boots a VM; offered only when served locally). -->
         <label id="compute-source-label" data-i18n="param.compute_source" style="margin-top: 8px;">Compute source</label>
@@ -1042,6 +1034,8 @@
           <div id="cloud-vm-status" style="font-size: 10px; color: var(--muted); margin-top: 3px;"></div>
           <div id="cloud-transfer" style="font-size: 10px; color: var(--muted); margin-top: 3px;"></div>
         </div>
+        <label data-i18n="param.max_workers" style="margin-top: 8px;">Max compute workers (0 = auto)</label>
+        <input type="number" id="max-workers" value="0" min="0" max="64" step="1" />
       </details>
       </details>
 
@@ -1249,12 +1243,19 @@
       }
       const app = document.getElementById('app');
       const isDesktop = () => window.innerWidth > 860;
+      // Highlight the hamburger while the docked sidebar is VISIBLE (desktop:
+      // not collapsed). Mobile uses the .open class for its open-state highlight.
+      const syncToggleActive = () => {
+        if (isDesktop()) btn.classList.toggle('active', !app.classList.contains('panel-collapsed'));
+        else btn.classList.remove('active');
+      };
       btn.addEventListener('click', () => {
         if (isDesktop()) {
           // Desktop: collapse/expand the docked sidebar (keep the ☰ glyph).
           const collapsed = app.classList.toggle('panel-collapsed');
           btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
           btn.textContent = '☰';
+          btn.classList.toggle('active', !collapsed);
         } else {
           setOpen(!panel.classList.contains('open'));
         }
@@ -1265,7 +1266,9 @@
       window.addEventListener('resize', () => {
         if (isDesktop()) { setOpen(false); }
         else { app.classList.remove('panel-collapsed'); btn.textContent = '☰'; btn.setAttribute('aria-expanded', 'false'); }
+        syncToggleActive();
       });
+      syncToggleActive(); // initial state (sidebar visible on desktop → highlighted)
       // Expose so app.js can close the drawer after a successful map click.
       window.__simuDrawer = { close: () => setOpen(false), open: () => setOpen(true) };
 

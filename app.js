@@ -202,11 +202,13 @@ const STRINGS = {
   "bridge.from_network": { pt: "Extrair da rede carregada", en: "Extract from loaded network" },
   "bridge.no_candidates":{ pt: "A rede carregada não tem pontes/túneis marcados (tags bridge/tunnel).", en: "The loaded network has no bridge/tunnel tags." },
   "bridge.tunnels":      { pt: "Incluir túneis (tunnel=yes)", en: "Include tunnels (tunnel=yes)" },
-  "bridge.clear":        { pt: "Limpar pontes", en: "Clear bridges" },
+  "bridge.clear":        { pt: "Limpar portais", en: "Clear portals" },
   "draw.barrier":        { pt: "Desenhar barreira", en: "Draw barrier" },
   "draw.corridor":       { pt: "Desenhar corredor", en: "Draw corridor" },
   "draw.portal":         { pt: "Desenhar portal", en: "Draw portal" },
   "draw.erase":          { pt: "Apagar desenhos", en: "Erase drawings" },
+  "draw.erase_imp":      { pt: "Apagar barreiras/corredores desenhados", en: "Erase drawn barriers/corridors" },
+  "draw.erase_portal":   { pt: "Apagar portais desenhados", en: "Erase drawn portals" },
   "draw.need_dem":       { pt: "Carregue um DEM geográfico (lon/lat) antes de desenhar.", en: "Load a geographic (lon/lat) DEM before drawing." },
   "draw.drawing":        { pt: "Desenhando… clique para adicionar vértices, duplo-clique para concluir.", en: "Drawing… click to add vertices, double-click to finish." },
   "draw.barrier_added":  { pt: "Barreira adicionada ({0} no total).", en: "Barrier added ({0} total)." },
@@ -611,8 +613,8 @@ const PERSIST_KEY = "simu-params";
 const PERSIST_IDS = [
   // Parameters
   "mode", "alpha", "beta", "eta", "e-max", "e-max-mode",
-  "want-passes", "want-topn", "want-density", "maximize", "maximize-length",
-  "n-refs", "ref-source", "ref-sampling", "refs-visible",
+  "want-passes", "want-topn", "want-density",
+  "n-refs", "ref-sampling", "refs-visible",
   "backend-url", "orchestrator-url", "cloud-keep-warm", "n-routes", "penalty", "repulsion-mode",
   "routes-colormap", "colormap",
   // Vector network
@@ -637,7 +639,7 @@ const PERSIST_IDS = [
 // flag a bogus "● refresh" on load; the legend is reconciled directly via the
 // activeColormap assignment + applyColormapToLegend() call below instead.
 const PERSIST_REFIRE = [
-  "mode", "want-density", "want-topn", "maximize", "basemap-select",
+  "mode", "want-density", "want-topn", "basemap-select",
   "vec-graph-mode",
 ];
 // The compute-source selector is a radiogroup (no single element to dispatch a
