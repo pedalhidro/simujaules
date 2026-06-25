@@ -64,6 +64,12 @@
        on iOS Safari (which still ignores parts of the manifest spec). -->
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#0f1115" />
+  <!-- Raster favicons FIRST: Safari renders SVG favicons poorly and otherwise
+       falls back to /favicon.ico — without an app-owned one it inherits the apex
+       domain's (Miraheze) icon. The .ico + PNG keep the app's own icon in Safari;
+       the SVG is the crisp modern option for Chrome/Firefox. -->
+  <link rel="icon" href="./favicon.ico" sizes="32x32" />
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
   <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1301,6 +1307,10 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v36</strong> — 2026-06-24<br/>
+              Added a raster favicon (<code>favicon.ico</code> + a PNG icon link) so
+              Safari shows the app's own icon in tabs instead of falling back to the
+              <code>pedalhidrografi.co</code> (Miraheze) icon. No engine changes.</p>
               <p><strong>v35</strong> — 2026-06-24<br/>
               App moved to its own domain: now served from the root of
               <code>simujaules.pedalhidrografi.co</code> (dedicated bucket) instead of

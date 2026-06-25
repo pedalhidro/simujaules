@@ -9,6 +9,16 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v36 — 2026-06-24
+
+### Fixed
+
+- **Safari tab icon.** The app now ships a raster favicon (`favicon.ico` plus a
+  PNG `<link rel="icon">`) in addition to the SVG. Safari renders SVG favicons
+  poorly and otherwise falls back to `/favicon.ico`; with no app-owned one it
+  showed the apex `pedalhidrografi.co` (Miraheze) icon. Now Safari uses the
+  app's own icon. No engine or app-logic changes.
+
 ## v35 — 2026-06-24
 
 Two changes ship together, numbered **v35** to avoid a version clash with the

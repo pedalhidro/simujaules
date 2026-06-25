@@ -278,7 +278,12 @@
 //              same token gates control + data planes; ephemeral IP with dynamic
 //              DNS; the VM is deleted after 30 days idle (cost → 0).
 //              No engine changes.
-const VERSION  = "v35";
+//   v35 → v36: Add a raster favicon (favicon.ico + a PNG <link rel="icon">) so
+//              Safari uses the app's own icon instead of falling back to the
+//              apex pedalhidrografi.co (Miraheze) icon — Safari renders SVG
+//              favicons poorly and otherwise drops to /favicon.ico. favicon.ico
+//              precached + shipped by deploy.sh. No engine/app-logic changes.
+const VERSION  = "v36";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
@@ -302,6 +307,7 @@ const PRECACHE_URLS = [
   "./icons/icon-maskable-192.png",
   "./icons/icon-maskable-512.png",
   "./icons/apple-touch-icon.png",
+  "./favicon.ico",
   "./vocab/simujoules.jsonld",
 ];
 
