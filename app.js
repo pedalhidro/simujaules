@@ -21,7 +21,8 @@
 
 const STRINGS = {
   // ---- Header / chrome --------------------------------------------------
-  "title":               { pt: "Simulador bici-geo-energético",       en: "Bicycling Energy Field Simulator" },
+  "title":               { pt: "Simujaules",       en: "Simujaules" },
+  "subtitle":            { pt: "Imaginador de caminhos fáceis para o encontro", en: "Imagining easy paths to the gathering" },
   "lang.toggle.title":   { pt: "Idioma — clique para alternar PT/EN", en: "Language — click to switch PT/EN" },
   // (engine.* strings removed along with the engine-tag pill.)
   "locate.title":        { pt: "Centralizar na minha localização",     en: "Center on my location" },
@@ -243,10 +244,10 @@ const STRINGS = {
   "mode.from":           { pt: "Saindo da fonte",     en: "From source" },
   "mode.to":             { pt: "Vindo até a fonte",  en: "To source point" },
   "mode.round":          { pt: "Ida e volta",         en: "Round trip" },
-  "param.alpha":         { pt: "α (por metro plano)", en: "α (per metre flat)" },
-  "param.beta":          { pt: "β (por metro de subida)", en: "β (per metre uphill)" },
-  "param.eta":           { pt: "η (recuperação descida)", en: "η (downhill recovery)" },
-  "param.budget":        { pt: "Orçamento de energia (≤0 = ∞)", en: "Energy budget (≤0 = ∞)" },
+  "param.alpha":         { pt: "Custo horizontal (kJ/m)", en: "Horizontal cost (kJ/m)" },
+  "param.beta":          { pt: "Custo vertical (kJ/m)", en: "Vertical cost (kJ/m)" },
+  "param.eta":           { pt: "Recuperação na descida (%)", en: "Downhill recovery (%)" },
+  "param.budget":        { pt: "Orçamento de energia (kJ)", en: "Energy budget (kJ)" },
   "param.budget_mode":   { pt: "Orçamento aplica-se a", en: "Budget applies to" },
   "budget.leg":          { pt: "cada perna (ida OU volta)", en: "each leg (out OR back)" },
   "budget.total":        { pt: "ida e volta (total)", en: "round trip (total)" },
