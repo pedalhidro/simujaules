@@ -558,8 +558,13 @@ function syncLoadedHighlights() {
   setGroupStatus("load-dem-group", state.dem ? "green" : "");
   const apply = (loaded, id) => loaded ? (document.getElementById(id)?.checked ? "green" : "orange") : "";
   setGroupStatus("network-group", apply(!!state.networkMask, "vec-constrain"));
-  setGroupStatus("impassable-group", apply(!!state.impassable, "imp-enabled"));
-  setGroupStatus("bridges-group", apply(!!(state.bridges && state.bridges.length), "bridge-enabled"));
+  // 1C / 1D: drawn geometry counts as ready (green) on its own — even with no
+  // loaded mask/network/bridge file (it's applied to the compute directly).
+  const hasDrawnImp = !!((state.drawnImpassable && state.drawnImpassable.length) ||
+                         (state.drawnPassable && state.drawnPassable.length));
+  const hasDrawnPortals = !!(state.drawnPortals && state.drawnPortals.length);
+  setGroupStatus("impassable-group", hasDrawnImp ? "green" : apply(!!state.impassable, "imp-enabled"));
+  setGroupStatus("bridges-group", hasDrawnPortals ? "green" : apply(!!(state.bridges && state.bridges.length), "bridge-enabled"));
 
   // 3B — points & references: red = can't compute, orange = partial, green = complete.
   let pts = "";
@@ -3179,6 +3184,9 @@ function updateDrawMeta() {
   if (im) im.textContent = t("draw.imp_meta", (state.drawnImpassable || []).length, (state.drawnPassable || []).length);
   const pm = document.getElementById("draw-portal-meta");
   if (pm) pm.textContent = t("draw.portal_meta", (state.drawnPortals || []).length);
+  // Single chokepoint for every drawn-geometry change (create/delete/clear,
+  // polygons + portals all route through here) → refresh 1C/1D green status.
+  syncLoadedHighlights();
 }
 
 // Build a bridge object from a drawn portal polyline (mirrors the per-way logic

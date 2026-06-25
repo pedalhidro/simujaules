@@ -154,6 +154,7 @@
          (top:104) buttons. Mobile overrides this to a bottom corner. */
       top: 56px;
       right: 8px;
+      left: auto;
       /* Strictly above the panel (z-index 900) so the user can tap the
          hamburger to close the drawer once it's open. Same DOM position
          + same z-index would lose to the later-in-DOM panel. */
@@ -325,6 +326,12 @@
        left accent bar. Toggled from JS off state.dem / state.networkMask
        (see syncLoadedHighlights). Style-only — never affects compute. */
     .group.loaded { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+    /* Base collapse/expand tint: collapsed reads dimmer (grey), expanded reads
+       brighter (white-ish). Pure BACKGROUND, so it sits UNDER the st-* status
+       colors (which use border-color + a left box-shadow bar) — a green/orange/
+       yellow/red status always reads on top. Lower priority by construction. */
+    .group:not([open]) { background: rgba(255, 255, 255, 0.03); }
+    .group[open]       { background: rgba(255, 255, 255, 0.08); }
     .group h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 5px 0; font-weight: 500; }
     /* Title row: app name + lang/help actions on one line. */
     /* padding-left clears the fixed top-left hamburger (collapse) toggle. */
@@ -1067,117 +1074,6 @@
           <summary data-i18n="group.result_stats">3A. Estatísticas</summary>
           <div class="meta" id="result-meta" data-i18n="result.empty">—</div>
         </details>
-
-        <!-- 3B. Energy field (min/max here are the ENERGY field bounds). -->
-        <details class="group" id="result-energy-group" open>
-          <summary data-i18n="group.result_energy">3B. Campo de energia</summary>
-          <label data-i18n="param.field_cmap">Field colormap</label>
-          <select id="colormap"></select>
-          <div class="layer-block">
-            <!-- Shown only when a compare run produced both scenarios. -->
-            <div id="energy-source-row" style="display: none;">
-              <label data-i18n="layer.energy_source">Displayed scenario (energy &amp; passes)</label>
-              <select id="energy-source">
-                <option value="constrained"   data-i18n="esrc.constrained">network-constrained</option>
-                <option value="unconstrained" data-i18n="esrc.unconstrained">unconstrained</option>
-                <option value="difference"    data-i18n="esrc.difference">difference (network cost; passes overlaid)</option>
-              </select>
-            </div>
-            <div class="row">
-              <div>
-                <label data-i18n="vmin.label">min (auto = p1)</label>
-                <input type="number" id="vmin" placeholder="auto" step="any" />
-              </div>
-              <div>
-                <label data-i18n="vmax.label">max (auto = p80)</label>
-                <input type="number" id="vmax" placeholder="auto" step="any" />
-              </div>
-            </div>
-          </div>
-        </details>
-
-        <!-- 3C. Trajectory density (min/max here are the PASSES density bounds).
-             Shown only once a run produced passes (JS toggles #passes-row). -->
-        <details class="group" id="passes-row" open style="display: none;">
-          <summary data-i18n="group.result_density">3C. Densidade de trajetos</summary>
-
-          <!-- 3C.a. Density on the vector NETWORK. Holds the PRIMARY tweaks
-               (#passes-primary) whenever the displayed channel is the network
-               (constrained / difference). For a terrain-only run rerenderCachedResult
-               moves #passes-primary into 3C.b instead and hides this group. -->
-          <details class="group" id="result-density-net-group" open>
-            <summary data-i18n="group.result_density_net">3C.a. Densidade de trajetos na rede vetorial</summary>
-            <div id="density-net-body">
-              <div id="passes-primary">
-                <div class="row">
-                  <div>
-                    <label data-i18n="vmin.passes">min (auto = p10)</label>
-                    <input type="number" id="passes-vmin" placeholder="p10" step="any" />
-                  </div>
-                  <div>
-                    <label data-i18n="vmax.passes">max (auto = p90)</label>
-                    <input type="number" id="passes-vmax" placeholder="p90" step="any" />
-                  </div>
-                </div>
-                <div class="row">
-                  <div>
-                    <label data-i18n="passes.gamma">γ gamma (1 = no change)</label>
-                    <input type="number" id="passes-gamma" value="1" min="0.01" step="0.05" />
-                  </div>
-                  <div>
-                    <label data-i18n="passes.mean_window">mean filter N</label>
-                    <input type="number" id="passes-mean-window" value="5" min="1" max="200" step="1" />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </details>
-
-          <!-- 3C.b. Density on the TERRAIN. Hosts #passes-primary for a
-               terrain-only run; in the difference view it instead shows the
-               green B-channel overrides (#passes-dual-row, blank = inherit A). -->
-          <details class="group" id="result-density-terrain-group" open style="display: none;">
-            <summary data-i18n="group.result_density_terrain">3C.b. Densidade de trajetos no terreno</summary>
-            <div id="density-terrain-body">
-              <div id="passes-dual-row" style="display: none;">
-                <div class="row">
-                  <div><label>min</label><input type="number" id="passes-vmin-b" placeholder="=" step="any" /></div>
-                  <div><label>max</label><input type="number" id="passes-vmax-b" placeholder="=" step="any" /></div>
-                </div>
-                <div class="row">
-                  <div><label>γ</label><input type="number" id="passes-gamma-b" placeholder="=" min="0.01" step="0.05" /></div>
-                  <div><label>N</label><input type="number" id="passes-mean-window-b" placeholder="=" min="1" max="200" step="1" /></div>
-                </div>
-              </div>
-            </div>
-          </details>
-
-          <label data-i18n="passes.blend">Blend</label>
-          <select id="passes-blend">
-            <option value="plus-lighter" data-i18n="blend.add">add (plus-lighter)</option>
-            <option value="normal"       data-i18n="blend.normal">normal</option>
-            <option value="screen"       data-i18n="blend.screen">screen</option>
-            <option value="multiply"     data-i18n="blend.multiply">multiply</option>
-            <option value="overlay"      data-i18n="blend.overlay">overlay</option>
-            <option value="energy"       data-i18n="blend.energy">energy color (passes = opacity)</option>
-          </select>
-        </details>
-
-        <!-- 3D. Legend -->
-        <details class="group" id="result-legend-group" open>
-          <summary data-i18n="group.result_legend">3D. Legenda</summary>
-          <div class="legend" style="margin-top: 4px;">
-            <div class="swatch"></div>
-            <div class="legend-ticks">
-              <span class="v" id="legend-lo">0</span>
-              <span class="v" id="legend-mid">—</span>
-              <span class="v" id="legend-hi">—</span>
-            </div>
-          </div>
-        </details>
-
-        <button type="button" id="refresh-style" class="secondary" data-i18n="btn.refresh_style" style="margin-top: 6px;">Refresh style</button>
-        <button class="secondary" id="range-reset" data-i18n="btn.range_reset" style="margin-top: 4px;">Reset ranges to auto</button>
       </details>
 
       </div><!-- /.panel-cols -->
@@ -1313,9 +1209,16 @@
         if (colsEl.clientWidth < 50) return;                      // collapsed/hidden — nothing to size
         const ps = getComputedStyle(panel);
         const header = panel.querySelector('.panel-header');
+        // Exact available height = panel content box minus the header's full
+        // vertical footprint (offsetHeight + its margins). No guess fudge, so a
+        // column fills to the true viewport bottom before spilling / scrolling.
+        let headerH = 0;
+        if (header) {
+          const hs = getComputedStyle(header);
+          headerH = header.offsetHeight + parseFloat(hs.marginTop) + parseFloat(hs.marginBottom);
+        }
         const avail = Math.max(160, panel.clientHeight
-          - parseFloat(ps.paddingTop) - parseFloat(ps.paddingBottom)
-          - (header ? header.offsetHeight : 0) - 10);
+          - parseFloat(ps.paddingTop) - parseFloat(ps.paddingBottom) - headerH);
         const gap = parseFloat(getComputedStyle(colsEl).columnGap) || 14;
         const colW = (colsEl.clientWidth - (effCols - 1) * gap) / effCols;
         // Measure the content's height as a SINGLE column at the column width.
@@ -1753,7 +1656,8 @@
        list = drawn on top); ↑/↓ apply immediately and persist. -->
   <div class="modal-backdrop" id="layer-order-modal" role="dialog" aria-modal="true" aria-labelledby="layer-order-title">
     <div class="modal" style="max-width: 340px;">
-      <button type="button" class="modal-close" id="layer-order-close" aria-label="Close">×</button>
+      <!-- No × close button: the layer-control button toggles this panel and Esc
+           closes it (it's a non-blocking floating panel). -->
       <h2 id="layer-order-title" data-i18n="order.title" style="margin: 0 0 8px; font-size: 15px;">Controle de camadas</h2>
 
       <label data-i18n="layer.basemap">Basemap</label>
@@ -1793,6 +1697,119 @@
       <div class="hint" data-i18n="order.hint" style="margin-bottom: 6px;">Top of the list is drawn on top. Markers and tooltips always stay above. Applied immediately; remembered on this device.</div>
       <div id="layer-order-list"></div>
       <button type="button" class="secondary" id="layer-order-reset" data-i18n="order.reset" style="margin-top: 8px;">Reset to default</button>
+      <hr style="border: none; border-top: 1px solid var(--border); margin: 12px 0 6px;" />
+      <!-- Result styling (energy field, density channels, legend) — moved here from the sidebar. -->
+      <!-- 3B. Energy field (min/max here are the ENERGY field bounds). -->
+      <details class="group" id="result-energy-group" open>
+        <summary data-i18n="group.result_energy">3B. Campo de energia</summary>
+        <label data-i18n="param.field_cmap">Field colormap</label>
+        <select id="colormap"></select>
+        <div class="layer-block">
+          <!-- Shown only when a compare run produced both scenarios. -->
+          <div id="energy-source-row" style="display: none;">
+            <label data-i18n="layer.energy_source">Displayed scenario (energy &amp; passes)</label>
+            <select id="energy-source">
+              <option value="constrained"   data-i18n="esrc.constrained">network-constrained</option>
+              <option value="unconstrained" data-i18n="esrc.unconstrained">unconstrained</option>
+              <option value="difference"    data-i18n="esrc.difference">difference (network cost; passes overlaid)</option>
+            </select>
+          </div>
+          <div class="row">
+            <div>
+              <label data-i18n="vmin.label">min (auto = p1)</label>
+              <input type="number" id="vmin" placeholder="auto" step="any" />
+            </div>
+            <div>
+              <label data-i18n="vmax.label">max (auto = p80)</label>
+              <input type="number" id="vmax" placeholder="auto" step="any" />
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <!-- 3C. Trajectory density (min/max here are the PASSES density bounds).
+           Shown only once a run produced passes (JS toggles #passes-row). -->
+      <details class="group" id="passes-row" open style="display: none;">
+        <summary data-i18n="group.result_density">3C. Densidade de trajetos</summary>
+
+        <!-- 3C.a. Density on the vector NETWORK. Holds the PRIMARY tweaks
+             (#passes-primary) whenever the displayed channel is the network
+             (constrained / difference). For a terrain-only run rerenderCachedResult
+             moves #passes-primary into 3C.b instead and hides this group. -->
+        <details class="group" id="result-density-net-group" open>
+          <summary data-i18n="group.result_density_net">3C.a. Densidade de trajetos na rede vetorial</summary>
+          <div id="density-net-body">
+            <div id="passes-primary">
+              <div class="row">
+                <div>
+                  <label data-i18n="vmin.passes">min (auto = p10)</label>
+                  <input type="number" id="passes-vmin" placeholder="p10" step="any" />
+                </div>
+                <div>
+                  <label data-i18n="vmax.passes">max (auto = p90)</label>
+                  <input type="number" id="passes-vmax" placeholder="p90" step="any" />
+                </div>
+              </div>
+              <div class="row">
+                <div>
+                  <label data-i18n="passes.gamma">γ gamma (1 = no change)</label>
+                  <input type="number" id="passes-gamma" value="1" min="0.01" step="0.05" />
+                </div>
+                <div>
+                  <label data-i18n="passes.mean_window">mean filter N</label>
+                  <input type="number" id="passes-mean-window" value="5" min="1" max="200" step="1" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <!-- 3C.b. Density on the TERRAIN. Hosts #passes-primary for a
+             terrain-only run; in the difference view it instead shows the
+             green B-channel overrides (#passes-dual-row, blank = inherit A). -->
+        <details class="group" id="result-density-terrain-group" open style="display: none;">
+          <summary data-i18n="group.result_density_terrain">3C.b. Densidade de trajetos no terreno</summary>
+          <div id="density-terrain-body">
+            <div id="passes-dual-row" style="display: none;">
+              <div class="row">
+                <div><label>min</label><input type="number" id="passes-vmin-b" placeholder="=" step="any" /></div>
+                <div><label>max</label><input type="number" id="passes-vmax-b" placeholder="=" step="any" /></div>
+              </div>
+              <div class="row">
+                <div><label>γ</label><input type="number" id="passes-gamma-b" placeholder="=" min="0.01" step="0.05" /></div>
+                <div><label>N</label><input type="number" id="passes-mean-window-b" placeholder="=" min="1" max="200" step="1" /></div>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <label data-i18n="passes.blend">Blend</label>
+        <select id="passes-blend">
+          <option value="plus-lighter" data-i18n="blend.add">add (plus-lighter)</option>
+          <option value="normal"       data-i18n="blend.normal">normal</option>
+          <option value="screen"       data-i18n="blend.screen">screen</option>
+          <option value="multiply"     data-i18n="blend.multiply">multiply</option>
+          <option value="overlay"      data-i18n="blend.overlay">overlay</option>
+          <option value="energy"       data-i18n="blend.energy">energy color (passes = opacity)</option>
+        </select>
+      </details>
+
+      <!-- 3D. Legend -->
+      <details class="group" id="result-legend-group" open>
+        <summary data-i18n="group.result_legend">3D. Legenda</summary>
+        <div class="legend" style="margin-top: 4px;">
+          <div class="swatch"></div>
+          <div class="legend-ticks">
+            <span class="v" id="legend-lo">0</span>
+            <span class="v" id="legend-mid">—</span>
+            <span class="v" id="legend-hi">—</span>
+          </div>
+        </div>
+      </details>
+
+      <button type="button" id="refresh-style" class="secondary" data-i18n="btn.refresh_style" style="margin-top: 6px;">Refresh style</button>
+      <button class="secondary" id="range-reset" data-i18n="btn.range_reset" style="margin-top: 4px;">Reset ranges to auto</button>
+
     </div>
   </div>
 </body>
