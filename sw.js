@@ -346,7 +346,15 @@
 //              invariant (a constant scale, so the percentile-normalized pattern
 //              is unchanged); already-normalized density fields are left untouched;
 //              the GeoTIFF export stays counts. JS/UI only; engine untouched.
-const VERSION  = "v40";
+//   v40 → v41: Mobile layout fix. The locate / hamburger / layer-control buttons
+//              now mirror the desktop top-right stack (8 / 56 / 104), and the
+//              layer-control modal opens BELOW them — previously the buttons sat
+//              in the bottom corners and the tall modal covered them, so you
+//              couldn't tap the layer button to close its own modal. The modal
+//              also scrolls VERTICALLY when space is tight (its 2-column flow
+//              moved into a height:auto child) instead of spilling sideways into
+//              extra columns. JS/UI only; engine untouched.
+const VERSION  = "v41";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

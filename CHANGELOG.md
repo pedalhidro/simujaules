@@ -9,6 +9,22 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v41 — 2026-06-26
+
+Mobile layout fix for the on-map buttons + the layer-control panel. **JS/UI
+only — engine untouched.**
+
+- On phones the **locate / hamburger / layer-control buttons** now mirror the
+  desktop top-right stack (8 / 56 / 104) instead of being scattered to the bottom
+  corners. The **layer-control modal opens below them**, so it no longer covers
+  the buttons — previously the tall modal extended down over the bottom-corner
+  buttons and you couldn't tap the layer button to close its own modal.
+- The layer-control modal now **scrolls vertically** when space is tight: its
+  2-column flow moved into a `height:auto` child, so overflow scrolls the panel
+  down instead of spilling sideways into extra columns (no more horizontal
+  scrollbar).
+- Sized for an iPhone SE; covered by a new headless test (`check-mobile-layout`).
+
 ## v40 — 2026-06-25
 
 Passes are always visualized as a **normalized density**, never raw counts.

@@ -1526,6 +1526,15 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v41</strong> — 2026-06-26<br/>
+              Mobile layout fix (JS/UI only). On phones the locate, hamburger and
+              layer-control buttons now mirror the desktop top-right stack instead
+              of being scattered to the bottom corners, and the layer-control
+              modal opens <em>below</em> them — before, the tall modal covered the
+              bottom-corner buttons so you couldn't tap the layer button to close
+              its own modal. The modal also scrolls vertically when space is tight
+              (its 2-column flow moved into a height:auto child) instead of
+              spilling sideways. Sized for an iPhone SE.</p>
               <p><strong>v40</strong> — 2026-06-25<br/>
               Passes are now always shown as a <em>normalized density</em> rather
               than raw counts (JS/UI only; display-only and colour-invariant). A
