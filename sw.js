@@ -321,9 +321,25 @@
 //              success pill, disabled-Calcular reason, density auto-opens the
 //              refs group. i18n/copy leaks fixed + shorter select options +
 //              mobile button fixes + cloud example datasets ("Viário RMSampa"
-//              network in 1B, "Águas RMSampa" water mask in 1C). JS/UI only;
+//              network in 1B, "Águas RMSampa" water mask in 1C, full RMSampa
+//              extent). JS/UI only;
 //              engine untouched (bit-parity).
-const VERSION  = "v38";
+//   v38 → v39: Density display + new I/O + map fixes. Graph-mode passes: network
+//              vectors keep a true orange / azure hue (intensity is now opacity,
+//              not a darkening multiply that muddied mid-values into yellow-brown);
+//              "filtro média N" rasterises + mean-smooths the network channel
+//              (precise vectors when empty); the difference view composites
+//              network + terrain into one orange/azure raster; the 3C.a passes and
+//              3B energy inputs show the resolved auto numbers (were static
+//              p10/p90/auto). Sidebar columns balance evenly once content overflows
+//              (was column-1-heavy). Map: rmsampa-v2 hydrography is crisp on HiDPI
+//              and no longer vanishes past z17 (detectRetina + DPR-aware native-zoom
+//              cap). Group 0 gains export/import of the four inputs in matching
+//              formats — DEM + mask as GeoTIFF, network + bridges as GeoPackage (new
+//              in-browser .gpkg writer). The layer-control panel is resizable to
+//              2 columns. JS/UI only; engine + worker + backend untouched
+//              (bit-parity preserved).
+const VERSION  = "v39";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

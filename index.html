@@ -1524,6 +1524,22 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v39</strong> — 2026-06-25<br/>
+              Density-display polish, dataset export/import, and map fixes (JS/UI
+              only; engine untouched). Graph-mode passes: network vectors keep a
+              true orange (terrain a true azure) — intensity is now opacity, not a
+              multiply that muddied mid-values into yellow-brown — and the
+              <em>filtro média N</em> filter applies to the network channel
+              (precise vectors when empty, a rasterised + mean-smoothed field when
+              set; the difference view composites both channels into one
+              orange/azure raster). The 3C.a passes and 3B energy min/max inputs
+              now show the resolved auto numbers instead of the static
+              <em>p10/p90/auto</em>. The sidebar balances its columns evenly once
+              they overflow (was column-1-heavy). The rmsampa-v2 hydrography is
+              crisp on HiDPI displays and no longer vanishes past z17. New in
+              Group 0: <em>export/import</em> of the four inputs in matching
+              formats — DEM and mask as GeoTIFF, network and bridges as GeoPackage.
+              The layer-control panel is resizable to two columns.</p>
               <p><strong>v38</strong> — 2026-06-25<br/>
               A UI/UX review pass (JS/UI only; engine untouched). Units: the budget
               stays in kJ, so α/β are labelled <em>kJ/m</em> again (reverting v37's

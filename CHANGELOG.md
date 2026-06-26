@@ -9,6 +9,32 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v39 — 2026-06-25
+
+Density-display polish, dataset export/import, and map fixes. **JS/UI only —
+the compute engine, Web Worker and Rust backend are untouched and stay
+bit-parity.**
+
+- **Graph-mode passes (3C):** the network-passes vectors keep a true orange
+  (and the terrain channel a true azure) — intensity is now encoded as opacity
+  instead of a multiply that darkened mid-values into a muddy yellow-brown, so
+  min/max edits read clearly. The **"filtro média N"** filter now applies to the
+  network channel: precise vectors when empty, a rasterised + mean-smoothed field
+  when set (and the difference view composites network + terrain into a single
+  orange/azure raster, like raster mode). The **3C.a passes** and **3B energy**
+  min/max inputs now show the resolved auto numbers as their placeholders (they
+  were stuck on the static `p10`/`p90`/`auto`).
+- **Sidebar:** once the groups overflow one column, they balance evenly across
+  the columns (minimum height variance) instead of overloading column 1.
+- **Map:** the rmsampa-v2 hydrography overlay renders crisp on HiDPI / retina
+  displays and no longer disappears when you zoom past ~z17 — `detectRetina` with
+  a DPR-aware native-zoom cap, so it never requests the non-existent z17 tiles.
+- **Group 0 — export/import** of the four input datasets, same format both ways:
+  1A DEM and 1C mask as GeoTIFF, 1B network and 1D bridges as GeoPackage (a new
+  in-browser `.gpkg` writer, QGIS-readable).
+- **Layer-control panel** is now resizable to two columns by dragging its left
+  edge, matching the sidebar.
+
 ## v38 — 2026-06-25
 
 A UI/UX review pass. **JS/UI only — the compute engine, Web Worker and Rust
@@ -50,8 +76,8 @@ backend are untouched and stay bit-parity.**
 ### Example datasets
 
 - **1B** gains a one-click **"Viário RMSampa"** loader (the ~145 MB RMSampa road
-  network `.gpkg`) and **1C** an **"Águas RMSampa"** water-mask loader (`.tif`),
-  both fetched from the bucket. `deploy.sh` now excludes the `vector/` and `mask/`
+  network `.gpkg`) and **1C** an **"Águas RMSampa"** water-mask loader (a ~2.4 MB
+  `.tif` covering the full RMSampa region), both fetched from the bucket. `deploy.sh` now excludes the `vector/` and `mask/`
   prefixes from the bucket prune (same out-of-band pattern as `census/`).
 
 ## v37 — 2026-06-25
