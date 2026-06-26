@@ -9,6 +9,16 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v42 — 2026-06-26
+
+Moved the map attribution into the help modal. **JS/UI only — engine untouched.**
+
+- Removed the on-map Leaflet attribution strip (`attributionControl: false`). The
+  same credits — Leaflet, Leaflet-Geoman, © OpenStreetMap contributors, © CARTO,
+  © Esri (Maxar, Earthstar Geographics), and the `pedalhidrografi.co` buried-
+  hydrography overlay — now live in an **"Atribuições / Attributions"** section of
+  the help modal, with links.
+
 ## v41 — 2026-06-26
 
 Mobile layout fix for the on-map buttons + the layer-control panel. **JS/UI

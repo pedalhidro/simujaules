@@ -354,7 +354,12 @@
 //              also scrolls VERTICALLY when space is tight (its 2-column flow
 //              moved into a height:auto child) instead of spilling sideways into
 //              extra columns. JS/UI only; engine untouched.
-const VERSION  = "v41";
+//   v41 → v42: Removed the on-map Leaflet attribution strip (attributionControl
+//              off); the same credits (Leaflet, Leaflet-Geoman, OpenStreetMap,
+//              CARTO, Esri, the pedalhidrografi.co hydrography overlay) now live
+//              in an "Atribuições / Attributions" section of the help modal.
+//              JS/UI only; engine untouched.
+const VERSION  = "v42";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
