@@ -9,6 +9,23 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v40 — 2026-06-25
+
+Passes are always visualized as a **normalized density**, never raw counts.
+**JS/UI only — display-only and colour-invariant; the engine, export and
+bit-parity are untouched.**
+
+- A single run's passes are subtree-size *counts*, while the multi-reference
+  density path already normalizes by `H·W` twice — so the two read on wildly
+  different scales (a 3C channel showing `12` instead of the density's `~1e-10`).
+  Count-based passes are now scaled by `1/(H·W)²` into the **same units as the
+  density**, at every passes render point (graph vectors, graph/raster rasters,
+  the difference view) — never energy. Fields already normalized (max < 1) are
+  left untouched, so density runs aren't double-divided. Because it's a constant
+  scale, the percentile-normalized colour/pattern is unchanged — only the
+  displayed numbers and auto-bound placeholders move to density units. The
+  GeoTIFF export stays counts.
+
 ## v39 — 2026-06-25
 
 Density-display polish, dataset export/import, and map fixes. **JS/UI only —

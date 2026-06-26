@@ -339,7 +339,14 @@
 //              in-browser .gpkg writer). The layer-control panel is resizable to
 //              2 columns. JS/UI only; engine + worker + backend untouched
 //              (bit-parity preserved).
-const VERSION  = "v39";
+//   v39 → v40: Passes are ALWAYS shown as a normalized density now, not raw
+//              counts — single-run subtree-size counts are scaled by 1/(H·W)² into
+//              the same units the multi-reference density already uses (so a 3C
+//              channel reads ~1e-10 instead of "12"). Display-only + colour-
+//              invariant (a constant scale, so the percentile-normalized pattern
+//              is unchanged); already-normalized density fields are left untouched;
+//              the GeoTIFF export stays counts. JS/UI only; engine untouched.
+const VERSION  = "v40";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

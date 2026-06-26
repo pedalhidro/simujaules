@@ -1524,6 +1524,18 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v40</strong> — 2026-06-25<br/>
+              Passes are now always shown as a <em>normalized density</em> rather
+              than raw counts (JS/UI only; display-only and colour-invariant). A
+              single run's passes are subtree-size counts, while the
+              multi-reference density already normalizes by H·W twice — so the two
+              read on very different scales (a 3C channel showing <em>12</em>
+              instead of the density's <em>~1e-10</em>). Count-based passes are
+              scaled by <em>1/(H·W)²</em> into the same units as the density at
+              every render point; already-normalized fields are left untouched.
+              The colour/pattern is unchanged (a constant scale) — only the
+              numbers and placeholders move to density units. The GeoTIFF export
+              stays counts.</p>
               <p><strong>v39</strong> — 2026-06-25<br/>
               Density-display polish, dataset export/import, and map fixes (JS/UI
               only; engine untouched). Graph-mode passes: network vectors keep a
