@@ -485,6 +485,8 @@ const STRINGS = {
   "help.h.changelog":    { pt: "Histórico de versões (changelog, em inglês)", en: "Changelog" },
   "help.h.impl":         { pt: "Implementação", en: "Implementation" },
   "help.p.impl":         { pt: "JS puro, em Web Worker: Dijkstra 8-conectada com heap binária sobre arrays tipados (<code>Float64Array</code> de prioridades + <code>Int32Array</code> de payloads). Tudo o que precisa de Δh assimétrico, passes count, top-N e densidade roda no mesmo motor.", en: 'Pure JS in a Web Worker: 8-connected Dijkstra on a binary heap over typed arrays (<code>Float64Array</code> for priorities + <code>Int32Array</code> for payloads). Everything — asymmetric Δh, passes count, top-N, density — runs on the same engine.' },
+  "help.h.attribution":  { pt: "Atribuições", en: "Attributions" },
+  "help.p.attribution":  { pt: "Mapa com <a href='https://leafletjs.com' target='_blank' rel='noopener'>Leaflet</a> e <a href='https://github.com/geoman-io/leaflet-geoman' target='_blank' rel='noopener'>Leaflet-Geoman</a>. Camadas base: © <a href='https://www.openstreetmap.org/copyright' target='_blank' rel='noopener'>OpenStreetMap</a> contribuidores, © <a href='https://carto.com/attributions' target='_blank' rel='noopener'>CARTO</a>, © Esri — Maxar, Earthstar Geographics. Hidrografia soterrada (rmsampa-v2): <a href='https://pedalhidrografi.co' target='_blank' rel='noopener'>pedalhidrografi.co</a>.", en: "Map with <a href='https://leafletjs.com' target='_blank' rel='noopener'>Leaflet</a> and <a href='https://github.com/geoman-io/leaflet-geoman' target='_blank' rel='noopener'>Leaflet-Geoman</a>. Base layers: © <a href='https://www.openstreetmap.org/copyright' target='_blank' rel='noopener'>OpenStreetMap</a> contributors, © <a href='https://carto.com/attributions' target='_blank' rel='noopener'>CARTO</a>, © Esri — Maxar, Earthstar Geographics. Buried hydrography (rmsampa-v2): <a href='https://pedalhidrografi.co' target='_blank' rel='noopener'>pedalhidrografi.co</a>." },
 };
 
 // localStorage access can throw in iOS Safari Private Browsing — feature
@@ -1559,7 +1561,10 @@ document.addEventListener("DOMContentLoaded", () => {
   setupDrawingTools();
 });
 
-const map = L.map("map", { preferCanvas: true }).setView([-23.55, -46.63], 12);
+// attributionControl:false — the on-map attribution strip is removed; the same
+// credits live in the help modal instead (the per-layer `attribution:` strings
+// below are kept for the record / in case the control is ever re-enabled).
+const map = L.map("map", { preferCanvas: true, attributionControl: false }).setView([-23.55, -46.63], 12);
 
 // Explicit stacking for the analysis layers, between Leaflet's default
 // overlayPane (z 400) and markerPane (z 600). Without dedicated panes all
