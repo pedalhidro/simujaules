@@ -258,20 +258,22 @@
       #panel.open { transform: translateX(0); }
       /* On phones the top-left corner is awkward to reach with the
          right thumb; move both floating buttons to the bottom row. */
+      /* Mobile mirrors desktop: locate / hamburger / layers form a single
+         top-right stack (8 / 56 / 104) so they all stay ABOVE the layer-control
+         modal (which opens at top:152) — tapping them, including to close the
+         modal, always works. Sized for an iPhone SE: the 40px buttons sit in the
+         narrow strip the slide-in drawer leaves on the right. */
       .drawer-toggle {
         display: inline-flex;
-        top: auto;
-        right: auto; /* base uses right:8 (desktop); mobile anchors bottom-left */
-        bottom: 16px;
-        left: 16px;
-        box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.4);
+        top: 56px;
+        right: 8px;
+        bottom: auto;
+        left: auto;
       }
       .locate-button {
-        top: auto;
-        /* Sits above Leaflet's attribution strip at the bottom-right. */
-        bottom: 50px;
-        right: 16px;
-        box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.4);
+        top: 8px;
+        right: 8px;
+        bottom: auto;
       }
       /* Once the drawer is open, swap the icon to an × via the data-attr.
          The button stays where it is so the user can close from the same
@@ -306,8 +308,8 @@
        gesture on touch devices anyway. */
     @media (max-width: 860px) {
       .leaflet-control-zoom { display: none; }
-      /* Stack the layer-control button above the bottom-right locate button. */
-      .layer-ctrl-button { top: auto; bottom: 84px; right: 16px; box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.4); }
+      /* Third in the top-right stack (mirrors desktop), clear of its own modal. */
+      .layer-ctrl-button { top: 104px; right: 8px; bottom: auto; }
     }
     h1 {
       font-size: 14px;
@@ -643,12 +645,15 @@
       pointer-events: auto;
       width: min(calc(var(--layer-modal-cols, 1) * 320px), calc(100vw - 16px));
       max-height: calc(100vh - 164px); padding: 14px 16px; margin: 0;
-      /* Same idea as the sidebar: widen via the left-edge resizer to flow the
-         content into up to 2 columns. The title spans; groups never split. */
-      column-count: var(--layer-modal-cols, 1); column-gap: 16px;
+      overflow-x: hidden; /* scroll VERTICALLY only — never sideways */
     }
-    #layer-order-modal > .modal > h2 { column-span: all; }
-    #layer-order-modal > .modal > *:not(#layer-modal-resizer):not(h2) { break-inside: avoid; }
+    /* Same idea as the sidebar: widen via the left-edge resizer to flow content
+       into up to 2 columns. The multicol lives in this height:auto CHILD (not on
+       .modal, which has max-height) so overflow scrolls the modal VERTICALLY
+       instead of spilling into extra columns sideways. The title stays outside it
+       (full width); groups never split across columns. */
+    #layer-modal-cols { column-count: var(--layer-modal-cols, 1); column-gap: 16px; }
+    #layer-modal-cols > * { break-inside: avoid; }
     #layer-modal-resizer {
       position: absolute; top: 0; bottom: 0; left: -3px; width: 6px;
       cursor: col-resize; z-index: 3; background: transparent;
@@ -657,7 +662,8 @@
     #layer-modal-resizer:hover, #layer-modal-resizer.dragging { background: var(--accent-2); opacity: 0.45; }
     @media (max-width: 860px) {
       #layer-modal-resizer { display: none; }
-      #layer-order-modal > .modal { column-count: 1; width: min(320px, calc(100vw - 16px)); }
+      #layer-order-modal > .modal { width: min(320px, calc(100vw - 16px)); }
+      #layer-modal-cols { column-count: 1; }
     }
     .modal {
       background: var(--panel);
@@ -741,13 +747,9 @@
     }
     /* Make checked/active native controls legible on the dark panel. */
     input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color: var(--accent-2); }
-    /* Hidden while the mobile drawer is open (toggled from the drawer JS). */
-    .locate-button.drawer-hidden { display: none; }
-    /* Short screens: lift the floating layer panel so its legend stays on-screen. */
-    @media (max-height: 800px) {
-      #layer-order-modal { top: 96px; }
-      #layer-order-modal > .modal { max-height: calc(100vh - 108px); }
-    }
+    /* (The layer panel used to lift to top:96 on short screens for legend
+       visibility, but the top-right button stack now occupies that area — so the
+       panel stays BELOW it at its base top:152 and scrolls vertically instead.) */
     /* Respect reduced-motion preferences. */
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
@@ -1208,8 +1210,8 @@
         backdrop.classList.toggle('active', open);
         btn.setAttribute('aria-expanded', open ? 'true' : 'false');
         btn.textContent = open ? '×' : '☰';
-        // Hide the locate button while the open drawer covers the screen (mobile).
-        document.getElementById('locate-btn')?.classList.toggle('drawer-hidden', open);
+        // The locate / layer buttons stay in the top-right stack (clear of the
+        // left slide-in drawer), so they're left visible — same as desktop.
       }
       const app = document.getElementById('app');
       const isDesktop = () => window.innerWidth > 860;
@@ -1817,6 +1819,10 @@
            closes it (it's a non-blocking floating panel). -->
       <h2 id="layer-order-title" data-i18n="order.title" style="margin: 0 0 8px; font-size: 15px;">Controle de camadas</h2>
 
+      <!-- The multi-column flow lives in a height:auto child so the .modal scrolls
+           VERTICALLY (overflow-y) when space is tight, instead of the multicol
+           spilling content into extra columns sideways (horizontal scroll). -->
+      <div id="layer-modal-cols">
       <label data-i18n="layer.basemap">Basemap</label>
       <select id="basemap-select">
         <option value="osm"            data-i18n="basemap.osm">OSM (default)</option>
@@ -1966,6 +1972,7 @@
 
       <button type="button" id="refresh-style" class="secondary" data-i18n="btn.refresh_style" style="margin-top: 6px;">Refresh style</button>
       <button class="secondary" id="range-reset" data-i18n="btn.range_reset" style="margin-top: 4px;">Reset ranges to auto</button>
+      </div><!-- /#layer-modal-cols -->
 
     </div>
   </div>
