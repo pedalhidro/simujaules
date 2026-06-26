@@ -4463,6 +4463,7 @@ function removeGraphLayers() {
 // greyscale matches the raster passes layer; colormap matches the energy layer.
 // Returns a layerGroup with `_range = [lo, hi]` for the legend.
 function buildGraphFieldLayer(graph, field, { pane, greyscale, tint, minId, maxId, percentiles, skipZero }) {
+  if (state.dem) field = passesAsDensity(field, state.dem.W, state.dem.H); // counts → density units
   // Collect drawable values. skipZero mirrors the raster's treatZeroAsTransparent:
   // zero / unreached edges DON'T draw, so the result reads as corridors instead
   // of a full-network outline. Percentile bounds tame the long passes tail.
@@ -4617,7 +4618,7 @@ function renderGraphOverlay() {
         usePercentileBounds: true, percentiles: [10, 90], maxAboveMin: true,
         userMin: readRangeInput("passes-vmin", null), userMax: readRangeInput("passes-vmax", null),
         gamma: numOr("passes-gamma", 1), meanWindow: netWin,
-        useGreyscale: true, treatZeroAsTransparent: true,
+        useGreyscale: true, treatZeroAsTransparent: true, densityNormalize: true,
       });
       state.passesDataUrl = out.url;
       state.lastPassesAutoMin = out.lo; state.lastPassesAutoMax = out.hi;
@@ -4640,7 +4641,7 @@ function renderGraphOverlay() {
       usePercentileBounds: true, percentiles: [10, 90], maxAboveMin: true,
       userMin: uMin, userMax: uMax,
       gamma, meanWindow: win > 1 ? win : 1,
-      useGreyscale: !diffView, tint: diffView ? TERR_BLUE : null, treatZeroAsTransparent: true,
+      useGreyscale: !diffView, tint: diffView ? TERR_BLUE : null, treatZeroAsTransparent: true, densityNormalize: true,
     });
     state.passesDataUrl = out.url;
     if (!showNet) { state.lastPassesAutoMin = out.lo; state.lastPassesAutoMax = out.hi; }
@@ -6512,6 +6513,7 @@ function rerenderCachedResult() {
       usePercentileBounds: true,
       percentiles: [10, 90],
       maxAboveMin: true,
+      densityNormalize: true, // counts → density units (matches multi-ref density)
       userMin: readRangeInput("passes-vmin", null),
       userMax: readRangeInput("passes-vmax", null),
       gamma: Number.isFinite(gamma) ? gamma : 1,
@@ -6638,8 +6640,26 @@ function boxBlur2D(field, W, H, win) {
 // `gamma`: exponent γ such that `t' = t^γ`. γ=1 → identity. γ=2 squares
 // the intensity (darkens dim cells). γ=0.5 takes the square root
 // (brightens dim cells).
+// Passes are subtree-size COUNTS; show them in the SAME density units the
+// multi-reference density already uses (÷H·W twice) so passes ALWAYS read as a
+// normalized density, never raw counts. A field whose max is already < 1 is an
+// existing density and is left untouched (no double-division). The scale is a
+// constant, so the percentile-normalized COLOUR is unchanged — only the displayed
+// numbers (auto bounds + placeholders) move to density units.
+function passesAsDensity(field, W, H) {
+  if (!field || !field.length) return field;
+  let max = 0;
+  for (let i = 0; i < field.length; i++) { if (field[i] > max) max = field[i]; }
+  if (max < 1) return field; // already a density (or empty) — counts are integers ≥ 1
+  const k = 1 / (W * H * W * H);
+  const out = new Float64Array(field.length);
+  for (let i = 0; i < field.length; i++) out[i] = field[i] * k;
+  return out;
+}
+
 function renderFieldToDataURL(field, W, H, opts) {
   const N = W * H;
+  if (opts.densityNormalize) field = passesAsDensity(field, W, H);
 
   // Optional mean filter. boxBlur returns a fresh Float64Array.
   const work = opts.meanWindow && opts.meanWindow > 1
@@ -6806,6 +6826,9 @@ function renderFieldToDataURL(field, W, H, opts) {
 // independently. Auto bounds are p10/p90 over BOTH fields' positive cells.
 function renderDualPassesToDataURL(constrained, unconstrained, W, H, opts) {
   const N = W * H;
+  // Both channels → density units (counts ×1/(H·W)²; existing densities untouched).
+  constrained = passesAsDensity(constrained, W, H);
+  unconstrained = passesAsDensity(unconstrained, W, H);
   const winA = opts.meanWindow && opts.meanWindow > 1 ? opts.meanWindow : 1;
   const winB = opts.meanWindowB && opts.meanWindowB > 1
     ? opts.meanWindowB
