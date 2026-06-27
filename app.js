@@ -404,7 +404,19 @@ const STRINGS = {
   "order.energy":        { pt: "Energia", en: "Energy" },
   "order.network":       { pt: "Rede vetorial (linhas)", en: "Vector network (lines)" },
   "order.passes":        { pt: "Passagens", en: "Passes" },
+  "order.refgeom":       { pt: "Geometria de referência", en: "Reference geometry" },
   "order.routes":        { pt: "Rotas / caminho", en: "Routes / path" },
+  "layer.refgeom":       { pt: "Geometria de referência", en: "Reference geometry" },
+  "refgeom.upload":      { pt: "Carregar trilha GPX", en: "Upload GPX track" },
+  "refgeom.distance":    { pt: "Distância", en: "Distance" },
+  "refgeom.energy":      { pt: "Energia total", en: "Total energy" },
+  "refgeom.ascent":      { pt: "Subida total", en: "Total ascent" },
+  "refgeom.descent":     { pt: "Descida total", en: "Total descent" },
+  "refgeom.no_elevation":{ pt: "Sem dados de elevação (a trilha não traz elevação e não há DEM sob ela).", en: "No elevation data (the track carries no elevation and there's no DEM under it)." },
+  "refgeom.loading":     { pt: "Lendo trilha GPX…", en: "Reading GPX track…" },
+  "refgeom.loaded":      { pt: "Geometria de referência: {0} ({1} km).", en: "Reference geometry: {0} ({1} km)." },
+  "refgeom.parse_error": { pt: "Arquivo GPX inválido.", en: "Invalid GPX file." },
+  "refgeom.too_short":   { pt: "A trilha GPX precisa de ao menos 2 pontos.", en: "The GPX track needs at least 2 points." },
   "passes.gamma":        { pt: "γ gama (1 = sem mudança)", en: "γ gamma (1 = no change)" },
   "passes.mean_window":  { pt: "filtro média N", en: "mean filter N" },
   "passes.blend":        { pt: "Blend", en: "Blend" },
@@ -1409,6 +1421,13 @@ document.addEventListener("DOMContentLoaded", () => {
   wireImport("import-mask", "io-mask-file", (f) => loadImpassableMaskFromFile(f));
   wireImport("import-bridges", "io-bridges-file", (f) => importBridgesGpkg(f));
 
+  // Reference-geometry GPX picker (triggered by the layer row's ↑ upload button).
+  document.getElementById("refgeom-file")?.addEventListener("change", async (ev) => {
+    const f = ev.target.files[0];
+    ev.target.value = ""; // re-picking the same file fires change again
+    if (f) await loadRefGeometry(f);
+  });
+
   applyColormapToLegend();
   // Apply initial layer controls so the rmsampa-v2 tile layer (default ON)
   // gets added to the map without waiting for a Compute.
@@ -1447,6 +1466,7 @@ document.addEventListener("DOMContentLoaded", () => {
     energy:     { vis: "energy-visible",  op: "energy-opacity"  },
     network:    { vis: "vec-render",      op: "vec-render-opacity" },
     passes:     { vis: "passes-visible",  op: "passes-opacity"  },
+    refgeom:    { vis: "refgeom-visible", op: null, upload: true },
     routes:     { vis: null,              op: null              },
   };
   // Fixed (non-reorderable) layers shown after the stacking list.
@@ -1459,7 +1479,7 @@ document.addEventListener("DOMContentLoaded", () => {
     el.dispatchEvent(new Event("input",  { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
   };
-  const buildLayerRow = ({ labelKey, reorder, vis, op }) => {
+  const buildLayerRow = ({ labelKey, reorder, vis, op, upload }) => {
     const row = document.createElement("div");
     row.style.cssText =
       "display:flex;align-items:center;gap:6px;padding:4px 6px;" +
@@ -1514,6 +1534,16 @@ document.addEventListener("DOMContentLoaded", () => {
       r.addEventListener("input", () => { realOp.value = r.value; fireInput(realOp); });
       row.appendChild(r);
     }
+    // Upload control (↑) in place of the opacity slider — used by the
+    // reference-geometry layer to load a GPX track.
+    if (upload) {
+      const up = document.createElement("button");
+      up.type = "button"; up.className = "secondary"; up.textContent = "↑";
+      up.title = t("refgeom.upload"); up.setAttribute("aria-label", t("refgeom.upload"));
+      up.style.cssText = "width:24px;height:24px;padding:2px 0;margin:0;flex:none;";
+      up.addEventListener("click", () => document.getElementById("refgeom-file")?.click());
+      row.appendChild(up);
+    }
     return row;
   };
   const renderOrderList = () => {
@@ -1525,7 +1555,7 @@ document.addEventListener("DOMContentLoaded", () => {
       orderList.appendChild(buildLayerRow({
         labelKey: `order.${key}`,
         reorder: { key, di, last: topToBottom.length - 1 },
-        vis: v.vis, op: v.op,
+        vis: v.vis, op: v.op, upload: v.upload,
       }));
     });
     FIXED_ROWS.forEach((f) => orderList.appendChild(buildLayerRow({
@@ -1580,9 +1610,10 @@ const LAYER_PANES = {
   energy:     "energyPane",
   network:    "networkPane",
   passes:     "passesPane",
+  refgeom:    "refgeomPane",
   routes:     "routesPane",
 };
-const DEFAULT_LAYER_ORDER = ["relief", "impassable", "energy", "network", "passes", "routes"]; // bottom → top
+const DEFAULT_LAYER_ORDER = ["relief", "impassable", "energy", "network", "passes", "refgeom", "routes"]; // bottom → top
 let layerOrder = DEFAULT_LAYER_ORDER.slice();
 try {
   const saved = JSON.parse(localStorage.getItem("simu-layer-order") || "null");
@@ -7264,6 +7295,139 @@ function applyLayerControls() {
       // lines contribute nothing, leaving only the bright corridors.
       pp.style.mixBlendMode = blend === "energy" ? "normal" : blend;
     }
+  }
+  // Reference geometry (GPX overlay): a simple show/hide toggle (no opacity).
+  if (state.refTrackLayer) {
+    const visible = document.getElementById("refgeom-visible")?.checked ?? true;
+    if (visible && !map.hasLayer(state.refTrackLayer)) state.refTrackLayer.addTo(map);
+    else if (!visible && map.hasLayer(state.refTrackLayer)) state.refTrackLayer.remove();
+  }
+}
+
+// ------- Reference geometry (GPX overlay) -------
+// "Geometria de referência": a user-uploaded GPX track shown as an overlay layer.
+// Hover/click shows its metrics — distance, total energy (the app's asymmetric
+// α·dist+β·dh model, with the CURRENT params, recomputed on each open so it tracks
+// edits), total ascent and descent. Elevation is the GPX <ele> if present, else
+// sampled from the loaded DEM; without either, only distance is shown.
+const REFGEOM_COLOR = "#ff2d95";
+
+function haversineM(lat1, lng1, lat2, lng2) {
+  const R = 6371008.8, toRad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * toRad, dLng = (lng2 - lng1) * toRad;
+  const s = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+function sampleDemElevation(lat, lng) {
+  if (!state.dem || !state.dem.isGeographic) return null;
+  const { H, W, height, mask } = state.dem;
+  const [rf, cf] = latLngToCellFrac(lat, lng);
+  const r = Math.round(rf), c = Math.round(cf);
+  if (r < 0 || r >= H || c < 0 || c >= W) return null;
+  const idx = r * W + c;
+  return mask[idx] ? height[idx] : null;
+}
+
+function parseGpx(text) {
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  if (doc.getElementsByTagName("parsererror").length) throw new Error(t("refgeom.parse_error"));
+  let pts = [...doc.getElementsByTagName("trkpt")];
+  if (!pts.length) pts = [...doc.getElementsByTagName("rtept")];
+  if (!pts.length) pts = [...doc.getElementsByTagName("wpt")];
+  const latlngs = [], eles = [];
+  for (const p of pts) {
+    const lat = parseFloat(p.getAttribute("lat")), lng = parseFloat(p.getAttribute("lon"));
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    latlngs.push([lat, lng]);
+    const e = p.getElementsByTagName("ele")[0];
+    const ev = e ? parseFloat(e.textContent) : NaN;
+    eles.push(Number.isFinite(ev) ? ev : null);
+  }
+  if (latlngs.length < 2) throw new Error(t("refgeom.too_short"));
+  return { latlngs, eles };
+}
+
+// Resolve elevation (GPX → DEM → none), then the params-independent per-segment
+// {d, dh} + distance/ascent/descent once. Energy is params-dependent → computed
+// fresh from the segments on each hover (refEnergyKJ).
+function buildRefTrack(latlngs, eles) {
+  let elev = null, eleSource = "none";
+  if (eles.some((e) => e != null)) { elev = eles.slice(); eleSource = "gpx"; }
+  else {
+    const demEle = latlngs.map(([la, ln]) => sampleDemElevation(la, ln));
+    if (demEle.some((e) => e != null)) { elev = demEle; eleSource = "dem"; }
+  }
+  if (elev) { // carry-forward fill any gaps so every point has an elevation
+    let last = elev.find((e) => e != null) ?? 0;
+    for (let i = 0; i < elev.length; i++) { if (elev[i] == null) elev[i] = last; else last = elev[i]; }
+  }
+  const segs = []; let distM = 0, ascentM = 0, descentM = 0;
+  for (let i = 1; i < latlngs.length; i++) {
+    const d = haversineM(latlngs[i - 1][0], latlngs[i - 1][1], latlngs[i][0], latlngs[i][1]);
+    const dh = elev ? elev[i] - elev[i - 1] : 0;
+    segs.push({ d, dh });
+    distM += d;
+    if (dh > 0) ascentM += dh; else descentM += -dh;
+  }
+  return { latlngs, segs, distM, ascentM, descentM, eleSource, hasEle: !!elev };
+}
+
+function refEnergyKJ(segs, alpha, beta, eta) {
+  let e = 0;
+  for (const { d, dh } of segs) {
+    e += dh >= 0 ? alpha * d + beta * dh : Math.max(0, alpha * d - eta * beta * (-dh));
+  }
+  return e;
+}
+
+function refMetricsHtml() {
+  const rt = state.refTrack;
+  if (!rt) return "";
+  const alpha = parseFloat(document.getElementById("alpha")?.value) || 0;
+  const beta = parseFloat(document.getElementById("beta")?.value) || 0;
+  const eta = (parseFloat(document.getElementById("eta")?.value) || 0) / 100;
+  const rows = [`<strong>${escapeHtml(t("layer.refgeom"))}</strong>`,
+    `${escapeHtml(t("refgeom.distance"))}: ${(rt.distM / 1000).toFixed(2)} km`];
+  if (rt.hasEle) {
+    rows.push(`${escapeHtml(t("refgeom.energy"))}: ${escapeHtml(formatEnergy(refEnergyKJ(rt.segs, alpha, beta, eta)))} kJ`);
+    rows.push(`${escapeHtml(t("refgeom.ascent"))}: ${Math.round(rt.ascentM)} m`);
+    rows.push(`${escapeHtml(t("refgeom.descent"))}: ${Math.round(rt.descentM)} m`);
+  } else {
+    rows.push(escapeHtml(t("refgeom.no_elevation")));
+  }
+  return rows.join("<br>");
+}
+
+function renderRefTrack() {
+  if (state.refTrackLayer) { state.refTrackLayer.remove(); state.refTrackLayer = null; }
+  if (!state.refTrack) return;
+  const renderer = L.canvas({ pane: "refgeomPane", tolerance: 8 });
+  const line = L.polyline(state.refTrack.latlngs, {
+    pane: "refgeomPane", color: REFGEOM_COLOR, weight: 4, opacity: 0.95, interactive: true, renderer });
+  // Function content → recomputed each open, so the energy reflects current α/β/η.
+  line.bindTooltip(() => refMetricsHtml(), { sticky: true, direction: "top" });
+  line.bindPopup(() => refMetricsHtml());
+  line.addTo(map);
+  state.refTrackLayer = line;
+  applyLayerControls();
+}
+
+async function loadRefGeometry(file) {
+  try {
+    status.textContent = t("refgeom.loading");
+    const text = await file.text();
+    const { latlngs, eles } = parseGpx(text);
+    state.refTrack = buildRefTrack(latlngs, eles);
+    const vis = document.getElementById("refgeom-visible");
+    if (vis) vis.checked = true;
+    renderRefTrack();
+    map.fitBounds(L.latLngBounds(state.refTrack.latlngs), { padding: [30, 30], maxZoom: 16 });
+    status.textContent = t("refgeom.loaded", escapeHtml(file.name), (state.refTrack.distM / 1000).toFixed(2));
+  } catch (e) {
+    console.error(e);
+    status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(e.message)}</span>`;
   }
 }
 
