@@ -359,7 +359,14 @@
 //              CARTO, Esri, the pedalhidrografi.co hydrography overlay) now live
 //              in an "Atribuições / Attributions" section of the help modal.
 //              JS/UI only; engine untouched.
-const VERSION  = "v42";
+//   v42 → v43: New "Geometria de referência" layer — its layer-control row has an
+//              ↑ upload button (instead of opacity) that loads a GPX track, drawn
+//              as a magenta overlay; hover/click shows its metrics (distance, total
+//              energy via the app's α·dist+β·dh model with current params, total
+//              ascent + descent; elevation from GPX <ele> or sampled from the DEM).
+//              Also: energy now displays as a plain decimal (e.g. "3357 kJ"), never
+//              scientific. JS/UI only; engine untouched.
+const VERSION  = "v43";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

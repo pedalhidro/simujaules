@@ -9,6 +9,24 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v43 — 2026-06-26
+
+A reference-geometry GPX layer + plain-decimal energy. **JS/UI only — engine
+untouched.**
+
+- **New "Geometria de referência" layer.** Its row in the layer-control panel
+  carries an **↑ upload button** (in place of the opacity slider) that loads a
+  **GPX track**, drawn as a magenta overlay on its own reorderable pane (with a
+  visibility checkbox). **Hover or click** the track for its metrics: **distance,
+  total energy, total ascent, total descent**. Energy uses the app's asymmetric
+  `α·dist + β·dh` model with the *current* parameters (recomputed on each open).
+  Elevation comes from the GPX `<ele>` if present, else sampled from the loaded
+  DEM; without either, only distance is shown.
+- **Energy is now shown as a plain decimal** (e.g. `3357 kJ`) instead of
+  scientific notation (`3.3e+3 kJ`), in the legend, the energy min/max
+  placeholders and the reference-geometry metrics. Passes/density keep scientific
+  notation (they span ~1e-9…1e-3).
+
 ## v42 — 2026-06-26
 
 Moved the map attribution into the help modal. **JS/UI only — engine untouched.**
