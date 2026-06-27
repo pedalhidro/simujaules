@@ -8077,9 +8077,10 @@ function formatBytes(b) {
 function formatEnergy(v) {
   if (!Number.isFinite(v) || v === 0) return "0";
   const a = Math.abs(v);
-  if (a >= 1000 || a < 0.01) return v.toExponential(1);
+  // Plain decimal, never scientific — energy reads as e.g. "3357", not "3.3e+3".
+  // Large values stay whole; smaller ones keep 1–2 decimals for precision.
   if (a >= 100) return v.toFixed(0);
-  if (a >= 10) return v.toFixed(1);
+  if (a >= 10)  return v.toFixed(1);
   return v.toFixed(2);
 }
 
