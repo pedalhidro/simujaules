@@ -1554,6 +1554,12 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v45</strong> — 2026-06-29<br/>
+              Bridge/tunnel <em>deck passes</em> read as a continuous line again. A
+              deck is a 1-cell line over water (unreached by the compute), so its
+              stamped density was faint and dropped by the passes-overlay downsample
+              on big DEMs — a gap along the bridge. The stamp is now dilated by the
+              render stride. Render-only.</p>
               <p><strong>v44</strong> — 2026-06-29<br/>
               <strong>v2 energy model.</strong> The cost is now physics-based —
               mass, Crr, CdA, air density, drivetrain efficiency, power on the flat

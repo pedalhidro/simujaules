@@ -8801,12 +8801,30 @@ function bridgeDeckCells(br) {
 // graph mode already routes the (flattened) deck edges, so they carry passes.
 function stampBridgeDeckPasses(passes) {
   if (!passes || !state.bridges || !state.dem || !bridgesEnabled()) return;
+  const { W, H } = state.dem;
+  // The deck is a 1-cell-wide Bresenham line over water (mask=0, unreached by the
+  // compute), so it reads faint — and on a big DEM the passes overlay downsamples
+  // by `stride`, dropping a 1-cell line between samples → a GAP along the bridge.
+  // Dilate the stamp by the render stride (≥1) so the deck always lands on a
+  // sampled cell and reads as a continuous line.
+  const rad = Math.max(1, overlayCanvasDims(W, H).stride);
   for (const br of state.bridges) {
     const a = passes[br.endA], b = passes[br.endB];
     if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
     const flow = Math.min(a, b);
     if (!(flow > 0)) continue;
-    for (const cell of bridgeDeckCells(br)) if (flow > passes[cell]) passes[cell] = flow;
+    for (const cell of bridgeDeckCells(br)) {
+      const cr = (cell / W) | 0, cc = cell - cr * W;
+      for (let dr = -rad; dr <= rad; dr++) {
+        const rr = cr + dr; if (rr < 0 || rr >= H) continue;
+        const rowOff = rr * W;
+        for (let dc = -rad; dc <= rad; dc++) {
+          const ccc = cc + dc; if (ccc < 0 || ccc >= W) continue;
+          const idx = rowOff + ccc;
+          if (flow > passes[idx]) passes[idx] = flow; // max() — don't lower heavier ground traffic
+        }
+      }
+    }
   }
 }
 

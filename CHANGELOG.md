@@ -9,6 +9,15 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v45 — 2026-06-29
+
+Bridge/tunnel **deck passes** read as a continuous line again. A bridge deck is a
+1-cell-wide line over water (`mask=0`, unreached by the compute), so its stamped
+density was faint and got dropped by the passes-overlay downsample on large DEMs
+— a **gap along the bridge** in the density layer. The deck stamp is now dilated
+by the render stride so it always lands on a sampled cell. Render-only; the
+engine/routing is unchanged.
+
 ## v44 — 2026-06-29
 
 The **v2 energy model**. The cost is now **physics-parameterised** — *mass, Crr

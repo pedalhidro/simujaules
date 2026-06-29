@@ -374,7 +374,12 @@
 //              backend move together (bit-parity); reference-geometry energy uses
 //              the closed form with a 2 m elevation deadband. See
 //              bicycling-energy-model/notas.md (v2).
-const VERSION  = "v44";
+//   v44 → v45: Bridge/tunnel deck passes now read as a continuous line. The deck
+//              is a 1-cell line over water (mask=0, unreached), so its stamped
+//              flow was faint and dropped by the passes-overlay downsample on big
+//              DEMs → a gap along the bridge. The stamp is now dilated by the
+//              render stride so it always lands on a sampled cell. Render-only.
+const VERSION  = "v45";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
