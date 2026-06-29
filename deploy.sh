@@ -100,7 +100,7 @@ fi
 #                                                CENSUS_FGB_URL, built by build_fgb.py)
 #                                              vector/sampa-viario.gpkg (~145 MB,
 #                                                "Viário RMSampa" example network)
-#                                              mask/water_mask.tif (~0.7 MB,
+#                                              mask/water_mask.tif (~2.4 MB,
 #                                                "Águas RMSampa" example barrier mask)
 #                                            gcloud's --exclude is a Python regex
 #                                            (re.match, start-anchored) on the

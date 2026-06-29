@@ -1,26 +1,77 @@
-# Asymmetric Energy Field — Web Prototype
+# Simujoules (sampasimu)
 
-A static-site, no-backend port of the QGIS Processing algorithm. Loads a
-GeoTIFF DEM, lets you click two points on a map, and renders the
-asymmetric energy field (with optional path).
+A static-site, build-step-free PWA that computes asymmetric-cost cycling
+**energy fields** over digital elevation models (DEMs). Load a GeoTIFF DEM (or
+pull FABDEM tiles for the current map view), click anchor points, and it renders
+the minimum energy to ride from/to/round-trip every cell — via Dijkstra on an
+8-connected grid. Everything runs client-side in Web Workers; no account, no
+upload, the DEM never leaves the machine. UI in Brazilian Portuguese and
+English. Originally a port of a QGIS Processing algorithm.
 
-## Files
+Live app: <https://telhas.pedalhidrografi.co/simujoules/> (PWA, works offline
+after first load).
 
-- `index.html` — page shell, panel UI, map container. The little tag
-  next to the title shows whether the **wasm** or **js** engine is
-  active.
-- `app.js` — DEM loading (via geotiff.js), map glue (Leaflet), worker
-  dispatch, result rendering. At startup it probes for the wasm worker
-  and falls back to the JS worker if wasm isn't available.
-- `energy-worker.js` — Dijkstra in a Web Worker (pure JS). Asymmetric
-  uphill/downhill cost, with optional partial recovery on descent.
-  Includes a binary heap on a flat typed array for speed. Used as the
-  fallback engine.
-- `energy-worker-wasm.js` — same algorithm, same message API, but the
-  inner loop is a Rust-compiled wasm module loaded from `wasm/pkg/`.
-  Used as the default engine when `wasm/pkg/` is built.
-- `wasm/` — Rust crate (`Cargo.toml`, `src/lib.rs`) that compiles to
-  the wasm module. `wasm/pkg/` is the build output (gitignored).
+## What it computes
+
+- **Energy field** — for every DEM cell, the minimum energy to ride from (or to,
+  or round-trip via) an anchor. Cost of moving between adjacent cells with height
+  difference Δh over ground distance d:
+  - uphill/flat: `α·d + β·Δh`
+  - downhill: `max(0, α·d − η·β·|Δh|)`
+  - α = cost per flat metre, β = cost per metre climbed, η ∈ [0,1] = fraction of
+    climb energy recovered on descent. With the defaults (α = 0.008, β = 1.0)
+    one energy unit ≈ the work to climb 1 m (≈ 0.8–1 kJ for an ~85 kg
+    rider + bike).
+- **Passes count** ("natural corridors") — for each cell, how many optimal paths
+  traverse it (subtree size in the shortest-path tree). Highlights the terrain's
+  natural highways. Round-trip mode counts only within-budget trajectories.
+- **Top-N alternative routes** between two points, via iterative penalisation
+  (per-cell / linear / quadratic repulsion) so alternatives genuinely diverge.
+- **Multi-reference density** — passes counts averaged over K reference points
+  (clicked, or sampled pseudo-/quasi-randomly via Sobol or Halton sequences),
+  normalised to a density field. Runs on a multi-core **worker pool** (sized by
+  cores + memory); an optional native Rust backend accelerates large runs.
+- **Energy budgets** — prune the search at a maximum energy; in round-trip mode,
+  cap each leg or the out-plus-back total.
+- **Maximize mode** — invert the optimisation to find the most *expensive*
+  routes, optionally length-constrained (layered dynamic programming).
+- **Graph mode** ("follow the vectors") — compute on an OSM-derived street graph
+  instead of the raster grid, honouring bridges/tunnels by layer; can run a
+  full-DEM unconstrained scenario alongside it and expose the difference (the
+  cost of being restricted to the network).
+
+## Inputs and outputs
+
+- **DEM** — georeferenced GeoTIFF (EPSG:4326 recommended), the built-in FABDEM
+  viewport loader (fetches 30 m global elevation for the visible area), or one of
+  the bundled São Paulo example DEMs in `dem/`.
+- **Optional network constraint** — GeoPackage (`.gpkg`) line layers, rasterised
+  onto the DEM grid (read in-browser via sql.js). Analysis can be confined to the
+  network, with IDW interpolation for off-network cells. An OSM water mask can
+  mark impassable areas (areas, sea, rivers).
+- **Outputs** — a reproducible bundle (`.zip`) of georeferenced GeoTIFFs
+  (`energy.tif` f32, `passes.tif` f64, `network.tif` u8), route/path GeoJSON, and
+  a `metadata.jsonld` capturing every parameter (vocabulary in
+  [`vocab/simujoules.jsonld`](vocab/simujoules.jsonld)). Rendered map layers
+  export as PNG + world file. Everything opens directly in QGIS.
+
+## Layout
+
+- `index.html` — page shell, panel UI, map container, help/changelog modal.
+- `app.js` — all UI: DEM/GeoPackage loading (geotiff.js, sql.js), Leaflet map,
+  compute dispatch, rendering, i18n (`STRINGS` table + `t()`), bundle
+  export/import.
+- `energy-worker.js` — the compute engine (Web Worker): Dijkstra, A\* top-N,
+  multi-ref density, layered-DP max-cost path, IDW network fill. Pure JS on typed
+  arrays. **This is the reference implementation** the Rust backend must mirror.
+- `graph-engine.js` — the graph-mode engine (OSM vector graph).
+- `sw.js`, `manifest.webmanifest`, `icons/` — the PWA shell.
+- `backend/` — optional native compute server (Rust + rayon). Off by default; see
+  [backend/README.md](backend/README.md).
+- `deploy.sh` — stages and rsyncs the deployable files to `gs://telhas/simujoules`.
+- `test-*.mjs`, `backend/test-backend.mjs` — the node test suites (see below).
+- `dem/`, `fabdem/`, `vocab/`, `qgis/` — example DEMs, the FABDEM fetcher, the
+  export vocabulary, and the original QGIS plugins this was ported from.
 
 ## Running
 
@@ -28,143 +79,90 @@ It's a static site. From the project directory:
 
     python3 -m http.server 8000
 
-Then open <http://localhost:8000>. (Workers need to be served over HTTP,
-not opened from `file://`.)
+Then open <http://localhost:8000>. (Workers need to be served over HTTP, not
+opened from `file://`.) No build step, no API keys (unless you swap in a paid
+basemap).
 
-For deployment to the production target (GCS + Cloud CDN behind
-`telhas.pedalhidrografi.co/simujoules/`):
+## Optional native backend
+
+The app is fully functional without it — compute runs use the in-browser worker
+pool. The optional native backend just accelerates the heaviest runs (~2–4×
+faster per Dijkstra, and rayon uses all cores → roughly 3–10× for multi-reference
+density). It's **off by default**:
+
+    cd backend
+    cargo run --release            # binds 127.0.0.1:8077
+
+Then tick **Use native backend** in the app's parameters panel (URL defaults to
+`http://127.0.0.1:8077`). The app falls back to the browser workers automatically
+if the server isn't reachable. It accelerates `POST /density` (multi-reference)
+and `POST /single` (single-source field); top-N, the destination path, and
+maximize stay browser-only. Memory-budget tuning, the binary protocol, and the
+`energy-worker.js` parity contract are in [backend/README.md](backend/README.md).
+
+> The old in-page **wasm** engine was removed — native compute now lives in the
+> standalone Rust server above, and the browser engine is always JS.
+
+## Deploy
+
+For the production target (`gs://telhas/simujoules`, served at
+`https://telhas.pedalhidrografi.co/simujoules/`):
 
     ./deploy.sh
 
-The script builds the wasm bundle, stages just the deployable files
-(skipping Rust source, the QGIS plugins, and test harnesses), rsyncs
-to `gs://telhas/simujoules/`, sets `Content-Type`
-on the `.wasm` and `Cache-Control` on everything, then invalidates
-the Cloud CDN cache for `/simujoules/*`. Set the URL-map name in the
-`URL_MAP` env var if the default guess in the script is wrong (find
-candidates with `gcloud compute url-maps list`). Drop `--skip-wasm`
-into the args if you only changed HTML/JS and the existing
-`wasm/pkg/` is still fresh.
+The script (no arguments) stages just the deployable files — skipping the Rust
+source, QGIS plugins, and test harnesses — and rsyncs them with `gcloud storage`
+(not `gsutil`). `telhas.pedalhidrografi.co` is fronted by **Cloudflare** (origin
+= the GCS bucket directly), so cache invalidation is a Cloudflare purge: set
+`CF_API_TOKEN` (Zone › Cache Purge) and `CF_ZONE_ID` to enable it (skipped if
+unset). See the header comment in `deploy.sh` for the Cloudflare cache-rule
+gotcha around `sw.js`.
 
-For any other static host (GitHub Pages, Cloudflare Pages, S3 +
-CloudFront, Netlify, etc.) drop the same set of files manually. No
-backend, no API keys (unless you swap in a paid basemap).
+For any other static host (GitHub/Cloudflare Pages, S3 + CloudFront, Netlify,
+etc.) drop the same set of files manually. No backend required.
 
-## Building the wasm engine
+## Verification & tests
 
-The wasm worker needs `wasm/pkg/` to exist. If it doesn't, the page
-silently falls back to the JS engine — nothing is broken, just slower.
+There is no CI; run these before committing engine changes:
 
-One-time setup (Rust toolchain + wasm-pack):
+    node test-worker-pool.mjs                 # worker regression suite
+    node test-water-raster.mjs                # OSM water-mask rasterisation
+    node test-graph-engine.mjs                # graph-mode engine
+    cd backend && cargo build --release && node test-backend.mjs   # JS↔Rust parity
 
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-    cargo install wasm-pack    # or: brew install wasm-pack
+`backend/src/main.rs` is a line-for-line port of `energy-worker.js`'s cost model
+and density math — `test-backend.mjs` enforces energy bit-parity (passes may
+differ only on exact f64 cost ties). Likewise `test-water-raster.mjs` holds pure
+mirrors of `app.js`'s OSM water-mask helpers (app.js can't be imported in node).
+Keep the mirrors in sync — a change to one engine must land in the other.
 
-Build (re-run any time `wasm/src/lib.rs` changes):
-
-    cd wasm
-    wasm-pack build --target web --release --no-typescript --out-dir pkg
-
-This drops `energy_wasm.js` and `energy_wasm_bg.wasm` into `wasm/pkg/`.
-Reload the page and the engine tag in the title should switch from
-`js` to `wasm`. There's a `wasm/build.sh` shortcut for the same
-command.
-
-The Rust source mirrors `energy-worker.js` line-for-line so the two
-engines produce identical results. If you change the cost model in one,
-mirror it in the other or you'll get inconsistent answers depending on
-which engine is loaded.
-
-## Features
-
-By default the worker computes only the energy field. Two extra features
-ported from the QGIS plugins are available behind toggles in the
-Parameters panel:
-
-- **Passes count** (route density / shortest-path-tree subtree size at
-  each cell). Adds a parent + settle-order tracking pass to Dijkstra and
-  a reverse-walk subtree accumulation. After computing, a "Display:
-  Energy / Passes" radio appears in the Result panel; switching is a
-  pure re-render with no recompute. Round-trip mode sums the outbound
-  and return passes, matching the QGIS plugin.
-
-- **Top-N routes** between source and destination via iterative
-  penalisation. Each iteration runs A\* with `mult = penalty^used` on
-  the alpha\*dist component for already-traversed cells, so subsequent
-  routes deviate. Default penalty = 2.0 doubles the baseline cost per
-  prior pass; raise it for more spatially distinct alternatives,
-  lower it for closer-to-optimal twins. Routes are drawn as coloured
-  polylines on the map and listed in the Result panel with energy,
-  length, and shared-cell count.
-
-The wasm worker doesn't yet implement either; when you tick passes or
-top-N the app automatically falls back to the JS worker for that
-compute and the engine tag will show `js` until you turn the toggles
-back off.
-
-Still not ported from the QGIS plugins:
-
-- **Network constraint** (rasterised line layer). Needs a way to read
-  vector data — easiest is a GeoJSON drag-and-drop, then a JS line
-  rasteriser, then AND with the mask.
-- **Energy / distance budgets** (constrained reachability). Single-
-  resource case (energy budget only) is just a cutoff in the worker;
-  ~3 extra lines.
+Per the project convention, bump `sw.js` `VERSION` (with a changelog line in
+`CHANGELOG.md`, the help modal, and the `sw.js` history comment) on every deploy
+that changes app behaviour.
 
 ## Known limitations
 
-**CRS handling is naive.** The prototype assumes the DEM is in geographic
-coordinates (EPSG:4326). For a real tool you want UTM or another projected
-CRS so that horizontal distances are in metres. The fix is to add
-[proj4js](https://github.com/proj4js/proj4js) and parse the GeoTIFF's
-GeoKeys to get the source CRS. Then convert mouse clicks (which Leaflet
-gives you in lat/lon) to DEM CRS pixel coordinates, and convert pixel
-extents back to lat/lon for the image overlay bounds.
+- **CRS.** EPSG:4326 is recommended; horizontal distances are taken from the
+  geographic grid. Projected DEMs render but some features (e.g. the OSM bridge
+  pull) are guarded off on them, since lon/lat would map to garbage cells. To
+  make a test EPSG:4326 DEM:
 
-For testing, you can produce a small EPSG:4326 DEM with:
+      gdalwarp -t_srs EPSG:4326 -tr 0.0003 0.0003 input.tif test_dem.tif
 
-    gdalwarp -t_srs EPSG:4326 -tr 0.0003 0.0003 input.tif test_dem.tif
-
-(`-tr` sets the pixel size in degrees; ~30 m at the equator. Use a smaller
-value for finer resolution.)
-
-**No reprojection of result.** The energy field overlay is drawn in the
-DEM's CRS, so on a Web Mercator basemap there will be distortion away
-from the equator (negligible for most cycling-scale extents).
-
-**Single-DEM-per-session.** Loading a new DEM doesn't clear all state
-cleanly; refresh the page if results look wrong.
-
-**Memory.** The DEM is copied each time you run the worker (since
-transferred buffers can't be reused). For large DEMs that's noticeable;
-either keep a single worker alive for the session and re-load only on
-DEM change, or accept the copy cost.
+  (`-tr` is the pixel size in degrees; ~30 m near the equator.)
+- **Web Mercator overlay.** The energy field is drawn in the DEM's CRS, so on a
+  Web Mercator basemap there's mild distortion away from the equator (negligible
+  at cycling-scale extents).
+- **Memory at scale.** Very large DEMs (tens of millions of cells) are bounded by
+  RAM both in the browser pool and the native backend — both cap concurrency to a
+  memory budget rather than OOM-crashing (fewer parallel slices, same output).
 
 ## Performance
 
-On a 333×333 DEM (10×10 km at 30 m), the JS engine runs a single
-Dijkstra in roughly 200–400 ms on a modern laptop; round trip ~2× that.
-The wasm engine typically lands at 2–4× faster on the same DEM (Rust
-release build, LLVM `lto = "fat"`, `panic = "abort"`).
-
-Where the wasm engine actually pays off is at scale: the JS engine
-starts to feel sluggish around 500 k cells and is uncomfortable past
-~5 M; the wasm engine extends that envelope by roughly 3–5× before you
-need to think about further work (chunked dispatch, GPU compute,
-hierarchical Dijkstra). For the 25 M-cell case (50×50 km at 10 m), wasm
-is required to keep run time under 10 s.
-
-A few caveats to keep in mind:
-
-- The wasm engine doesn't emit progress updates. The bar stays at 0
-  and then jumps to "done" — the runs are usually short enough that
-  this isn't noticeable, but if you want a progress bar, use the JS
-  engine.
-- DEM upload to wasm linear memory and the result fetch are zero-copy
-  (typed-array views), so there's no marshalling overhead per cell.
-  The only copy is the one-shot `set()` from the worker's input buffer
-  into wasm memory.
-- Memory growth during Dijkstra (the internal heap) detaches any
-  views into `wasm.memory.buffer` taken before the call. The worker
-  re-fetches views after every wasm call so this is handled, but if
-  you extend the worker, keep that gotcha in mind.
+On a 333×333 DEM (10×10 km at 30 m) the JS engine runs a single Dijkstra in
+roughly 200–400 ms on a modern laptop; round trip ~2×. The browser worker pool
+parallelises multi-reference density across cores; the native backend adds
+another ~2–4× per Dijkstra (Rust release, fat LTO) and saturates all cores. For
+huge DEMs (e.g. the 135 M-cell case) memory, not CPU, is the ceiling — see
+[backend/README.md](backend/README.md) and `docs/runtime_estimate.md` for the
+slice/memory model and the in-app run-time estimator.
