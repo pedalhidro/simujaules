@@ -46,14 +46,31 @@ export CF_API_TOKEN=<token with Zone > Cache Purge>
 ./deploy.sh
 ```
 
-### A3. Cloudflare (dashboard) — replicate how `telhas` is fronted
+### A3. Cloudflare (dashboard)
 
-1. **DNS**: add `simujaules` pointing at the GCS origin the SAME way `telhas` is
-   (origin rule / Worker that maps the host to `storage.googleapis.com/simujaules`).
-   Confirm the exact mechanism on the existing `telhas` host first.
-2. **Cache rule**: bypass cache for URI path ending `/sw.js` on the new host
+`telhas` is fronted by a Cloudflare **Cloud Connector** (Rules → Cloud Connector)
+that routes the host to the GCS bucket — that's the load-bearing piece, NOT an
+Origin/Page Rule (telhas has none). The Connector issues the GCS request so the
+bucket serves; a plain proxied CNAME alone gives `NoSuchBucket`, because
+Cloudflare forwards `Host: telhas.pedalhidrografi.co`, which GCS reads as a
+bucket name. Mirror telhas:
+
+1. **DNS**: add a **proxied** (orange-cloud) record for `simujaules` — a CNAME to
+   `simujaules.storage.googleapis.com` (same as telhas).
+2. **Cloud Connector (the fix)**: Rules → **Cloud Connector** → add a connector
+   for `simujaules.pedalhidrografi.co` → the `gs://simujaules` bucket (mirror
+   telhas's connector). Without it: `NoSuchBucket`; with it the bucket serves
+   (verified: `/index.html`, `/sw.js`, … → 200).
+3. **Root → `index.html`**: GCS's `mainPageSuffix` is NOT honored over the
+   Connector path (the bucket root returns the XML object listing), so map the
+   bare `/` Cloudflare-side — the Connector's default/index-document option if it
+   has one, or a **Transform Rule → Rewrite URL**: *when* URI Path equals `/`,
+   *rewrite* path to `/index.html`. (Explicit `/index.html` already serves.) The
+   bucket also has `--web-main-page-suffix=index.html` set (mirrors telhas;
+   harmless even though the Connector path ignores it).
+4. **Cache rule**: bypass cache for URI path ending `/sw.js` on the new host
    (and Browser Cache TTL = "Respect Existing Headers") — or SW updates stall.
-3. **Redirect (keeps old bundles working)**: 301
+5. **Redirect (keeps old bundles working)**: 301
    `telhas.pedalhidrografi.co/simujoules/*` → `simujaules.pedalhidrografi.co/$1`.
    The RDF `@vocab` IRI deliberately stays on telhas and resolves via this
    redirect — **do not** delete `gs://telhas/simujoules/` until it's verified.

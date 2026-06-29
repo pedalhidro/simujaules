@@ -48,7 +48,7 @@ CDN_ERR="$(mktemp)"
 # staging dir on every run because of exactly that).
 trap 'rm -rf "$STAGE" "$RSYNC_LOG" "$CDN_ERR"' EXIT
 
-cp index.html app.js energy-worker.js graph-engine.js "$STAGE/"
+cp index.html app.js energy-worker.js graph-engine.js favicon.ico "$STAGE/"
 # Explicit glob rather than `cp -r dem/ ...` — BSD and GNU cp disagree on
 # trailing-slash semantics (GNU nests a second dem/ level, breaking the
 # example-DEM URLs hardcoded in app.js).
@@ -159,6 +159,10 @@ gcloud storage objects update \
 
 gcloud storage objects update "$BUCKET/index.html" \
   --cache-control="public, max-age=300"
+
+# Favicon: explicit MIME (would otherwise be octet-stream) + long cache.
+gcloud storage objects update "$BUCKET/favicon.ico" \
+  --content-type="image/x-icon" --cache-control="public, max-age=2592000"
 
 # 5. Purge Cloudflare's cache for the deployed URLs (Cloudflare fronts the site,
 #    so this is a CF cache purge — there is no Google Cloud CDN url-map). Purges
