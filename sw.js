@@ -383,7 +383,8 @@
 //              basemap dropdown — Pindorama 90 m (COP90, South America, native z10)
 //              and Bacia do Paraná 30 m (native z12). XYZ tiles from
 //              telhas.pedalhidrografi.co; maxNativeZoom over-scales past native.
-const VERSION  = "v46";
+//   v46 → v47: Revert the v46 MTPI basemaps — they belong in amora, not Simujaules.
+const VERSION  = "v47";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

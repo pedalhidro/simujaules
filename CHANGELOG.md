@@ -9,6 +9,11 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v47 — 2026-06-29
+
+Reverted the MTPI basemaps added in v46 — they were meant for amora, not
+Simujaules.
+
 ## v46 — 2026-06-29
 
 Two **MTPI** (multi-scale topographic position index) basemaps in the basemap
