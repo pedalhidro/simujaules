@@ -15,7 +15,12 @@ function flatDem(H, W, h = 0, dxM = 10, dyM = 10) {
   return { height: new Float32Array(H * W).fill(h), mask: new Uint8Array(H * W).fill(1), H, W, dxM, dyM };
 }
 
-const alpha = 0.008, beta = 1.0, eta = 0.1;
+// v2 cost bundle (see graph-engine.js stepCost). climbThr=0.05 so flat steps get
+// aero and the ±3/±5-per-10m grades count as climbs/descents. beta dominates the
+// distance term (climbing out of a valley is dear) so the flat deck still beats
+// the descend-then-climb route. abRatio=(aRoll+aAero)/beta keeps it self-consistent.
+const cost = { aRoll: 0.5, aAero: 0.5, beta: 10.0, climbThr: 0.05, abRatio: 0.1, epsOffset: 0.13 };
+const distStep = cost.aRoll + cost.aAero; // flat-step cost per ground metre (rolling + flat aero)
 
 // ---- 1. cost-model parity: one graph edge == one grid step ------------------
 {
@@ -25,12 +30,16 @@ const alpha = 0.008, beta = 1.0, eta = 0.1;
   const dem = { height: new Float32Array([0, 3]), mask: new Uint8Array([1, 1]), H, W, dxM, dyM: 10 };
   const lines = [[[0, 0], [0, 1]]];
   const g = GraphEngine.buildGraph(lines, dem, { stepCells: 1, junctionMode: "shared" });
-  const { costAB, costBA } = GraphEngine.directedCosts(g, { alpha, beta, eta });
-  const gridUp = GraphEngine.stepCost(dxM, 3, alpha, beta, eta);   // alpha*10 + beta*3
-  const gridDn = GraphEngine.stepCost(dxM, -3, alpha, beta, eta);  // max(0, alpha*10 - eta*beta*3)
+  const { costAB, costBA } = GraphEngine.directedCosts(g, { cost });
+  const gridUp = GraphEngine.stepCost(dxM, 3, cost);   // +3/10 = 30% ≥ climbThr ⇒ no aero: aRoll*10 + beta*3
+  const gridDn = GraphEngine.stepCost(dxM, -3, cost);  // descent: rolling+aero − ε·beta·3, floored ≥0
   ok("uphill edge cost == grid step", approx(costAB[0], gridUp), `got ${costAB[0]} want ${gridUp}`);
   ok("downhill edge cost == grid step", approx(costBA[0], gridDn), `got ${costBA[0]} want ${gridDn}`);
-  ok("downhill floor applied", approx(gridDn, Math.max(0, alpha * 10 - eta * beta * 3)));
+  // v2 downhill closed form: per-grade ε recovery on the descent, floored at 0.
+  const s = 3 / dxM;
+  let eps = Math.min(1, cost.abRatio / s) - cost.epsOffset; if (eps < 0) eps = 0; else if (eps > 1) eps = 1;
+  const wantDn = Math.max(0, distStep * dxM - eps * cost.beta * 3);
+  ok("downhill v2 recovery applied", approx(gridDn, wantDn), `got ${gridDn} want ${wantDn}`);
 }
 
 // ---- 2. planarization: X-crossing, no shared vertex -------------------------
@@ -68,7 +77,7 @@ const alpha = 0.008, beta = 1.0, eta = 0.1;
   const g = GraphEngine.buildGraph(lines, dem, { junctionMode: "shared" });
   ok("chain: 4 nodes / 3 edges", g.nNodes === 4 && g.nEdges === 3);
   const refNode = GraphEngine.nearestNode(g, 0, 0);
-  const res = GraphEngine.computeGraph(g, { mode: "density", densityMode: "from", alpha, beta, eta, eMax: 0, refNodes: [refNode] });
+  const res = GraphEngine.computeGraph(g, { mode: "density", densityMode: "from", cost, eMax: 0, refNodes: [refNode] });
   // Subtree sizes from the root: 3, 2, 1 along the chain.
   const passes = Array.from(res.edgePasses).sort((a, b) => b - a);
   ok("chain passes are {3,2,1}", passes.join(",") === "3,2,1", `got ${passes.join(",")}`);
@@ -81,10 +90,10 @@ const alpha = 0.008, beta = 1.0, eta = 0.1;
   const lines = [[[0, 0], [0, 1], [0, 2], [0, 3]]];
   const g = GraphEngine.buildGraph(lines, dem, { junctionMode: "shared" });
   const src = GraphEngine.nearestNode(g, 0, 0), dst = GraphEngine.nearestNode(g, 0, 3);
-  const res = GraphEngine.computeGraph(g, { mode: "from", alpha, beta, eta, eMax: 0, srcNode: src, dstNode: dst, wantPath: true });
+  const res = GraphEngine.computeGraph(g, { mode: "from", cost, eMax: 0, srcNode: src, dstNode: dst, wantPath: true });
   ok("path reaches dst", !!res.path && res.path.nodes[0] === dst && res.path.nodes[res.path.nodes.length - 1] === src);
   ok("path length == 3 cells", approx(res.path.lengthM, 3 * dxM), `got ${res.path.lengthM}`);
-  ok("path energy == 3 flat steps", approx(res.path.energy, 3 * alpha * dxM), `got ${res.path.energy}`);
+  ok("path energy == 3 flat steps", approx(res.path.energy, 3 * distStep * dxM), `got ${res.path.energy}`);
 }
 
 // ---- 5. budget prunes the search --------------------------------------------
@@ -96,8 +105,8 @@ const alpha = 0.008, beta = 1.0, eta = 0.1;
   const g = GraphEngine.buildGraph([chain], dem, { junctionMode: "shared" });
   const src = GraphEngine.nearestNode(g, 0, 0);
   // budget = 2.5 flat steps → only ~2 edges reachable
-  const eMax = 2.5 * alpha * dxM;
-  const res = GraphEngine.computeGraph(g, { mode: "from", alpha, beta, eta, eMax, srcNode: src, dstNode: -1 });
+  const eMax = 2.5 * distStep * dxM;
+  const res = GraphEngine.computeGraph(g, { mode: "from", cost, eMax, srcNode: src, dstNode: -1 });
   const reached = Array.from(res.edgePasses).filter((p) => p > 0).length;
   ok("budget limits reached edges", reached === 2, `reached=${reached}`);
 }
@@ -111,7 +120,7 @@ const alpha = 0.008, beta = 1.0, eta = 0.1;
   ];
   const g = GraphEngine.buildGraph(lines, dem, { junctionMode: "shared" });
   const src = GraphEngine.nearestNode(g, 0, 0), dst = GraphEngine.nearestNode(g, 0, 2);
-  const res = GraphEngine.computeGraph(g, { mode: "from", alpha, beta, eta, eMax: 0, srcNode: src, dstNode: dst, wantTopN: true, nRoutes: 2, penalty: 4 });
+  const res = GraphEngine.computeGraph(g, { mode: "from", cost, eMax: 0, srcNode: src, dstNode: dst, wantTopN: true, nRoutes: 2, penalty: 4 });
   ok("top-N returns 2 routes", res.routes && res.routes.length === 2, `got ${res.routes && res.routes.length}`);
   if (res.routes && res.routes.length === 2) {
     const set0 = res.routes[0].edges.slice().sort().join(","), set1 = res.routes[1].edges.slice().sort().join(",");
@@ -128,9 +137,9 @@ const alpha = 0.008, beta = 1.0, eta = 0.1;
   const chain = []; for (let c = 0; c < W; c++) chain.push([0, c]);
   const g = GraphEngine.buildGraph([chain], dem, { junctionMode: "shared" });
   const src = GraphEngine.nearestNode(g, 0, 0);
-  const res = GraphEngine.computeGraph(g, { mode: "from", alpha, beta, eta, eMax: 0, srcNode: src, dstNode: -1, maximize: true, maximizeLength: 3 });
+  const res = GraphEngine.computeGraph(g, { mode: "from", cost, eMax: 0, srcNode: src, dstNode: -1, maximize: true, maximizeLength: 3 });
   ok("maximize walk has L=3 edges", res.path && res.path.edges.length === 3, `got ${res.path && res.path.edges.length}`);
-  const want = 3 * (alpha * dxM + beta * 5); // three uphill steps
+  const want = 3 * (cost.aRoll * dxM + cost.beta * 5); // three uphill steps (≥climbThr ⇒ no aero)
   ok("maximize energy == 3 uphill steps", res.path && approx(res.path.energy, want), `got ${res.path && res.path.energy} want ${want}`);
 }
 
@@ -144,7 +153,7 @@ const alpha = 0.008, beta = 1.0, eta = 0.1;
   for (let i = 0; i < g.nNodes; i++) if (!g.nodeValid[i]) invalid++;
   ok("out-of-extent nodes marked invalid", invalid === 2, `invalid=${invalid}`);
   const src = GraphEngine.nearestNode(g, 0, 0);
-  const res = GraphEngine.computeGraph(g, { mode: "density", densityMode: "from", alpha, beta, eta, eMax: 0, refNodes: [src] });
+  const res = GraphEngine.computeGraph(g, { mode: "density", densityMode: "from", cost, eMax: 0, refNodes: [src] });
   const reached = Array.from(res.edgePasses).filter((p) => p > 0).length;
   ok("passes stop at the DEM extent (3 in-bounds edges)", reached === 3, `reached=${reached}`);
 }
@@ -169,11 +178,11 @@ function graphComps(g) {
   const mkRes = (lineMeta) => {
     const g = GraphEngine.buildGraph([chain], dem, { junctionMode: "shared", lineMeta });
     const src = GraphEngine.nearestNode(g, 0, 0), dst = GraphEngine.nearestNode(g, 0, 4);
-    return GraphEngine.computeGraph(g, { mode: "from", alpha, beta, eta, eMax: 0, srcNode: src, dstNode: dst, wantPath: true });
+    return GraphEngine.computeGraph(g, { mode: "from", cost, eMax: 0, srcNode: src, dstNode: dst, wantPath: true });
   };
   const plain = mkRes(null);
   const deck = mkRes([{ deck: true, layer: 1 }]);
-  const flat = 4 * alpha * dxM; // 4 edges, each a flat 10 m step (no climb)
+  const flat = 4 * distStep * dxM; // 4 edges, each a flat 10 m step (no climb)
   ok("deck flattens to the flat-deck cost", approx(deck.path.energy, flat), `got ${deck.path.energy} want ${flat}`);
   ok("deck is cheaper than following the valley", deck.path.energy < plain.path.energy - 1e-6, `deck ${deck.path.energy} vs plain ${plain.path.energy}`);
 }

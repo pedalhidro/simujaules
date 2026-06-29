@@ -91,12 +91,20 @@
   }
 
   // ----------------------------------------------------------- cost model ----
-  // ONE step of the asymmetric cost, identical to energy-worker.js:
-  //   dh ≥ 0 (uphill):   alpha*d + beta*dh
-  //   dh < 0 (downhill):  max(0, alpha*d - eta*beta*|dh|)
-  function stepCost(d, dh, alpha, beta, eta) {
-    if (dh >= 0) return alpha * d + beta * dh;
-    const e = alpha * d - eta * beta * (-dh);
+  // ONE step of the v2 per-edge leg-energy cost, identical to energy-worker.js's
+  // v2Edge (and backend/src/main.rs::v2_edge). `c` is the cost bundle
+  // { aRoll, aAero, beta, climbThr, abRatio, epsOffset }.
+  function stepCost(d, dh, c) {
+    if (dh >= 0) {
+      const aero = (dh < c.climbThr * d) ? c.aAero * d : 0;
+      return c.aRoll * d + aero + c.beta * dh;
+    }
+    const ndh = -dh;
+    let eps = c.abRatio * d / ndh;
+    if (eps > 1) eps = 1;
+    eps -= c.epsOffset;
+    if (eps < 0) eps = 0;
+    const e = c.aRoll * d + c.aAero * d - eps * c.beta * ndh;
     return e < 0 ? 0 : e;
   }
 
@@ -104,12 +112,12 @@
   // metric steps of stepM) and sum the per-step cost. `forward` false walks
   // B→A. Per-STEP application of the downhill floor is what keeps parity with
   // the grid model (the floor is non-linear, so a closed-form on Σdh is wrong).
-  function profileCost(prof, off, n, stepM, forward, alpha, beta, eta) {
+  function profileCost(prof, off, n, stepM, forward, c) {
     let total = 0;
     if (forward) {
-      for (let i = 0; i < n; i++) total += stepCost(stepM, prof[off + i + 1] - prof[off + i], alpha, beta, eta);
+      for (let i = 0; i < n; i++) total += stepCost(stepM, prof[off + i + 1] - prof[off + i], c);
     } else {
-      for (let i = n; i > 0; i--) total += stepCost(stepM, prof[off + i - 1] - prof[off + i], alpha, beta, eta);
+      for (let i = n; i > 0; i--) total += stepCost(stepM, prof[off + i - 1] - prof[off + i], c);
     }
     return total;
   }
@@ -362,12 +370,12 @@
   // Per-run directed costs for every edge from the params, read straight off the
   // stored profiles (raw energy — the maximize mode is a separate layered DP).
   function directedCosts(g, params) {
-    const { alpha, beta, eta } = params;
+    const c = params.cost;
     const costAB = new Float64Array(g.nEdges), costBA = new Float64Array(g.nEdges);
     for (let e = 0; e < g.nEdges; e++) {
       const off = g.profOff[e], n = g.profOff[e + 1] - off - 1, stepM = g.edgeStepM[e];
-      costAB[e] = profileCost(g.profH, off, n, stepM, true, alpha, beta, eta);
-      costBA[e] = profileCost(g.profH, off, n, stepM, false, alpha, beta, eta);
+      costAB[e] = profileCost(g.profH, off, n, stepM, true, c);
+      costBA[e] = profileCost(g.profH, off, n, stepM, false, c);
     }
     return { costAB, costBA };
   }
@@ -447,12 +455,14 @@
 
   // ---------------------------------------------------------------- top-N -----
   // N progressively-penalised shortest paths src→dst (route diversity). The
-  // penalty multiplies the alpha*dist component of an edge by penalty^usedCount
-  // — the graph analogue of energy-worker's per-cell repulsion. (linear/square
-  // repulsion are grid distance-transform modes; on a graph they reduce to this
-  // per-edge form for now — see the README note.) Route energies are reported
-  // UN-penalised (true energy); sharedEdges counts edges shared with other routes.
-  function topN(g, costAB, costBA, src, dst, eMax, nRoutes, penalty, alpha) {
+  // penalty multiplies the distance-cost component of an edge by penalty^usedCount
+  // — the graph analogue of energy-worker's per-cell repulsion. Under v2 the
+  // distance-cost coefficient is `distCoeff = aRoll + aAero` (flat-resistance,
+  // the analogue of v1's alpha). (linear/square repulsion are grid distance-
+  // transform modes; on a graph they reduce to this per-edge form for now — see
+  // the README note.) Route energies are reported UN-penalised (true energy);
+  // sharedEdges counts edges shared with other routes.
+  function topN(g, costAB, costBA, src, dst, eMax, nRoutes, penalty, distCoeff) {
     const used = new Int32Array(g.nEdges);
     const pAB = new Float64Array(g.nEdges), pBA = new Float64Array(g.nEdges);
     const pen = penalty > 1 ? penalty : 1;
@@ -460,7 +470,7 @@
     const globalUse = new Int32Array(g.nEdges);
     for (let i = 0; i < nRoutes; i++) {
       for (let e = 0; e < g.nEdges; e++) {
-        const bump = (Math.pow(pen, used[e]) - 1) * alpha * g.edgeLenM[e];
+        const bump = (Math.pow(pen, used[e]) - 1) * distCoeff * g.edgeLenM[e];
         pAB[e] = costAB[e] + bump; pBA[e] = costBA[e] + bump;
       }
       const tree = dijkstra(g, pAB, pBA, [src], eMax, false);
@@ -520,8 +530,9 @@
   // -------------------------------------------------------------- dispatch ----
   // computeGraph(graph, params) -> result. Modes: density, from, to, round,
   // plus wantTopN (route diversity) and maximize (layered-DP walk of L edges).
-  // params: {mode, alpha, beta, eta, eMax, eMaxMode, srcNode, dstNode, refNodes,
+  // params: {mode, cost, eMax, eMaxMode, srcNode, dstNode, refNodes,
   //  wantPath, wantTopN, nRoutes, penalty, maximize, maximizeLength}.
+  //  cost = the v2 bundle { aRoll, aAero, beta, climbThr, abRatio, epsOffset }.
   function computeGraph(g, params) {
     const t0 = nowMs();
     const { costAB, costBA } = directedCosts(g, params);
@@ -549,7 +560,7 @@
       accumulatePasses(g, base, edgePass, null);
       nodeEnergy = new Float32Array(g.nNodes).fill(NaN);
       for (let j = 0; j < base.orderLen; j++) { const v = base.order[j]; nodeEnergy[v] = base.E[v]; }
-      const { routes } = topN(g, costAB, costBA, params.srcNode, params.dstNode, eMax, params.nRoutes > 0 ? params.nRoutes : 1, params.penalty, params.alpha);
+      const { routes } = topN(g, costAB, costBA, params.srcNode, params.dstNode, eMax, params.nRoutes > 0 ? params.nRoutes : 1, params.penalty, params.cost.aRoll + params.cost.aAero);
       const best = routes.length ? routes[0] : null;
       return {
         edgePasses: edgePass, edgeEnergy: edgeEnergyFromNodes(g, nodeEnergy), nodeEnergy,

@@ -69,6 +69,20 @@ fn unix_now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// The v2 leg-energy cost bundle (mirrors energy-worker.js's `cost`). Physics is
+/// folded once in app.js and shipped identically here, so the engines stay
+/// bit-parity. See v2_edge().
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Cost {
+    a_roll: f64,    // m·g·Crr / k_eff       (J per ground metre, always)
+    a_aero: f64,    // ½·ρ·CdA·v_f² / k_eff   (J per ground metre, only OFF climbs)
+    beta: f64,      // m·g / k_eff           (J per metre of climb)
+    climb_thr: f64, // climb-grade threshold (grade ≥ this ⇒ drop aero)
+    ab_ratio: f64,  // Crr + ½ρCdA·v_f²/(m·g) (flat-resistance grade, = α/β)
+    eps_offset: f64, // empirical descent-recovery offset (≈0.13)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Params {
@@ -76,9 +90,7 @@ struct Params {
     w: usize,
     dx: f64,
     dy: f64,
-    alpha: f64,
-    beta: f64,
-    eta: f64,
+    cost: Cost,
     #[serde(default)]
     e_max: f64,
     /// Round mode only: "leg" (default) caps each direction at e_max;
@@ -231,12 +243,34 @@ impl Scratch {
 /// so costs match bit-for-bit (parity). The cells under a deck are untouched.
 type PortalAdj = HashMap<u32, Vec<(u32, f64, f64)>>;
 
-fn portal_cost(len_m: f64, dh: f64, p: &Params) -> f64 {
+/// THE single per-edge cost — a byte-identical port of energy-worker.js's v2Edge
+/// (same operation order so the bit-parity test holds). `dist` = ground length,
+/// `dh` = signed rise (m).
+#[inline]
+fn v2_edge(dist: f64, dh: f64, c: &Cost) -> f64 {
     if dh >= 0.0 {
-        p.alpha * len_m + p.beta * dh
-    } else {
-        (p.alpha * len_m - p.eta * p.beta * (-dh)).max(0.0)
+        let aero = if dh < c.climb_thr * dist { c.a_aero * dist } else { 0.0 };
+        return c.a_roll * dist + aero + c.beta * dh;
     }
+    let ndh = -dh;
+    let mut eps = c.ab_ratio * dist / ndh;
+    if eps > 1.0 {
+        eps = 1.0;
+    }
+    eps -= c.eps_offset;
+    if eps < 0.0 {
+        eps = 0.0;
+    }
+    let e = c.a_roll * dist + c.a_aero * dist - eps * c.beta * ndh;
+    if e < 0.0 {
+        0.0
+    } else {
+        e
+    }
+}
+
+fn portal_cost(len_m: f64, dh: f64, p: &Params) -> f64 {
+    v2_edge(len_m, dh, &p.cost)
 }
 
 // phu/phv: per-portal deck-END elevations (from OSM `ele`). NaN means "no mapped
@@ -318,11 +352,7 @@ fn dijkstra_tree(
             let dh = if reverse { h_here - h_nbr } else { h_nbr - h_here };
             let dist = dists[k];
 
-            let mut edge = if dh >= 0.0 {
-                p.alpha * dist + p.beta * dh
-            } else {
-                (p.alpha * dist - p.eta * p.beta * (-dh)).max(0.0)
-            };
+            let mut edge = v2_edge(dist, dh, &p.cost);
             if p.maximize {
                 edge = (max_edge_cost - edge).max(0.0);
             }
@@ -529,7 +559,8 @@ fn compute_density(g: &Grid, p: &Params, portals: &PortalAdj) -> (Vec<f64>, Vec<
             }
         }
         let dh = if min_h.is_finite() && max_h.is_finite() { max_h - min_h } else { 0.0 };
-        (p.alpha * g.dx.hypot(g.dy) + p.beta * dh.max(1e-6)) * 1.001
+        // Worst per-edge cost = rolling + flat aero over the diagonal + full climb.
+        ((p.cost.a_roll + p.cost.a_aero) * g.dx.hypot(g.dy) + p.cost.beta * dh.max(1e-6)) * 1.001
     } else {
         0.0
     };

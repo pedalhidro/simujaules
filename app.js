@@ -249,9 +249,18 @@ const STRINGS = {
   "mode.from":           { pt: "Saindo da fonte",     en: "From source" },
   "mode.to":             { pt: "Vindo até a fonte",  en: "To source point" },
   "mode.round":          { pt: "Ida e volta",         en: "Round trip" },
-  "param.alpha":         { pt: "Custo horizontal (kJ/m)", en: "Horizontal cost (kJ/m)" },
-  "param.beta":          { pt: "Custo vertical (kJ/m)", en: "Vertical cost (kJ/m)" },
-  "param.eta":           { pt: "Recuperação na descida (%)", en: "Downhill recovery (%)" },
+  "param.mass":          { pt: "Massa (kg)", en: "Mass (kg)" },
+  "param.crr":           { pt: "Resistência ao rolamento (Crr)", en: "Rolling resistance (Crr)" },
+  "param.cda":           { pt: "Área de arrasto (CdA, m²)", en: "Drag area (CdA, m²)" },
+  "param.rho":           { pt: "Densidade do ar (ρ, kg/m³)", en: "Air density (ρ, kg/m³)" },
+  "param.keff":          { pt: "Eficiência da transmissão", en: "Drivetrain efficiency" },
+  "param.pflat":         { pt: "Potência no plano (W)", en: "Power on the flat (W)" },
+  "param.climbthr":      { pt: "Limiar de subida (%)", en: "Climb threshold (%)" },
+  "param.ksmooth":       { pt: "Suavização k_s", en: "Smoothing k_s" },
+  "param.deadband":      { pt: "Deadband de elev. (m)", en: "Elev. deadband (m)" },
+  "param.alphar":        { pt: "α_r rolamento (kJ/m)", en: "α_r rolling (kJ/m)" },
+  "param.alphaa":        { pt: "α_a arrasto, plano (kJ/m)", en: "α_a aero, flat (kJ/m)" },
+  "param.betaro":        { pt: "β subida (kJ/m)", en: "β climb (kJ/m)" },
   "param.budget":        { pt: "Orçamento de energia (kJ)", en: "Energy budget (kJ)" },
   "param.budget_mode":   { pt: "Orçamento aplica-se a", en: "Budget applies to" },
   "budget.leg":          { pt: "por perna", en: "each leg" },
@@ -465,7 +474,7 @@ const STRINGS = {
   "help.p.points":       { pt: "<strong>Modo padrão:</strong> clique no mapa para o ponto-fonte (<code>src</code>). Um segundo clique marca o destino (<code>dst</code>) — necessário para \"até a fonte\", \"ida e volta\" e \"top-N rotas\".", en: '<strong>Default mode:</strong> click the map for the source (<code>src</code>). A second click sets the destination (<code>dst</code>) — required for "to source point", "round trip", and "top-N routes".' },
   "help.p.density_pts":  { pt: "<strong>Densidade multi-referência:</strong> ative <em>Calcular densidade multi-referência</em>. Os cliques agora adicionam pontos numerados. Use \"Distribuir aleatórias\" ou ajuste <em>N referências</em>. Política FIFO: ao exceder N, o mais antigo é descartado.", en: '<strong>Multi-reference density:</strong> turn on <em>Compute multi-reference density</em>. Clicks now add numbered reference points. Use "Place random" or adjust <em>N references</em>. FIFO policy: above N, the oldest is dropped.' },
   "help.h.params":       { pt: "Parâmetros", en: "Parameters" },
-  "help.p.params":       { pt: "<code>α</code> custo por metro horizontal · <code>β</code> custo por metro de subida · <code>η</code> fração da subida recuperada na descida (0–1) · <em>Orçamento</em> para podar caminhos acima de um limiar (≤0 = sem orçamento).", en: '<code>α</code> cost per horizontal metre · <code>β</code> cost per metre uphill · <code>η</code> fraction of the climb recovered on descent (0–1) · <em>Budget</em> prunes paths above a threshold (≤0 = no budget).' },
+  "help.p.params":       { pt: "Modelo de energia v2: <em>massa</em>, <em>Crr</em> (rolamento), <em>CdA</em> (arrasto), <em>ρ</em> (densidade do ar), <em>eficiência da transmissão</em> e <em>potência no plano</em> (que fixa a velocidade de plano) definem o custo por metro; o <em>limiar de subida</em> separa onde o arrasto deixa de ser cobrado. <em>Orçamento</em> poda caminhos acima de um limiar (≤0 = sem orçamento).", en: 'v2 energy model: <em>mass</em>, <em>Crr</em> (rolling), <em>CdA</em> (drag), <em>ρ</em> (air density), <em>drivetrain efficiency</em> and <em>power on the flat</em> (which sets the flat speed) define the cost per metre; the <em>climb threshold</em> marks where aero stops being charged. <em>Budget</em> prunes paths above a threshold (≤0 = no budget).' },
   "help.h.maximize":     { pt: "Maximizar energia", en: "Maximize energy" },
   "help.h.compute":      { pt: "Calcular", en: "Compute" },
   "help.p.compute":      { pt: "Aperte <em>Calcular</em>. Habilitado quando há fonte (modo padrão) ou pelo menos uma referência (modo densidade). Estimativa de tempo aparece antes; durante a execução, a barra mostra o tempo restante.", en: 'Hit <em>Compute</em>. Enabled when a source is set (default mode) or at least one reference (density mode). A time estimate appears beforehand; during the run, the bar shows time remaining.' },
@@ -671,9 +680,72 @@ function associateOrphanLabels() {
 // src/dst, reference points — those ride in bundles) and `max-workers`
 // (already persisted separately as simu-max-workers).
 const PERSIST_KEY = "simu-params";
+
+// ── v2 leg-energy cost bundle ────────────────────────────────────────────────
+// The compute engines (energy-worker.js v2Edge, graph-engine.js stepCost, the
+// Rust backend v2_edge) are parameterised by this bundle, derived ONCE here from
+// the physics inputs and shipped identically to all three so they stay
+// bit-parity. See bicycling-energy-model/notas.md (v2). Coefficients are in
+// kJ-based units (energy field / budget / legend stay kJ, as before α/β/η).
+// epsOffset is the empirical −0.13 descent-recovery offset (a constant, not a
+// UI knob). abRatio = (aRoll+aAero)/beta is the dimensionless flat-resistance
+// grade (= α/β) used by the per-grade descent recovery ε.
+// Flat reference speed v_f (m/s) from the rider's power on the flat: solve the
+// steady wheel-power balance keff·P = (Crr·m·g + ½ρCdA·v²)·v by bisection.
+// Mirrors bicycling-energy-model compare.mjs flatEqSpeed (wind = 0).
+function flatEqSpeed(P, m, crr, cda, rho, keff) {
+  const a = crr * m * 9.81, b = 0.5 * rho * cda;
+  let lo = 0, hi = 40;
+  for (let k = 0; k < 60; k++) {
+    const v = (lo + hi) / 2;
+    const wheel = (a + b * v * v) * v;
+    if (wheel < keff * P) lo = v; else hi = v;
+  }
+  return (lo + hi) / 2;
+}
+function readCost() {
+  const num = (id, dflt) => { const v = parseFloat(document.getElementById(id)?.value); return Number.isFinite(v) ? v : dflt; };
+  const m    = Math.max(1, num("mass", 75));
+  const crr  = Math.max(0, num("crr", 0.008));
+  const cda  = Math.max(0, num("cda", 0.45));
+  const rho  = Math.max(0, num("rho", 1.1));    // ~750 m asl (São Paulo)
+  const keff = Math.min(1, Math.max(0.1, num("keff", 0.97)));
+  const pFlat = Math.max(1, num("pflat", 80));  // W — rider power on the flat
+  const vf   = flatEqSpeed(pFlat, m, crr, cda, rho, keff);  // m/s, derived
+  const climbThr = Math.max(0, num("climb-thr", 2)) / 100;  // % → grade
+  // k_smooth: profile-smoothing factor (notas v2). 1 = no smoothing (the per-edge
+  // engine pays roller momentum implicitly; the notas' ≈0.74 is the FABDEM value
+  // for the LOW-COMPUTE closed form). Multiplies the gravity term (climb + the
+  // descent credit); ε stays computed from the UN-smoothed abRatio.
+  const kSmooth = Math.min(1, Math.max(0, num("ksmooth", 1)));
+  const g = 9.81, mg = m * g, KJ = 1000;
+  const aeroCoef = 0.5 * rho * cda * vf * vf;               // ½ρCdA·v_f² (J/ground-m, pre-/keff)
+  return {
+    aRoll: mg * crr / keff / KJ,
+    aAero: aeroCoef / keff / KJ,
+    beta: mg * kSmooth / keff / KJ,
+    climbThr,
+    abRatio: crr + aeroCoef / mg,   // un-smoothed flat-resistance grade (for ε); k_eff & kJ scale cancel
+    epsOffset: 0.13,
+  };
+}
+// The v2 analogue of v1's `alpha` (per-ground-metre distance cost) — used by the
+// runtime estimator's reach model (flat reach ∝ eMax/alpha).
+function costAlphaEquiv(c) { return c.aRoll + c.aAero; }
+// Read-only readout of the derived v2 cost coefficients in the Parameters panel:
+// α_r (rolling), α_a (flat aero), β (climb), already kJ/m. Live-updates on change.
+function updateCostReadout() {
+  const c = readCost();
+  const fmt4 = (n) => (Number.isFinite(n) ? n.toFixed(4) : "—");
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set("ro-alphar", fmt4(c.aRoll));
+  set("ro-alphaa", fmt4(c.aAero));
+  set("ro-beta", fmt4(c.beta));
+}
+
 const PERSIST_IDS = [
   // Parameters
-  "mode", "alpha", "beta", "eta", "e-max", "e-max-mode",
+  "mode", "mass", "crr", "cda", "rho", "keff", "pflat", "climb-thr", "ksmooth", "deadband", "e-max", "e-max-mode",
   "want-passes", "want-topn", "want-density",
   "n-refs", "ref-sampling", "refs-visible",
   "backend-url", "orchestrator-url", "cloud-keep-warm", "n-routes", "penalty", "repulsion-mode",
@@ -737,14 +809,6 @@ function setupParamPersistence() {
         if (id === "colormap" && COLORMAPS[saved[id]]) activeColormap = saved[id];
       }
     }
-    // MIGRATE eta: it used to be a 0–1 fraction; the input is now a 0–100
-    // percent. Any persisted value ≤ 1 is an old fraction (η is realistically
-    // ≥10%), so scale it up once. Idempotent — a percent (>1) is left alone.
-    const etaEl = document.getElementById("eta");
-    if (etaEl && "eta" in saved) {
-      const v = parseFloat(etaEl.value);
-      if (Number.isFinite(v) && v > 0 && v <= 1) etaEl.value = String(v * 100);
-    }
     for (const id of PERSIST_REFIRE) {
       document.getElementById(id)?.dispatchEvent(new Event("change"));
     }
@@ -766,8 +830,12 @@ function setupParamPersistence() {
   // (always — even with no saved state, so the local-only gating note shows).
   syncComputeSourceUI();
   for (const id of PERSIST_IDS) {
-    document.getElementById(id)?.addEventListener("change", savePersistedParams);
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.addEventListener("change", savePersistedParams);
+    el.addEventListener("input", updateCostReadout);
   }
+  updateCostReadout();
   // The radios live under name="compute-source", not in PERSIST_IDS — wire
   // their change to persist too.
   document.querySelectorAll('input[name="compute-source"]').forEach((el) => {
@@ -1232,7 +1300,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // compute-source selector switches the engine model (handled below with the
   // radios, since they share a name rather than a single id).
   for (const id of ["mode", "want-passes", "want-topn", "n-routes", "want-density",
-                    "n-refs", "e-max", "alpha", "max-workers",
+                    "n-refs", "e-max", "mass", "crr", "cda", "rho", "keff", "pflat", "ksmooth", "max-workers",
                     // Network/graph + interpolation controls — they move the
                     // estimate now that interp is a separate phase and graph
                     // mode has its own (much cheaper) compute model.
@@ -5322,14 +5390,9 @@ runBtn.addEventListener("click", async () => {
   window.__simuDrawer?.close();
 
   const mode = document.getElementById("mode").value;
-  // Clamp α/β to ≥0: a negative cost coefficient makes negative edge weights,
-  // which break Dijkstra (and a negative α NaN-poisons the time estimate). The
-  // min="0" input attribute only guards the spinner, not typed/pasted values.
-  const alphaRaw = parseFloat(document.getElementById("alpha").value);
-  const alpha = Number.isFinite(alphaRaw) ? Math.max(0, alphaRaw) : 0.008;
-  const betaRaw = parseFloat(document.getElementById("beta").value);
-  const beta = Number.isFinite(betaRaw) ? Math.max(0, betaRaw) : 1.0;
-  const eta = parseFloat(document.getElementById("eta").value) / 100; // input is %, engine wants 0–1
+  // The v2 cost bundle derived from the physics inputs (readCost clamps each to a
+  // sane range, so edge weights stay non-negative and the time estimate finite).
+  const cost = readCost();
   const eMaxRaw = parseFloat(document.getElementById("e-max")?.value);
   const eMax = Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0;
   // Round mode only: budget caps each leg ("leg", default — totals reach
@@ -5569,7 +5632,7 @@ runBtn.addEventListener("click", async () => {
     seedC: state.src ? state.src[1] : (state.refPoints[0] ? state.refPoints[0][1] : -1),
     goalR: state.dst ? state.dst[0] : -1,
     goalC: state.dst ? state.dst[1] : -1,
-    mode, alpha, beta, eta, eMax, eMaxMode,
+    mode, cost, eMax, eMaxMode,
     wantPasses, wantTopN, nRoutes, penalty, repulsionMode,
     wantDensity,
     refPoints: wantDensity ? state.refPoints.slice() : null,
@@ -5832,7 +5895,7 @@ runBtn.addEventListener("click", async () => {
       const params = {
         h: H, w: W,
         dx: state.dem.dxM, dy: state.dem.dyM,
-        alpha, beta, eta, eMax, eMaxMode,
+        cost, eMax, eMaxMode,
         densityMode,
         refPoints: state.refPoints.map(([r, c]) => [r, c]),
         hasNetwork: useNetwork,
@@ -5912,7 +5975,7 @@ runBtn.addEventListener("click", async () => {
       const params = {
         h: H, w: W,
         dx: state.dem.dxM, dy: state.dem.dyM,
-        alpha, beta, eta, eMax, eMaxMode,
+        cost, eMax, eMaxMode,
         densityMode: mode,                 // from | to | round (single-source dir)
         src: [state.src[0], state.src[1]],
         wantPasses,
@@ -6230,7 +6293,7 @@ runBtn.addEventListener("click", async () => {
     const runOnGraph = (graph) => {
       if (gen !== state.computeGen) return;
       const params = {
-        mode, alpha, beta, eta, eMax, eMaxMode,
+        mode, cost, eMax, eMaxMode,
         srcRC: state.src || null,
         dstRC: state.dst || null,
         wantPath: !!state.dst,
@@ -7374,24 +7437,46 @@ function buildRefTrack(latlngs, eles) {
   return { latlngs, segs, distM, ascentM, descentM, eleSource, hasEle: !!elev };
 }
 
-function refEnergyKJ(segs, alpha, beta, eta) {
-  let e = 0;
-  for (const { d, dh } of segs) {
-    e += dh >= 0 ? alpha * d + beta * dh : Math.max(0, alpha * d - eta * beta * (-dh));
+// v2 leg energy (kJ) of a route from its {d, dh} segments: the closed form with
+// a 2 m elevation deadband (rejects sub-τ jitter in h±) and the ε descent-
+// recovery estimator — mirrors bicycling-energy-model compare.mjs
+// approximate()+deadband(). readCost()'s coefficients are kJ-based, so the sum
+// is in kJ. Aero is charged only OFF climbs; descent gets the drop-weighted ε.
+function refEnergyKJ(segs) {
+  const c = readCost();
+  const tdv = parseFloat(document.getElementById("deadband")?.value);
+  const TAU = Math.max(0, Number.isFinite(tdv) ? tdv : 2), n = segs.length;  // τ=0 ⇒ identity (no smoothing)
+  // Rebuild the elevation profile from the per-segment Δh and deadband it.
+  const h = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) h[i + 1] = h[i] + segs[i].dh;
+  let y = h[0];
+  const hS = new Float64Array(n + 1); hS[0] = y;
+  for (let i = 1; i <= n; i++) {
+    if (h[i] > y + TAU) y = h[i] - TAU; else if (h[i] < y - TAU) y = h[i] + TAU;
+    hS[i] = y;
   }
-  return e;
+  let X = 0, Xnc = 0, hPlus = 0, hMinus = 0, Xdesc = 0;
+  for (let i = 0; i < n; i++) {
+    const d = segs[i].d; if (!(d > 0)) continue;
+    const dh = hS[i + 1] - hS[i];
+    X += d;
+    if (dh >= 0) { hPlus += dh; if (dh < c.climbThr * d) Xnc += d; }  // aero off climbs
+    else { hMinus += -dh; Xnc += d; Xdesc += d; }                    // descents: full flat aero
+  }
+  // Drop-weighted ε via the mean descent grade s̄ = H₋/X₋.
+  const sbar = Xdesc > 0 ? hMinus / Xdesc : 0;
+  let eps = sbar > 0 ? Math.min(1, c.abRatio / sbar) - c.epsOffset : 0;
+  if (eps < 0) eps = 0; else if (eps > 1) eps = 1;
+  return c.aRoll * X + c.aAero * Xnc + c.beta * (hPlus - eps * hMinus);
 }
 
 function refMetricsHtml() {
   const rt = state.refTrack;
   if (!rt) return "";
-  const alpha = parseFloat(document.getElementById("alpha")?.value) || 0;
-  const beta = parseFloat(document.getElementById("beta")?.value) || 0;
-  const eta = (parseFloat(document.getElementById("eta")?.value) || 0) / 100;
   const rows = [`<strong>${escapeHtml(t("layer.refgeom"))}</strong>`,
     `${escapeHtml(t("refgeom.distance"))}: ${(rt.distM / 1000).toFixed(2)} km`];
   if (rt.hasEle) {
-    rows.push(`${escapeHtml(t("refgeom.energy"))}: ${escapeHtml(formatEnergy(refEnergyKJ(rt.segs, alpha, beta, eta)))} kJ`);
+    rows.push(`${escapeHtml(t("refgeom.energy"))}: ${escapeHtml(formatEnergy(refEnergyKJ(rt.segs)))} kJ`);
     rows.push(`${escapeHtml(t("refgeom.ascent"))}: ${Math.round(rt.ascentM)} m`);
     rows.push(`${escapeHtml(t("refgeom.descent"))}: ${Math.round(rt.descentM)} m`);
   } else {
@@ -7745,9 +7830,7 @@ function startCalibrationProbe() {
   if (refs.length < 2) return; // degenerate mask; estimate stays uncalibrated
 
   const probeGen = state.calibrationGen;
-  const alpha = parseFloat(document.getElementById("alpha")?.value) || 0.008;
-  const beta = parseFloat(document.getElementById("beta")?.value) || 1.0;
-  const eta = parseFloat(document.getElementById("eta")?.value) / 100 || 0.1; // % → 0–1
+  const cost = readCost();
 
   const w = new Worker(WORKER_URL);
   state.probeWorker = w;
@@ -7772,7 +7855,7 @@ function startCalibrationProbe() {
       N: m.N,
       allocMsN: m.allocMs,
       Estar, bStar, perRefProbe,
-      alphaAtProbe: alpha,
+      alphaAtProbe: costAlphaEquiv(cost),
       // Online correction: actual/predicted from completed computes, per
       // PHASE/engine (the backend's native-speedup × slice-contention factor,
       // the graph engine's per-edge cost, and the interp fill rate are all
@@ -7793,7 +7876,7 @@ function startCalibrationProbe() {
       kind: "probe",
       height: probeHeight, mask, H, W,
       dx: state.dem.dxM, dy: state.dem.dyM,
-      alpha, beta, eta, maxSettled,
+      cost, maxSettled,
       refPoints: refs,
     },
     [probeHeight.buffer, mask.buffer],
@@ -7955,7 +8038,8 @@ function predictComputeMs(cal, opts, applyCorr) {
 // post-compute correction, so they describe the same run).
 function currentRunOpts(cal, N) {
   const mode = document.getElementById("mode")?.value || "from";
-  const alpha = parseFloat(document.getElementById("alpha")?.value) || cal.alphaAtProbe;
+  // The v2 analogue of v1's α for the reach model (flat reach ∝ eMax/alpha).
+  const alpha = costAlphaEquiv(readCost()) || cal.alphaAtProbe;
   const eMaxRaw = parseFloat(document.getElementById("e-max")?.value);
   const graph = graphModeActive();
   // Interp runs when its toggle is on AND there's a network to fill around —
@@ -8843,9 +8927,16 @@ function buildMetadata(result, withOutputs = true) {
   const dem = state.dem;
   const params = {
     mode:          document.getElementById("mode")?.value,
-    alpha:         parseFloat(document.getElementById("alpha")?.value),
-    beta:          parseFloat(document.getElementById("beta")?.value),
-    eta:           parseFloat(document.getElementById("eta")?.value) / 100, // store as 0–1 fraction (bundle stays fraction-based; back-compat)
+    // v2 physics inputs (the cost bundle is derived from these — see readCost).
+    mass:          parseFloat(document.getElementById("mass")?.value),
+    crr:           parseFloat(document.getElementById("crr")?.value),
+    cda:           parseFloat(document.getElementById("cda")?.value),
+    rho:           parseFloat(document.getElementById("rho")?.value),
+    keff:          parseFloat(document.getElementById("keff")?.value),
+    pFlat:         parseFloat(document.getElementById("pflat")?.value),
+    kSmooth:       parseFloat(document.getElementById("ksmooth")?.value),
+    deadbandM:     parseFloat(document.getElementById("deadband")?.value),
+    climbThr:      parseFloat(document.getElementById("climb-thr")?.value) / 100,
     eMax:          parseFloat(document.getElementById("e-max")?.value) || 0,
     eMaxMode:      document.getElementById("e-max-mode")?.value || "leg",
     src:           state.src,
@@ -9308,9 +9399,17 @@ function applyMetadataToUI(md, bin = {}) {
   state.pendingBundle = (!state.dem || demDimsMatch === false) ? { md, bin } : null;
 
   set("mode", p.mode);
-  set("alpha", p.alpha);
-  set("beta", p.beta);
-  set("eta", p.eta != null ? p.eta * 100 : p.eta); // bundle stores 0–1; input is %
+  // v2 physics inputs (older bundles carried α/β/η, which no longer map cleanly —
+  // they're ignored, the defaults stand).
+  set("mass", p.mass);
+  set("crr", p.crr);
+  set("cda", p.cda);
+  set("rho", p.rho);
+  set("keff", p.keff);
+  set("pflat", p.pFlat);
+  set("ksmooth", p.kSmooth);
+  set("deadband", p.deadbandM);
+  set("climb-thr", p.climbThr != null ? p.climbThr * 100 : p.climbThr); // bundle stores grade; input is %
   set("e-max", p.eMax);
   set("e-max-mode", p.eMaxMode);
   check("want-passes", p.wantPasses);

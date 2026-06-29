@@ -38,7 +38,8 @@ const mask = new Uint8Array(N).fill(1);
 for (let i = 0; i < N; i += 997) mask[i] = 0;
 
 const base = {
-  kind: "run", H, W, dx: 30, dy: 30, alpha: 1, beta: 30, eta: 0.3,
+  kind: "run", H, W, dx: 30, dy: 30,
+  cost: { aRoll: 1, aAero: 0.5, beta: 30, climbThr: 0.05, abRatio: 0.05, epsOffset: 0.13 },
   seedR: 100, seedC: 90, goalR: 200, goalC: 210, mode: "from",
 };
 const msg = (over) => ({

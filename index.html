@@ -8,6 +8,11 @@
        part of the UX. Some devices add their own zoom controls when the
        app is "installed" — that's fine. -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <!-- IBM Plex Mono — the default UI font (display=swap; falls back to the
+       system monospace before it loads / offline). -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
   <!-- Replaced at runtime by applyTranslations() (PT/EN). This is just
        what crawlers and the OS task-bar see before JS runs. -->
   <title>Simulador bici-geo-energético</title>
@@ -95,7 +100,7 @@
       --border: #2a2e36;
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
+    html, body { margin: 0; padding: 0; height: 100%; font-family: "IBM Plex Mono", ui-monospace, monospace; background: var(--bg); color: var(--text); }
     /* Use 100dvh (dynamic viewport) where supported so the layout doesn't
        jump under the iOS Safari URL bar. Falls back to 100vh elsewhere. */
     #app { display: grid; grid-template-columns: calc(var(--sidebar-cols, 1) * 320px) 1fr; height: 100vh; height: 100dvh; }
@@ -356,6 +361,8 @@
     .kv-table td.kv-key { font-size: 11px; color: var(--text); padding-right: 8px; line-height: 1.2; }
     .kv-table td.kv-val { width: 110px; }
     .kv-table td.kv-val > input, .kv-table td.kv-val > select { width: 100%; }
+    /* Derived read-only coefficients (α_r/α_a/β) — smaller + muted, below the inputs. */
+    .kv-table tr.kv-readout td { font-size: 9px; color: var(--muted); padding-top: 1px; padding-bottom: 1px; }
     /* Desktop sidebar collapse: hamburger toggles #app.panel-collapsed.
        ONE column (not "0 1fr"): with #panel display:none the only remaining
        in-flow child is #map, which would auto-place into the 0-width first
@@ -428,12 +435,12 @@
       flex: 0 0 auto;
       font-size: 10px;
       color: var(--muted);
-      font-family: ui-monospace, monospace;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
     .point-display {
-      font-family: ui-monospace, monospace;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
       font-size: 11px;
       color: var(--muted);
       overflow: hidden;
@@ -476,14 +483,14 @@
       justify-content: space-between;
       margin-top: 2px;
       font-size: 10px;
-      font-family: ui-monospace, monospace;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
       color: var(--muted);
     }
     .legend-ticks .v { color: var(--text); }
     .progress { width: 100%; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 5px; display: none; }
     .progress.active { display: block; }
     .progress > .bar { height: 100%; background: var(--accent-2); width: 0; transition: width 0.1s; }
-    .meta { font-size: 11px; color: var(--muted); margin-top: 5px; line-height: 1.45; font-family: ui-monospace, monospace; }
+    .meta { font-size: 11px; color: var(--muted); margin-top: 5px; line-height: 1.45; font-family: "IBM Plex Mono", ui-monospace, monospace; }
     .meta .v { color: var(--text); }
     .leaflet-container { background: #0a0c10; }
     .credit {
@@ -527,7 +534,7 @@
     .ex-tag {
       font-size: 10px;
       color: var(--muted);
-      font-family: ui-monospace, monospace;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
     }
     .ex-link:hover .ex-tag { color: var(--accent-2); }
     .layer-block {
@@ -577,7 +584,7 @@
       min-width: 26px; /* slightly wider than the 18 px ? button */
       padding: 0 6px;
       font-size: 10px;
-      font-family: ui-monospace, monospace;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
       letter-spacing: 0.05em;
       line-height: 1;
       color: var(--muted);
@@ -604,7 +611,7 @@
       width: 18px !important; /* override the universal button:width:100% */
       height: 18px;
       font-size: 12px;
-      font-family: ui-monospace, monospace;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
       font-weight: 700;
       color: var(--muted);
       background: transparent;
@@ -722,7 +729,7 @@
       margin: 4px 0;
     }
     .modal-page code {
-      font-family: ui-monospace, monospace;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
       font-size: 11px;
       background: var(--bg);
       padding: 1px 4px;
@@ -730,7 +737,7 @@
       border: 1px solid var(--border);
     }
     .modal-page .formula {
-      font-family: ui-monospace, monospace;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
       font-size: 11px;
       background: var(--bg);
       padding: 6px 8px;
@@ -1013,12 +1020,24 @@
                 <option value="to"    data-i18n="mode.to">To source point</option>
                 <option value="round" data-i18n="mode.round">Round trip</option>
               </select></td></tr>
-          <tr><td class="kv-key"><label for="alpha" data-i18n="param.alpha">Horizontal cost (kJ/m)</label></td>
-              <td class="kv-val"><input type="number" id="alpha" value="0.008" step="0.001" min="0" /></td></tr>
-          <tr><td class="kv-key"><label for="beta" data-i18n="param.beta">Vertical cost (kJ/m)</label></td>
-              <td class="kv-val"><input type="number" id="beta" value="1.0" step="0.1" min="0" /></td></tr>
-          <tr><td class="kv-key"><label for="eta" data-i18n="param.eta">Downhill recovery (%)</label></td>
-              <td class="kv-val"><input type="number" id="eta" value="10" step="5" min="0" max="100" /></td></tr>
+          <tr><td class="kv-key"><label for="mass" data-i18n="param.mass">Mass (kg)</label></td>
+              <td class="kv-val"><input type="number" id="mass" value="75" step="1" min="1" /></td></tr>
+          <tr><td class="kv-key"><label for="crr" data-i18n="param.crr">Rolling resistance (Crr)</label></td>
+              <td class="kv-val"><input type="number" id="crr" value="0.008" step="0.001" min="0" /></td></tr>
+          <tr><td class="kv-key"><label for="cda" data-i18n="param.cda">Drag area (CdA, m²)</label></td>
+              <td class="kv-val"><input type="number" id="cda" value="0.45" step="0.05" min="0" /></td></tr>
+          <tr><td class="kv-key"><label for="rho" data-i18n="param.rho">Air density (ρ, kg/m³)</label></td>
+              <td class="kv-val"><input type="number" id="rho" value="1.1" step="0.025" min="0" /></td></tr>
+          <tr><td class="kv-key"><label for="keff" data-i18n="param.keff">Drivetrain efficiency</label></td>
+              <td class="kv-val"><input type="number" id="keff" value="0.97" step="0.01" min="0.1" max="1" /></td></tr>
+          <tr><td class="kv-key"><label for="pflat" data-i18n="param.pflat">Power on the flat (W)</label></td>
+              <td class="kv-val"><input type="number" id="pflat" value="80" step="5" min="1" /></td></tr>
+          <tr><td class="kv-key"><label for="climb-thr" data-i18n="param.climbthr">Climb threshold (%)</label></td>
+              <td class="kv-val"><input type="number" id="climb-thr" value="2" step="0.5" min="0" /></td></tr>
+          <tr><td class="kv-key"><label for="ksmooth" data-i18n="param.ksmooth">Smoothing k_s</label></td>
+              <td class="kv-val"><input type="number" id="ksmooth" value="1" step="0.01" min="0" max="1" /></td></tr>
+          <tr><td class="kv-key"><label for="deadband" data-i18n="param.deadband">Elev. deadband (m)</label></td>
+              <td class="kv-val"><input type="number" id="deadband" value="2" step="0.5" min="0" /></td></tr>
           <tr><td class="kv-key"><label for="e-max" data-i18n="param.budget">Energy budget (kJ)</label></td>
               <td class="kv-val"><input type="number" id="e-max" value="0" step="any" data-i18n-title="param.budget.title" title="≤0 = ∞ (sem orçamento)" /></td></tr>
           <tr id="e-max-mode-row" style="display: none;"><td class="kv-key"><label for="e-max-mode" data-i18n="param.budget_mode">Budget applies to</label></td>
@@ -1026,6 +1045,12 @@
                 <option value="leg"   data-i18n="budget.leg">each leg (out OR back)</option>
                 <option value="total" data-i18n="budget.total">round trip (total)</option>
               </select></td></tr>
+          <tr class="kv-readout"><td class="kv-key" data-i18n="param.alphar">α_r rolling (kJ/m)</td>
+              <td class="kv-val"><span id="ro-alphar">—</span></td></tr>
+          <tr class="kv-readout"><td class="kv-key" data-i18n="param.alphaa">α_a aero, flat (kJ/m)</td>
+              <td class="kv-val"><span id="ro-alphaa">—</span></td></tr>
+          <tr class="kv-readout"><td class="kv-key" data-i18n="param.betaro">β climb (kJ/m)</td>
+              <td class="kv-val"><span id="ro-beta">—</span></td></tr>
         </table>
         <div id="topn-extra" style="display: none;">
           <div class="row">
@@ -1529,6 +1554,17 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v44</strong> — 2026-06-29<br/>
+              <strong>v2 energy model.</strong> The cost is now physics-based —
+              mass, Crr, CdA, air density, drivetrain efficiency, power on the flat
+              and a climb threshold replace the α/β/η knobs. Per edge it splits rolling
+              from aero (aero charged only off the climbs) with a per-grade descent
+              recovery ε = clamp(min(1, (α/β)/s) − 0.13). Worker, graph engine and
+              the Rust backend move together (bit-parity); reference-geometry energy
+              uses the closed form with a 2 m elevation deadband. Defaults are São
+              Paulo-context (ρ=1.1, Crr=0.008, 75 kg, ~80 W flat); the panel shows the
+              derived α_r / α_a / β coefficients (kJ/m) and a k_smooth knob. See
+              bicycling-energy-model/notas.md.</p>
               <p><strong>v43</strong> — 2026-06-26<br/>
               New <em>Geometria de referência</em> layer: its layer-control row has
               an ↑ upload button (instead of opacity) that loads a GPX track, drawn

@@ -9,6 +9,25 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v44 — 2026-06-29
+
+The **v2 energy model**. The cost is now **physics-parameterised** — *mass, Crr
+(rolling), CdA (drag), ρ (air density), drivetrain efficiency, power on the flat*
+and a *climb threshold* replace the old α/β/η knobs. Per edge the model splits rolling
+from aero and charges **aero only off the climbs**, with a **per-grade descent
+recovery** ε = clamp(min(1, (α/β)/s) − 0.13). The JS worker, the graph engine and
+the **Rust backend** all move together and stay bit-parity (`test-backend.mjs`);
+a new `test-energy-v2.mjs` locks the closed form to the canonical model. The
+*Geometria de referência* energy now uses the v2 closed form with a **2 m
+elevation deadband**. Reference: `bicycling-energy-model/notas.md` (v2).
+
+Defaults are São Paulo-context (ρ=1.1, Crr=0.008, mass 75 kg, ~80 W flat power).
+The Parameters panel shows the derived per-edge coefficients **α_r** (rolling),
+**α_a** (flat aero) and **β** (climb) in kJ/m, plus a **k_smooth** knob (1 = no
+smoothing, as a per-edge engine needs; ≈0.74 is the FABDEM closed-form value) and
+an adjustable **elevation deadband** for the reference-geometry energy (default
+2 m; 0 = off). The UI font is now **IBM Plex Mono**.
+
 ## v43 — 2026-06-26
 
 A reference-geometry GPX layer + plain-decimal energy. **JS/UI only — engine

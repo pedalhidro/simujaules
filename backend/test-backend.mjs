@@ -35,6 +35,12 @@ const mask = new Uint8Array(N).fill(1);
 for (let i = 0; i < N; i += 997) mask[i] = 0;
 const refs = [[40, 60], [100, 200], [180, 30], [220, 230], [128, 128]];
 
+// v2 cost bundle (see energy-worker.js v2Edge / main.rs v2_edge). Chosen so the
+// synthetic relief exercises every branch: climbs ≥ climbThr drop aero, and the
+// per-grade descent recovery ε = clamp01(min(1, abRatio/s) − epsOffset) varies.
+// abRatio = (aRoll+aAero)/beta keeps the bundle self-consistent.
+const cost = { aRoll: 1, aAero: 0.5, beta: 30, climbThr: 0.05, abRatio: 0.05, epsOffset: 0.13 };
+
 const server = spawn(join(here, "target", "release", "simujoules-backend"), [ADDR], {
   stdio: ["ignore", "inherit", "inherit"],
 });
@@ -77,7 +83,7 @@ for (const { dmode, eMax, eMaxMode, portals = false, maximize = false } of cases
     const nPortals = portals ? portalU.length : 0;
     // backend
     const params = {
-      h: H, w: W, dx: 30, dy: 30, alpha: 1, beta: 30, eta: 0.3, eMax, eMaxMode,
+      h: H, w: W, dx: 30, dy: 30, cost, eMax, eMaxMode,
       densityMode: dmode, refPoints: refs, hasNetwork: false, maximize,
       nPortals,
     };
@@ -96,7 +102,7 @@ for (const { dmode, eMax, eMaxMode, portals = false, maximize = false } of cases
 
     // JS reference
     const ref = runWorker({
-      kind: "run", H, W, dx: 30, dy: 30, alpha: 1, beta: 30, eta: 0.3, eMax, eMaxMode,
+      kind: "run", H, W, dx: 30, dy: 30, cost, eMax, eMaxMode,
       seedR: -1, seedC: -1, goalR: -1, goalC: -1, mode: dmode,
       wantDensity: true, refPoints: refs, densityMode: dmode, maximize,
       height: new Float32Array(height), mask: new Uint8Array(mask),
@@ -152,7 +158,7 @@ for (const portals of [false, true]) {
 for (const { dmode, eMax, eMaxMode, portals, hasNetwork, wantPasses } of singleCases) {
   const nPortals = portals ? portalU.length : 0;
   const params = {
-    h: H, w: W, dx: 30, dy: 30, alpha: 1, beta: 30, eta: 0.3, eMax, eMaxMode,
+    h: H, w: W, dx: 30, dy: 30, cost, eMax, eMaxMode,
     densityMode: dmode, src: [SR, SC], wantPasses, hasNetwork, nPortals,
   };
   const json = new TextEncoder().encode(JSON.stringify(params));
@@ -171,7 +177,7 @@ for (const { dmode, eMax, eMaxMode, portals, hasNetwork, wantPasses } of singleC
 
   // JS reference — the worker's single-source branch (wantDensity false).
   const ref = runWorker({
-    kind: "run", H, W, dx: 30, dy: 30, alpha: 1, beta: 30, eta: 0.3, eMax, eMaxMode,
+    kind: "run", H, W, dx: 30, dy: 30, cost, eMax, eMaxMode,
     seedR: SR, seedC: SC, goalR: -1, goalC: -1, mode: dmode,
     wantPasses, wantDensity: false,
     height: new Float32Array(height), mask: new Uint8Array(mask),

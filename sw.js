@@ -366,7 +366,15 @@
 //              ascent + descent; elevation from GPX <ele> or sampled from the DEM).
 //              Also: energy now displays as a plain decimal (e.g. "3357 kJ"), never
 //              scientific. JS/UI only; engine untouched.
-const VERSION  = "v43";
+//   v43 → v44: v2 energy model. The cost is now physics-parameterised (mass, Crr,
+//              CdA, ρ, drivetrain efficiency, power on the flat, climb threshold)
+//              of the α/β/η knobs: per edge it splits rolling vs aero and charges
+//              aero only OFF climbs, with a per-grade descent recovery
+//              ε=clamp(min(1,(α/β)/s)−0.13). JS worker, graph engine AND the Rust
+//              backend move together (bit-parity); reference-geometry energy uses
+//              the closed form with a 2 m elevation deadband. See
+//              bicycling-energy-model/notas.md (v2).
+const VERSION  = "v44";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

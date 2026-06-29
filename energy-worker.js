@@ -1,8 +1,21 @@
 // energy-worker.js — runs Dijkstra in a Web Worker so the UI stays responsive.
 //
-// Cost model per directed edge u -> v, dh = h_v - h_u:
-//   if dh >= 0: cost = alpha * dist + beta * dh
-//   else:       cost = max(0, alpha * dist - eta * beta * |dh|)
+// Cost model per directed edge u -> v, dh = h_v - h_u (the v2 leg-energy model
+// from bicycling-energy-model/notas.md, per-edge realisation — see v2Edge()).
+// The engine is parameterised by a `cost` bundle (physics folded once in app.js
+// and shipped identically to this worker AND the Rust backend, so they stay
+// bit-parity):
+//   cost = { aRoll, aAero, beta, climbThr, abRatio, epsOffset }
+//     aRoll  = m·g·Crr / k_eff           (J per ground metre, always)
+//     aAero  = ½·ρ·CdA·v_f² / k_eff       (J per ground metre, only OFF climbs)
+//     beta   = m·g / k_eff               (J per metre of climb)
+//     climbThr = climb-grade threshold   (grade ≥ this ⇒ drop aero, e.g. 0.02)
+//     abRatio  = Crr + ½ρCdA·v_f²/(m·g)  (flat-resistance grade, = α/β)
+//     epsOffset = 0.13                   (empirical descent-recovery offset)
+// Per directed edge (dist = ground length, dh = signed rise):
+//   dh ≥ 0: aRoll·dist + (grade<climbThr ? aAero·dist : 0) + beta·dh
+//   dh < 0: max(0, aRoll·dist + aAero·dist − ε·beta·|dh|),
+//           ε = clamp₀₁(min(1, abRatio·dist/|dh|) − epsOffset)
 //
 // Modes: "from" | "to" | "round"
 // Always returns a Float32Array of energies (Infinity for unreachable).
@@ -69,6 +82,25 @@ function heapRemoveTop(h) {
   pl[i] = movedV;
 }
 
+// ------- v2 per-edge leg-energy cost -------
+// THE single cost function — every engine (dijkstra, densityField, astar, the
+// layered-DP, portals) routes through it, and backend/src/main.rs::v2_edge is a
+// byte-identical port (same operation order so test-backend.mjs stays parity).
+// `dist` = ground length (m), `dh` = signed rise (m). c = the cost bundle.
+function v2Edge(dist, dh, c) {
+  if (dh >= 0) {
+    const aero = (dh < c.climbThr * dist) ? c.aAero * dist : 0;
+    return c.aRoll * dist + aero + c.beta * dh;
+  }
+  const ndh = -dh;
+  let eps = c.abRatio * dist / ndh;
+  if (eps > 1) eps = 1;
+  eps -= c.epsOffset;
+  if (eps < 0) eps = 0;
+  const e = c.aRoll * dist + c.aAero * dist - eps * c.beta * ndh;
+  return e < 0 ? 0 : e;
+}
+
 // ------- Dijkstra -------
 // height: Float32Array of length H*W (row-major)
 // mask:   Uint8Array of length H*W, 1 = passable
@@ -100,13 +132,9 @@ function heapRemoveTop(h) {
 // "no mapped ele" → fall back to the DEM height at the abutment cell, so a pull
 // without ele is byte-identical to before. Both engines (this + Rust build_portals)
 // must apply the SAME fallback for parity.
-function buildPortalAdj(portalU, portalV, portalLenM, portalHU, portalHV, height, mask, alpha, beta, eta) {
+function buildPortalAdj(portalU, portalV, portalLenM, portalHU, portalHV, height, mask, costc) {
   if (!portalU || !portalU.length) return null;
-  const cost = (lenM, dh) => {
-    if (dh >= 0) return alpha * lenM + beta * dh;
-    const e = alpha * lenM - eta * beta * (-dh);
-    return e < 0 ? 0 : e;
-  };
+  const cost = (lenM, dh) => v2Edge(lenM, dh, costc);
   const adj = new Map();
   const add = (a, b, fwd, bwd) => {
     let arr = adj.get(a);
@@ -130,7 +158,7 @@ function dijkstra(opts) {
   const {
     height, mask, H, W,
     seedR, seedC,
-    alpha, beta, eta,
+    cost,
     dx, dy,
     reverse, trackParents,
     wantPasses,
@@ -238,13 +266,7 @@ function dijkstra(opts) {
       const dh = reverse ? hHere - hNbr : hNbr - hHere;
       const dist = dists[k];
 
-      let edge;
-      if (dh >= 0) {
-        edge = alpha * dist + beta * dh;
-      } else {
-        edge = alpha * dist - eta * beta * (-dh);
-        if (edge < 0) edge = 0;
-      }
+      let edge = v2Edge(dist, dh, cost);
 
       // Reverse the optimisation by inverting against the global cap.
       if (maximize) {
@@ -338,7 +360,7 @@ function subtreePasses(parents, order, orderLen, N, include) {
 function densityField(opts) {
   const {
     height, mask, H, W, refPoints, dmode,
-    alpha, beta, eta, dx, dy,
+    cost, dx, dy,
     eMax = 0, maximize = false, maxEdgeCost = 0, eMaxTotalCap = 0,
     portalAdj = null, // bridge portal edges: Map cell → [{ to, fwd, bwd }]
     onProgress = null,
@@ -360,11 +382,6 @@ function densityField(opts) {
   const dists = new Float64Array([diag, dy, diag, dx, dx, diag, dy, diag]);
   const dIdx = new Int32Array(8);
   for (let k = 0; k < 8; k++) dIdx[k] = drs[k] * W + dcs[k];
-  // Per-edge constants folded once (the inner loop runs ~8·explored·refs
-  // times, so even one fewer multiply per edge matters): adist[k] is the
-  // flat cost of edge k, eb the downhill-recovery coefficient.
-  const adist = new Float64Array(8); for (let k = 0; k < 8; k++) adist[k] = alpha * dists[k];
-  const eb = eta * beta;
 
   // `density` and the `passes` scratch are Float32 (not Float64): subtree
   // counts are exact integers up to 2^24, and density values are exact
@@ -468,9 +485,7 @@ function densityField(opts) {
         else { const nr = r + drs[k], nc = c + dcs[k]; if (nr < 0 || nr >= H || nc < 0 || nc >= W) continue; nIdx = nr * W + nc; }
         if (!mask[nIdx] || settledA[nIdx]) continue;
         const dh = reverse ? hHere - height[nIdx] : height[nIdx] - hHere;
-        let edge;
-        if (dh >= 0) edge = adist[k] + beta * dh;
-        else { edge = adist[k] - eb * (-dh); if (edge < 0) edge = 0; }
+        let edge = v2Edge(dists[k], dh, cost);
         if (maximize) { edge = maxEdgeCost - edge; if (edge < 0) edge = 0; }
         const t = g + edge;
         if (eMax > 0 && t > eMax) continue;
@@ -538,20 +553,20 @@ function densityField(opts) {
 }
 
 // ------- A* with iterative-penalization for top-N routes -------
-// Single shortest path from `start` to `goal` under the asymmetric cost
-// model, with a per-cell penalty multiplier on the alpha*dist component:
+// Single shortest path from `start` to `goal` under the v2 cost model (v2Edge),
+// with a per-cell penalty multiplier on the distance-cost component:
 //   mult = penalty ^ usedCount[v];
-//   edge += (mult - 1) * alpha * dist
+//   edge += (mult - 1) * (aRoll + aAero) * dist
 // Penalty applies to the destination cell of each edge. The gravitational
 // (beta * dh) term is NOT penalized — climb is unavoidable.
 //
-// Heuristic: alpha * straight-line + beta * max(0, h_goal - h_here).
+// Heuristic: aRoll * straight-line + beta * max(0, h_goal - h_here).
 // Admissible because both bounds are required by any feasible path.
 function astar(opts) {
   const {
     height, mask, H, W,
     startR, startC, goalR, goalC,
-    alpha, beta, eta,
+    cost,
     dx, dy,
     penalty, usedCount,
     repulsionMode = "per-cell",   // "per-cell" | "linear" | "square"
@@ -589,6 +604,8 @@ function astar(opts) {
   // inverted cost (it would be an upper bound on the remaining path,
   // which depends on path length). Falling back to h=0 makes A* behave
   // as Dijkstra — slower, but correctness is preserved.
+  // Rolling-only distance term (aRoll, the minimum per-distance edge cost — climbing
+  // edges carry no aero) keeps the heuristic a lower bound, as the v1 `alpha` did.
   const heuristic = maximize ? (() => 0) : (idx) => {
     const r = (idx / W) | 0;
     const c = idx - r * W;
@@ -596,7 +613,7 @@ function astar(opts) {
     const dc = (c - goalC) * dx;
     const straight = Math.hypot(dr, dc);
     const climb = Math.max(0, hGoal - height[idx]);
-    return alpha * straight + beta * climb;
+    return cost.aRoll * straight + cost.beta * climb;
   };
 
   E[startIdx] = 0;
@@ -641,12 +658,7 @@ function astar(opts) {
       const dh = hNbr - hHere;
       const dist = dists[k];
 
-      let edge;
-      if (dh >= 0) edge = alpha * dist + beta * dh;
-      else {
-        edge = alpha * dist - eta * beta * (-dh);
-        if (edge < 0) edge = 0;
-      }
+      let edge = v2Edge(dist, dh, cost);
 
       // Reverse-optimisation: invert the base cost before the repulsion
       // penalty is layered on. The penalty itself still ADDS to the
@@ -657,28 +669,31 @@ function astar(opts) {
         if (edge < 0) edge = 0;
       }
 
-      // Apply the repulsion penalty. Three modes:
-      //   per-cell:  multiplier = penalty^used_count[v], applied to alpha*dist.
+      // Apply the repulsion penalty. It scales the distance-cost component
+      // `distCost` (= (aRoll+aAero)·dist, the v2 flat-resistance distance term,
+      // the analog of v1's `alpha·dist`). Three modes:
+      //   per-cell:  multiplier = penalty^used_count[v], applied to distCost.
       //              Sharp edges; only cells you've already traversed are
       //              expensive. Same as the QGIS plugin.
-      //   linear:    extra cost = (penalty / (d + 1)) * alpha * dist, where d
+      //   linear:    extra cost = (penalty / (d + 1)) * distCost, where d
       //              is the cell's Euclidean distance (in cells) to the
       //              nearest previously-used cell. Soft 1/r decay; pushes
       //              the route away from prior corridors even where they
       //              don't directly overlap.
-      //   square:    extra cost = (penalty / (d² + 1)) * alpha * dist —
+      //   square:    extra cost = (penalty / (d² + 1)) * distCost —
       //              same idea but with 1/r² (point-charge-like) falloff.
+      const distCost = (cost.aRoll + cost.aAero) * dist;
       if (repulsionMode === "per-cell") {
         const used = usedCount[nIdx] | 0;
         if (used > 0) {
           const mult = Math.pow(penalty, used);
-          edge += (mult - 1) * alpha * dist;
+          edge += (mult - 1) * distCost;
         }
       } else if (distUsed) {
         const d = distUsed[nIdx];
         if (Number.isFinite(d)) {
           const denom = repulsionMode === "square" ? d * d + 1 : d + 1;
-          edge += (penalty / denom) * alpha * dist;
+          edge += (penalty / denom) * distCost;
         }
       }
 
@@ -967,7 +982,7 @@ function maxCostPathOfLength(opts) {
   const {
     height, mask, H, W,
     startR, startC, goalR, goalC,
-    alpha, beta, eta, dx, dy,
+    cost, dx, dy,
     L,
     progressBase = 0,
     progressScale = 1,
@@ -1030,15 +1045,10 @@ function maxCostPathOfLength(opts) {
           const pVal = prev[n];
           if (!Number.isFinite(pVal)) continue;
 
-          // Same cost model as Dijkstra/A*: asymmetric uphill/downhill.
+          // Same cost model as Dijkstra/A*: the v2 per-edge leg energy.
           const dh = hv - height[n];
           const dist = dists[k];
-          let edge;
-          if (dh >= 0) edge = alpha * dist + beta * dh;
-          else {
-            edge = alpha * dist - eta * beta * (-dh);
-            if (edge < 0) edge = 0;
-          }
+          const edge = v2Edge(dist, dh, cost);
           const cand = pVal + edge;
           if (cand > bestVal) {
             bestVal = cand;
@@ -1187,7 +1197,7 @@ self.onmessage = (ev) => {
   // one-time allocation (see app.js startCalibrationProbe).
   if (msg.kind === "probe") {
     try {
-      const { height, mask, H, W, dx, dy, alpha, beta, eta, refPoints, maxSettled } = msg;
+      const { height, mask, H, W, dx, dy, cost, refPoints, maxSettled } = msg;
       const N = H * W;
       const tA = performance.now();
       // Mirror densityField's non-round scratch set so the measured alloc
@@ -1211,7 +1221,7 @@ self.onmessage = (ev) => {
       const t0 = performance.now();
       densityField({
         height, mask, H, W, refPoints, dmode: "from",
-        alpha, beta, eta, dx, dy, eMax: 0, maxSettled,
+        cost, dx, dy, eMax: 0, maxSettled,
         maximize: false, maxEdgeCost: 0, eMaxTotalCap: 0,
         onExplored: (len, budgetReached) => { exploredTotal += len; budgetReachedSum += budgetReached; },
       });
@@ -1274,7 +1284,7 @@ self.onmessage = (ev) => {
     seedR, seedC,
     goalR, goalC,                                        // optional, may be -1 / -1
     mode,                                                 // "from" | "to" | "round"
-    alpha, beta, eta,
+    cost,                                                 // v2 cost bundle (see v2Edge)
     wantPasses = false,                                  // route-density toggle
     wantTopN = false,                                    // top-N routes toggle
     nRoutes = 1,                                         // number of top-N iterations
@@ -1330,8 +1340,9 @@ self.onmessage = (ev) => {
     const diag = Math.hypot(dx, dy);
     // 1.001 buffer so even the absolute worst-case original edge cost
     // can't push the inverted value to zero (which would make the cell
-    // free and degenerate the search).
-    maxEdgeCost = (alpha * diag + beta * Math.max(dh, 1e-6)) * 1.001;
+    // free and degenerate the search). Worst per-edge cost = rolling + flat
+    // aero over the diagonal + the full climb term.
+    maxEdgeCost = ((cost.aRoll + cost.aAero) * diag + cost.beta * Math.max(dh, 1e-6)) * 1.001;
   }
 
   // When a network mask is supplied, Dijkstra runs on the AND of the DEM
@@ -1351,7 +1362,7 @@ self.onmessage = (ev) => {
   // grid edge, so a long deck cost would invert to a clamped-0 "free" max-cost
   // shortcut (degenerate). Mirror the backend (handle_density) and the A*/DP
   // exclusion. Bridges + "maximize energy" isn't a meaningful combination anyway.
-  const portalAdj = maximize ? null : buildPortalAdj(msg.portalU, msg.portalV, msg.portalLenM, msg.portalHU, msg.portalHV, height, effMask, alpha, beta, eta);
+  const portalAdj = maximize ? null : buildPortalAdj(msg.portalU, msg.portalV, msg.portalLenM, msg.portalHU, msg.portalHV, height, effMask, cost);
 
   let energy;
   let passes = null;
@@ -1391,7 +1402,7 @@ self.onmessage = (ev) => {
       const { density, energySum, energyCount } = densityField({
         height, mask: effMask, H, W,
         refPoints, dmode,
-        alpha, beta, eta, dx, dy,
+        cost, dx, dy,
         eMax, maximize, maxEdgeCost, eMaxTotalCap,
         portalAdj,
         onProgress: (frac) => postMessage({ kind: "progress", progress: frac }),
@@ -1430,7 +1441,7 @@ self.onmessage = (ev) => {
       const r = dijkstra({
         height, mask: effMask, H, W,
         seedR, seedC,
-        alpha, beta, eta, dx, dy,
+        cost, dx, dy,
         reverse: false, trackParents: wantPath,
         wantPasses, eMax,
         maximize, maxEdgeCost, portalAdj,
@@ -1445,7 +1456,7 @@ self.onmessage = (ev) => {
       const r = dijkstra({
         height, mask: effMask, H, W,
         seedR, seedC,
-        alpha, beta, eta, dx, dy,
+        cost, dx, dy,
         reverse: true, trackParents: wantPath,
         wantPasses, eMax,
         maximize, maxEdgeCost, portalAdj,
@@ -1464,7 +1475,7 @@ self.onmessage = (ev) => {
       const f = dijkstra({
         height, mask: effMask, H, W,
         seedR, seedC,
-        alpha, beta, eta, dx, dy,
+        cost, dx, dy,
         reverse: false, trackParents: wantPath,
         wantTree: wantPasses, eMax,
         maximize, maxEdgeCost, portalAdj,
@@ -1472,7 +1483,7 @@ self.onmessage = (ev) => {
       const b = dijkstra({
         height, mask: effMask, H, W,
         seedR, seedC,
-        alpha, beta, eta, dx, dy,
+        cost, dx, dy,
         reverse: true, trackParents: false,
         wantTree: wantPasses, eMax,
         maximize, maxEdgeCost, portalAdj,
@@ -1527,7 +1538,7 @@ self.onmessage = (ev) => {
           height, mask: effMask, H, W,
           startR: seedR, startC: seedC,
           goalR, goalC,
-          alpha, beta, eta, dx, dy,
+          cost, dx, dy,
           penalty: pen, usedCount,
           repulsionMode, distUsed,
           eMax,
@@ -1568,7 +1579,7 @@ self.onmessage = (ev) => {
         height, mask: effMask, H, W,
         startR: seedR, startC: seedC,
         goalR, goalC,
-        alpha, beta, eta, dx, dy,
+        cost, dx, dy,
         L: maximizeLength,
       });
       // Always log the DP outcome to the console so it's clear whether the
