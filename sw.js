@@ -379,7 +379,11 @@
 //              flow was faint and dropped by the passes-overlay downsample on big
 //              DEMs → a gap along the bridge. The stamp is now dilated by the
 //              render stride so it always lands on a sampled cell. Render-only.
-const VERSION  = "v45";
+//   v45 → v46: Two MTPI (multi-scale topographic position index) basemaps in the
+//              basemap dropdown — Pindorama 90 m (COP90, South America, native z10)
+//              and Bacia do Paraná 30 m (native z12). XYZ tiles from
+//              telhas.pedalhidrografi.co; maxNativeZoom over-scales past native.
+const VERSION  = "v46";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

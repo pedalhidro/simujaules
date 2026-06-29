@@ -383,6 +383,8 @@ const STRINGS = {
   "basemap.white":       { pt: "sem mapa base (tudo branco)", en: "no basemap (all white)" },
   "basemap.gray":        { pt: "sem mapa base (tudo cinza)", en: "no basemap (all gray)" },
   "basemap.satellite":   { pt: "Satélite (Esri)", en: "Satellite (Esri)" },
+  "basemap.mtpi_pindorama": { pt: "MTPI Pindorama 90m", en: "MTPI Pindorama 90m" },
+  "basemap.mtpi_parana": { pt: "MTPI Bacia do Paraná 30m", en: "MTPI Bacia do Paraná 30m" },
   "order.open":          { pt: "Controle de camadas…", en: "Layer control…" },
   "order.title":         { pt: "Controle de camadas", en: "Layer control" },
   "layer.ctrl_open":     { pt: "Controle de camadas", en: "Layer control" },
@@ -1733,6 +1735,17 @@ const BASEMAPS = {
   "esri-satellite": {
     url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     options: { attribution: "© Esri, Maxar, Earthstar Geographics", maxZoom: 19 },
+  },
+  // MTPI (multi-scale topographic position index) rasters from pedalhidrografi.co.
+  // Native tiles cap at z10 (Pindorama/COP90 90 m, South-America-wide) and z12
+  // (Bacia do Paraná 30 m); maxNativeZoom over-scales past that instead of 404ing.
+  "mtpi-pindorama": {
+    url: "https://telhas.pedalhidrografi.co/mtpi_cop90_sa_full/{z}/{x}/{y}.png",
+    options: { attribution: "MTPI COP90 © pedalhidrografi.co", maxNativeZoom: 10, maxZoom: 19 },
+  },
+  "mtpi-parana": {
+    url: "https://telhas.pedalhidrografi.co/mtpi_bacia_parana_30/{z}/{x}/{y}.png",
+    options: { attribution: "MTPI Bacia do Paraná 30 m © pedalhidrografi.co", maxNativeZoom: 12, maxZoom: 19 },
   },
   "none-black": { color: "#000000" },
   "none-white": { color: "#ffffff" },

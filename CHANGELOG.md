@@ -9,6 +9,14 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v46 — 2026-06-29
+
+Two **MTPI** (multi-scale topographic position index) basemaps in the basemap
+dropdown — **Pindorama 90 m** (COP90, South-America-wide, native zoom 10) and
+**Bacia do Paraná 30 m** (native zoom 12) — served as XYZ tiles from
+`telhas.pedalhidrografi.co`. `maxNativeZoom` over-scales past native instead of
+404ing.
+
 ## v45 — 2026-06-29
 
 Bridge/tunnel **deck passes** read as a continuous line again. A bridge deck is a
