@@ -28,13 +28,14 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   browser-only — the backend produces no routes.
 - `sw.js` — service worker (precache + runtime cache). `index.html`,
   `manifest.webmanifest`, `icons/` are the PWA shell.
-- `deploy.sh` — stages and rsyncs to `gs://telhas/simujoules` (GCS + Cloud
-  CDN). Only explicitly listed files ship; backend/ and tests never deploy.
+- `deploy.sh` — stages and rsyncs to `gs://simujaules`, served at
+  `simujaules.pedalhidrografi.co` behind Cloudflare (cache invalidation is a
+  CF purge, not a Cloud CDN invalidation). Only explicitly listed files ship;
+  backend/ and tests never deploy.
 - `test-worker-pool.mjs` — run with `node`; self-contained worker
   regression test (invariants + pooled-density ≡ single-run equivalence).
 - `backend/test-backend.mjs` — starts the release binary and compares its
-  output against `energy-worker.js`. (`test-features.js` / `test-worker.js`
-  are legacy, depend on a missing `/tmp/dem.bin`, and assert nothing.)
+  output against `energy-worker.js`.
 
 ## Compute architecture
 
@@ -123,9 +124,13 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 - The backend bounds concurrent rayon slices by a memory budget
   (auto-detected, or `SIMU_MAX_MEM_GB` / `--max-mem-gb` / `RAYON_NUM_THREADS`)
   so high ref counts on huge DEMs don't OOM — fewer slices just run more refs
-  serially (output identical). Its `Scratch.passes` is f32 (parity-safe:
-  exact integers widen to the f64 `Acc`); do NOT make `Acc` f32 (breaks the
-  `maxD < 1e-15` parity test).
+  serially (output identical). Its `Scratch.passes` is f32 for DENSITY only
+  (parity-safe: it matches the JS `densityField`'s Float32 passes, and exact
+  integers widen to the f64 `Acc`); do NOT make `Acc` f32 (breaks the
+  `maxD < 1e-15` parity test). `/single` passes are accumulated in f64
+  (`subtree_passes_f64`) and shipped as f64 on the wire — the JS single-source
+  branch returns Float64Array (counts exceed 2^24 on big DEMs); `/density`'s
+  wire format is unchanged.
 - Multi-reference density does NOT go through `dijkstra()`: it uses the
   dedicated `densityField()` engine (one reused scratch set, targeted
   reset/accumulate over only the explored cells, and an exact monotone
@@ -171,6 +176,7 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 node test-worker-pool.mjs                  # worker regression suite
 node test-water-raster.mjs                 # OSM water-mask rasterisation (areas/sea/rivers)
 node census/test-census-sampler.mjs        # in-browser census sampler helpers (mirrors app.js)
+node census/test-census-density.mjs        # census density harness end-to-end (needs npm install in census/)
 cd backend && cargo build --release && node test-backend.mjs
 ```
 

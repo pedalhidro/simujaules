@@ -9,6 +9,8 @@
 // Parity notes (mirrors app.js exactly):
 //   - density workers receive dx/dy = dxM/dyM (METRES) for the cost model
 //     (app.js baseMsg, ~app.js:2624);
+//   - the worker takes a v2 `cost` bundle derived from the physics inputs —
+//     deriveCost() below is the hand-kept mirror of app.js readCost();
 //   - exported GeoTIFFs use NATIVE dx/dy + originX/originY (degrees) for
 //     georeferencing (tiffMetadataForDem, ~app.js:4361);
 //   - a single non-partial density message returns {energy, passes} with both
@@ -34,6 +36,46 @@ export function loadWorker(enginePath = ENGINE) {
     const err = messages.find((m) => m.kind === "error");
     if (err) throw new Error("worker error: " + err.message);
     return messages.find((m) => m.kind === "done");
+  };
+}
+
+// ---- v2 cost bundle: mirror of app.js flatEqSpeed() + readCost() ------------
+// PURE MIRRORS of app.js's flatEqSpeed()/readCost() (physics inputs → kJ-based
+// v2 cost bundle {aRoll, aAero, beta, climbThr, abRatio, epsOffset}), cribbed
+// from test-energy-v2.mjs's deriveCost — the repo-root mirror of the same two
+// originals. app.js is a browser module and can't be imported here; keep all
+// three in step by hand (same rule as the test-water-raster.mjs mirrors).
+// Clamps and defaults match readCost exactly (the app's UI defaults).
+export function flatEqSpeed(P, m, crr, cda, rho, keff) {
+  const a = crr * m * 9.81, b = 0.5 * rho * cda;
+  let lo = 0, hi = 40;
+  for (let k = 0; k < 60; k++) {
+    const v = (lo + hi) / 2;
+    const wheel = (a + b * v * v) * v;
+    if (wheel < keff * P) lo = v; else hi = v;
+  }
+  return (lo + hi) / 2;
+}
+export function deriveCost(p = {}) {
+  const num = (v, dflt) => (Number.isFinite(v) ? v : dflt);
+  const m    = Math.max(1, num(p.mass, 75));
+  const crr  = Math.max(0, num(p.crr, 0.008));
+  const cda  = Math.max(0, num(p.cda, 0.45));
+  const rho  = Math.max(0, num(p.rho, 1.1));    // ~750 m asl (São Paulo)
+  const keff = Math.min(1, Math.max(0.1, num(p.keff, 0.97)));
+  const pFlat = Math.max(1, num(p.pFlat, 80));  // W — rider power on the flat
+  const vf   = flatEqSpeed(pFlat, m, crr, cda, rho, keff);  // m/s, derived
+  const climbThr = Math.max(0, num(p.climbThrPct, 2)) / 100;  // % → grade
+  const kSmooth = Math.min(1, Math.max(0, num(p.kSmooth, 1)));
+  const g = 9.81, mg = m * g, KJ = 1000;
+  const aeroCoef = 0.5 * rho * cda * vf * vf;               // ½ρCdA·v_f² (J/ground-m, pre-/keff)
+  return {
+    aRoll: mg * crr / keff / KJ,
+    aAero: aeroCoef / keff / KJ,
+    beta: mg * kSmooth / keff / KJ,
+    climbThr,
+    abRatio: crr + aeroCoef / mg,   // un-smoothed flat-resistance grade (for ε); k_eff & kJ scale cancel
+    epsOffset: 0.13,
   };
 }
 
@@ -128,7 +170,7 @@ export function runDensity(dem, refs, params, runFn = loadWorker()) {
     seedR: refs[0]?.[0] ?? -1, seedC: refs[0]?.[1] ?? -1,
     goalR: -1, goalC: -1,
     mode: params.mode, densityMode: params.mode,
-    alpha: params.alpha, beta: params.beta, eta: params.eta,
+    cost: deriveCost(params),                 // v2 bundle, folded once like readCost
     eMax: params.eMax || 0, eMaxMode: "leg",
     wantDensity: true,
     refPoints: refs,
@@ -196,8 +238,16 @@ export function buildMetadata(dem, refs, params, result) {
     },
     params: {
       mode: params.mode,
-      alpha: params.alpha, beta: params.beta, eta: params.eta,
+      // v2 physics inputs, same property names app.js's buildMetadata()
+      // writes so the app's bundle restore re-fills the UI knobs.
+      // The cost bundle is re-derived from these on import (see deriveCost);
+      // fall back to the same defaults deriveCost used for missing keys.
+      mass: params.mass ?? 75, crr: params.crr ?? 0.008, cda: params.cda ?? 0.45,
+      rho: params.rho ?? 1.1, keff: params.keff ?? 0.97, pFlat: params.pFlat ?? 80,
+      kSmooth: params.kSmooth ?? 1, deadbandM: params.deadbandM ?? 2,
+      climbThr: (params.climbThrPct ?? 2) / 100,   // bundle stores grade; CLI takes %
       eMax: params.eMax || 0,
+      eMaxMode: "leg",
       src: null, dst: null,
       wantPasses: false, wantTopN: false, nRoutes: 3, penalty: 2,
       repulsionMode: "per-cell",
@@ -238,8 +288,17 @@ export async function writeBundle(outPath, dem, md, result) {
 }
 
 // ---- CLI -------------------------------------------------------------------
+// Cost knobs are the app's v2 PHYSICS inputs (defaults = the app's UI
+// defaults); the folded {aRoll, aAero, beta, …} bundle is derived by
+// deriveCost. deadbandM only rides in the metadata (the app's route
+// evaluator uses it; the density engine doesn't).
 function parseArgs(argv) {
-  const a = { mode: "from", alpha: 1, beta: 30, eta: 0.3, eMax: 0, out: "simujoules-census.zip" };
+  const a = {
+    mode: "from",
+    mass: 75, crr: 0.008, cda: 0.45, rho: 1.1, keff: 0.97, pFlat: 80,
+    climbThrPct: 2, kSmooth: 1, deadbandM: 2,
+    eMax: 0, out: "simujoules-census.zip",
+  };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const next = () => argv[++i];
@@ -247,12 +306,20 @@ function parseArgs(argv) {
       case "--dem": a.dem = next(); break;
       case "--points": a.points = next(); break;
       case "--mode": a.mode = next(); break;          // from | to | round
-      case "--alpha": a.alpha = parseFloat(next()); break;
-      case "--beta": a.beta = parseFloat(next()); break;
-      case "--eta": a.eta = parseFloat(next()); break;
+      case "--mass": a.mass = parseFloat(next()); break;        // rider+bike kg
+      case "--crr": a.crr = parseFloat(next()); break;          // rolling resistance
+      case "--cda": a.cda = parseFloat(next()); break;          // drag area m²
+      case "--rho": a.rho = parseFloat(next()); break;          // air density kg/m³
+      case "--keff": a.keff = parseFloat(next()); break;        // drivetrain eff. 0.1–1
+      case "--pflat": a.pFlat = parseFloat(next()); break;      // W on the flat
+      case "--climb-thr": a.climbThrPct = parseFloat(next()); break;  // % grade
+      case "--ksmooth": a.kSmooth = parseFloat(next()); break;  // 0–1 gravity smoothing
       case "--emax": a.eMax = parseFloat(next()); break;
       case "-o": case "--out": a.out = next(); break;
       case "-h": case "--help": a.help = true; break;
+      case "--alpha": case "--beta": case "--eta":
+        throw new Error(`${k} is gone (v1 cost model): use the physical knobs ` +
+          "--mass/--crr/--cda/--rho/--keff/--pflat/--climb-thr/--ksmooth instead");
       default: throw new Error(`unknown arg: ${k}`);
     }
   }
@@ -261,7 +328,11 @@ function parseArgs(argv) {
 
 const USAGE =
   "Usage: node census-density.mjs --dem dem.tif --points points.geojson \\\n" +
-  "         [--mode from] [--alpha 1] [--beta 30] [--eta 0.3] [--emax 0] [-o out.zip]";
+  "         [--mode from] [--mass 75] [--crr 0.008] [--cda 0.45] [--rho 1.1] \\\n" +
+  "         [--keff 0.97] [--pflat 80] [--climb-thr 2] [--ksmooth 1] \\\n" +
+  "         [--emax 0] [-o out.zip]\n" +
+  "Cost knobs are the app's v2 physics inputs (defaults shown = app defaults);\n" +
+  "the v1 --alpha/--beta/--eta flags were removed with the v2 cost model.";
 
 async function main() {
   const a = parseArgs(process.argv.slice(2));

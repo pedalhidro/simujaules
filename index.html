@@ -52,7 +52,7 @@
     "image": "https://simujaules.pedalhidrografi.co/icons/icon-512.png",
     "publisher": { "@type": "Organization", "name": "pedalhidrografi.co", "url": "https://pedalhidrografi.co/" },
     "featureList": [
-      "Asymmetric climb/descent energy cost model (alpha per flat metre, beta per metre climbed, eta downhill recovery)",
+      "Asymmetric climb/descent energy cost model derived from physical rider/bike parameters (mass, rolling resistance, drag area, air density, drivetrain efficiency, cruise power), with grade-dependent descent recovery",
       "Energy fields from/to a point or round trip, with per-leg or total energy budgets",
       "Passes count: natural corridor detection via shortest-path-tree subtree sizes",
       "Top-N alternative routes with repulsion penalties",
@@ -1554,6 +1554,24 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v49</strong> — 2026-07-02<br/>
+              <strong>Full-repo review fix batch</strong> (see
+              <code>docs/review-2026-07-01.md</code>). Top-N: an admissible A*
+              heuristic (the old one overcharged gentle descents, so route #1 could
+              cost more than the field's own optimum) and correct route direction in
+              "até" mode. "Maximizar" no longer silently empties under an energy
+              budget. Graph mode: fixed a half-cell terrain/rasterisation/snapping
+              registration error, T-junctions now join the network, chained
+              bridge/tunnel decks flatten as one continuous span, and node snap
+              tolerance is capped at 15 m on coarse DEMs. Native backend: maximize
+              now matches the browser engine under a network constraint, and
+              <code>/single</code> passes are exact on very large DEMs. Hardened a
+              crafted-.gpkg XSS, bundle import now cancels an in-flight compute
+              first, and the compute-time estimate no longer sticks on
+              "estimating…" if calibration fails. Deploy no longer deletes the
+              cloud VM startup script; the service worker installs past the HTTP
+              cache and stops caching large DEM/GeoPackage files. i18n and
+              v1→v2 cost-model doc fixes; the offline census pipeline works again.</p>
               <p><strong>v48</strong> — 2026-06-29<br/>
               <strong>Comparação de rotas origem→destino.</strong> Com
               <em>“Comparar com cenário sem rede”</em> ligado, o seletor

@@ -7,27 +7,28 @@
 
 ## What it computes
 
-- **Energy field**: for every DEM cell, the minimum energy to ride from (or
-  to, or round trip via) an anchor point, via Dijkstra on an 8-connected
-  grid. The cost of moving between adjacent cells with height difference
-  Δh over ground distance d is:
-  - uphill/flat: `α·d + β·Δh`
-  - downhill: `max(0, α·d − η·β·|Δh|)`
-  - α = cost per flat metre, β = cost per metre climbed, η ∈ [0,1] =
-    fraction of climb energy recovered on descent. With the defaults
-    (α = 0.008, β = 1.0) one energy unit ≈ the energy to climb 1 m
-    (≈ 0.8–1 kJ of mechanical work for a ~85 kg rider + bike).
+- **Energy field**: for every DEM cell, the minimum energy (kJ) to ride from
+  (or to, or round trip via) an anchor point, via Dijkstra on an 8-connected
+  grid. The cost model (v2) folds physical inputs — rider+bike mass, Crr,
+  CdA, air density, drivetrain efficiency, cruise power on the flat, a
+  climb-grade threshold (~2%), smoothing — into per-edge coefficients:
+  uphill/flat costs `aRoll·d + aAero·d + β·Δh` (aero dropped at/above the
+  climb threshold; β = m·g/k_eff/1000 ≈ 0.76 kJ/m at defaults); downhill
+  costs `max(0, aRoll·d + aAero·d − ε·β·|Δh|)` with grade-dependent recovery
+  `ε = clamp01(min(1, abRatio·d/|Δh|) − 0.13)`.
 - **Passes count** ("natural corridors"): for each cell, how many optimal
   paths traverse it — the subtree size in the shortest-path tree. Highlights
   the terrain's natural highways. In round-trip mode only completable
   (within-budget) trajectories are counted.
 - **Top-N alternative routes** between two points, with per-cell / linear /
   quadratic repulsion penalties so alternatives genuinely diverge.
-- **Multi-reference density**: passes counts averaged over K reference
+- **Multi-reference density**: passes counts summed over K reference
   points (placed by clicking or sampled pseudo-randomly / quasi-randomly
-  via Sobol or Halton sequences), normalised to a density field. Computed
-  on a multi-core worker pool; an optional native Rust backend exists for
-  large runs (off by default).
+  via Sobol or Halton sequences), normalised to a density field —
+  magnitudes grow ~linearly with K, so compare runs only at matching K.
+  Reference points can also be census-population-weighted samples (IBGE
+  census sectors). Computed on a multi-core worker pool; an optional
+  native Rust backend exists for large runs (off by default).
 - **Energy budgets**: prune the search at a maximum energy; in round-trip
   mode the budget can cap each leg or the out-plus-back total.
 - **Maximize mode**: invert the optimisation to find the most expensive

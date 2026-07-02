@@ -68,11 +68,18 @@
   }
 
   // -------------------------------------------------------------- sampling ----
-  // Bilinear DEM elevation at fractional (r, c). Mask-aware: corners that are
-  // nodata (mask 0) are dropped from the weighted average; if all four are
-  // nodata we fall back to the floor cell's raw height (the network shouldn't
-  // sit on nodata, but we stay finite rather than poison the cost with NaN).
+  // Bilinear DEM elevation at fractional (r, c). REGISTRATION: app.js's
+  // fractional-cell convention puts cell (r, c)'s DEM value at the cell CENTRE
+  // (r + 0.5, c + 0.5) — integer coords are cell CORNERS (see app.js
+  // latLngToCellFrac / pixelToLatLng). So we shift by −0.5 into array space
+  // (where height[r*W+c] sits at integer (r, c)) before interpolating:
+  // sampling a cell centre returns exactly that cell's value, a corner the
+  // 4-neighbour average. Mask-aware: corners that are nodata (mask 0) are
+  // dropped from the weighted average; if all four are nodata we fall back to
+  // the floor cell's raw height (the network shouldn't sit on nodata, but we
+  // stay finite rather than poison the cost with NaN).
   function sampleHeight(height, mask, H, W, r, c) {
+    r -= 0.5; c -= 0.5; // fractional-cell → array space (values at cell centres)
     if (r < 0) r = 0; else if (r > H - 1) r = H - 1;
     if (c < 0) c = 0; else if (c > W - 1) c = W - 1;
     const r0 = Math.floor(r), c0 = Math.floor(c);
@@ -136,6 +143,95 @@
     return { t, u };
   }
 
+  // Phase C — deck CHAINS: OSM often splits one physical bridge into several
+  // consecutive ways, and per-way flattening V-dips the deck to the DEM at
+  // every shared joint (the per-way endpoints sample the ground UNDER the
+  // deck). So: group deck lines that share an endpoint (within snapTol) at the
+  // SAME layer into chains, and re-flatten every SIMPLE chain (a path — no
+  // 3+-way deck junction, no cycle; those fall back to per-way) as ONE deck:
+  // linear between the ground elevations at the chain's two OUTER endpoints,
+  // arc-length parameterised across the whole chain. Members keep their
+  // per-line { h0, h1, total } shape (h0/h1 become the chain line evaluated at
+  // the member's own ends, orientation-corrected), so the flattening in
+  // buildGraph's emit loop needs no change. Single-way decks are untouched.
+  function chainDeckFlattening(lines, lineMeta, deckOf, snapTol, height, mask, H, W) {
+    // Endpoint identity: the same quantisation nodeOf uses, PLUS the layer so
+    // decks at different levels never chain through a shared (x, y).
+    const keyOf = (li, p) => (lineMeta[li].layer || 0) + "|" + Math.round(p[0] / snapTol) + "|" + Math.round(p[1] / snapTol);
+    const ends = new Map(); // key -> [{ li, end }] (end 0 = first vertex, 1 = last)
+    const deckLis = [];
+    for (let li = 0; li < lines.length; li++) {
+      if (!deckOf[li]) continue;
+      deckLis.push(li);
+      const ln = lines[li];
+      for (const end of [0, 1]) {
+        const k = keyOf(li, ln[end === 0 ? 0 : ln.length - 1]);
+        let a = ends.get(k); if (!a) { a = []; ends.set(k, a); } a.push({ li, end });
+      }
+    }
+    if (deckLis.length < 2) return;
+    // Connected components over shared-endpoint adjacency.
+    const seen = new Set();
+    for (const li0 of deckLis) {
+      if (seen.has(li0)) continue;
+      const compLines = [], compKeys = new Set(), stack = [li0];
+      seen.add(li0);
+      while (stack.length) {
+        const li = stack.pop();
+        compLines.push(li);
+        const ln = lines[li];
+        for (const p of [ln[0], ln[ln.length - 1]]) {
+          const k = keyOf(li, p);
+          compKeys.add(k);
+          for (const o of ends.get(k)) if (!seen.has(o.li)) { seen.add(o.li); stack.push(o.li); }
+        }
+      }
+      if (compLines.length < 2) continue; // single way — today's behaviour
+      // Simple path ⇔ every endpoint has ≤2 incident deck ends AND there are
+      // exactly n+1 endpoints for n lines (a cycle has n). Otherwise per-way.
+      let simple = compKeys.size === compLines.length + 1;
+      let start = null;
+      for (const k of compKeys) {
+        const deg = ends.get(k).length;
+        if (deg > 2) { simple = false; break; }
+        if (deg === 1) start = k;
+      }
+      if (!simple || start === null) continue;
+      // Walk the chain from one degree-1 end, recording each member's
+      // orientation (forward = entered at its first vertex).
+      const walk = []; // { li, forward, len }
+      const used = new Set();
+      let cur = start;
+      while (true) {
+        const next = ends.get(cur).find((o) => !used.has(o.li));
+        if (!next) break;
+        used.add(next.li);
+        const ln = lines[next.li];
+        walk.push({ li: next.li, forward: next.end === 0, len: deckOf[next.li].total });
+        cur = keyOf(next.li, ln[next.end === 0 ? ln.length - 1 : 0]);
+      }
+      if (walk.length !== compLines.length) continue; // defensive: keep per-way
+      // Ground elevations at the chain's two OUTER endpoints (actual vertex
+      // coords of the terminal lines, not the quantised keys).
+      const first = walk[0], last = walk[walk.length - 1];
+      const pA = lines[first.li][first.forward ? 0 : lines[first.li].length - 1];
+      const pB = lines[last.li][last.forward ? lines[last.li].length - 1 : 0];
+      const gA = sampleHeight(height, mask, H, W, pA[0], pA[1]);
+      const gB = sampleHeight(height, mask, H, W, pB[0], pB[1]);
+      let total = 0; for (const w of walk) total += w.len;
+      if (!(total > 0)) total = 1;
+      // Rewrite each member's h0/h1 from its position along the chain.
+      let arc = 0;
+      for (const w of walk) {
+        const hIn = gA + (gB - gA) * (arc / total);
+        const hOut = gA + (gB - gA) * ((arc + w.len) / total);
+        const d = deckOf[w.li];
+        if (w.forward) { d.h0 = hIn; d.h1 = hOut; } else { d.h0 = hOut; d.h1 = hIn; }
+        arc += w.len;
+      }
+    }
+  }
+
   // Build the routable graph from network polylines (each line = array of
   // [r, c] or [r, c, z] fractional-cell vertices). junctionMode:
   //   "shared"   — edges connect only where lines share a snapped vertex.
@@ -170,6 +266,9 @@
         for (let k = 0; k + 1 < ln.length; k++) total += Math.hypot(ln[k + 1][0] - ln[k][0], ln[k + 1][1] - ln[k][1]);
         deckOf[li] = { h0, h1, total: total > 0 ? total : 1 };
       }
+      // Multi-way bridges: re-flatten simple same-layer deck chains end-to-end
+      // (see chainDeckFlattening) so shared joints don't V-dip to the ground.
+      chainDeckFlattening(lines, lineMeta, deckOf, snapTol, height, mask, H, W);
     }
 
     // Flatten polylines into segments [rA,cA,zA, rB,cB,zB, lineId]; segArc0[s]
@@ -246,6 +345,52 @@
             if (Number.isFinite(zA) && Number.isFinite(zB) && Math.abs(zA - zB) > zTol) continue;
           }
           splits[a].push(hit.t); splits[b].push(hit.u);
+        }
+      }
+      // T-JUNCTIONS: a line ENDPOINT resting on another line's segment
+      // INTERIOR is a junction too (non-noded .gpkg / hand-drawn networks),
+      // but segIntersect only finds PROPER crossings — the touch has u at 0/1
+      // and is skipped, silently splitting the network into components. For
+      // each polyline endpoint, find segments of OTHER lines passing within
+      // snapTol (candidates via the same bucket hash — the endpoint's 3×3
+      // neighbourhood covers the segments' own ±1 dilation) and split them at
+      // the perpendicular projection; the quantised node-merge (nodeOf) then
+      // unifies the endpoint with the cut.
+      for (let li = 0; li < lines.length; li++) {
+        const ln = lines[li];
+        if (ln.length < 2) continue;
+        for (const P of [ln[0], ln[ln.length - 1]]) {
+          const pr = P[0], pc = P[1], pz = P.length > 2 ? P[2] : NaN;
+          const rr = Math.floor(pr), cc = Math.floor(pc);
+          const cand = new Set();
+          for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+            const arr = buckets.get((rr + dr) + "|" + (cc + dc));
+            if (arr) for (const s of arr) cand.add(s);
+          }
+          for (const s of cand) {
+            const S = segs[s];
+            if (S[6] === li) continue;                      // same polyline
+            // Phase C: same suppression rule as the crossing scan — an
+            // endpoint touching across DIFFERENT layers (deck over street) is
+            // a vertical separation, not a junction.
+            if (lineMeta) {
+              const mA = lineMeta[li], mB = lineMeta[S[6]];
+              if ((mA?.deck || mB?.deck) && ((mA?.layer || 0) !== (mB?.layer || 0))) continue;
+            }
+            const dr1 = S[3] - S[0], dc1 = S[4] - S[1];
+            const len2 = dr1 * dr1 + dc1 * dc1;
+            if (len2 === 0) continue;                       // degenerate segment
+            const t = ((pr - S[0]) * dr1 + (pc - S[1]) * dc1) / len2;
+            if (t <= eps || t >= 1 - eps) continue;         // vertex touch → nodeOf merges already
+            const qr = S[0] + dr1 * t, qc = S[1] + dc1 * t;
+            const d2 = (pr - qr) * (pr - qr) + (pc - qc) * (pc - qc);
+            if (d2 > snapTol * snapTol) continue;
+            if (anyZ) {                                     // same z rule as crossings
+              const zS = S[2] + (S[5] - S[2]) * t;
+              if (Number.isFinite(pz) && Number.isFinite(zS) && Math.abs(pz - zS) > zTol) continue;
+            }
+            splits[s].push(t);
+          }
         }
       }
     }

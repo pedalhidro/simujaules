@@ -1,10 +1,18 @@
 // test-graph-engine.mjs — self-contained regression test for graph-engine.js.
 // Run: node test-graph-engine.mjs
 //
-// Covers: cost-model parity with the grid step, planarization in BOTH junction
-// modes (shared-endpoints vs also-at-crossings), per-edge passes accumulation,
-// and Dijkstra path reconstruction. No DEM file needed — synthetic grids.
+// Covers: cost-model parity with the grid step (including EXACT parity against
+// the real energy-worker.js v2Edge), DEM sampling registration (cell values at
+// cell CENTRES), planarization in BOTH junction modes (shared-endpoints vs
+// also-at-crossings, plus T-junction endpoint touches), per-edge passes
+// accumulation, Dijkstra path reconstruction, and deck (bridge/tunnel)
+// flattening incl. multi-way deck chains. No DEM file needed — synthetic grids.
 import GraphEngine from "./graph-engine.js";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 let failures = 0;
 const approx = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
@@ -14,6 +22,12 @@ function ok(name, cond, extra = "") { console.log(`${cond ? "  ok  " : "FAIL  "}
 function flatDem(H, W, h = 0, dxM = 10, dyM = 10) {
   return { height: new Float32Array(H * W).fill(h), mask: new Uint8Array(H * W).fill(1), H, W, dxM, dyM };
 }
+
+// COORDINATE REGISTRATION (see graph-engine.js sampleHeight): cell (r, c)'s
+// DEM value sits at the fractional cell CENTRE (r + 0.5, c + 0.5) — integer
+// coords are cell corners. All fixtures below use centre coords so "the line
+// runs over cell (r, c)" samples exactly height[r*W + c].
+const ctr = (r, c) => [r + 0.5, c + 0.5];
 
 // v2 cost bundle (see graph-engine.js stepCost). climbThr=0.05 so flat steps get
 // aero and the ±3/±5-per-10m grades count as climbs/descents. beta dominates the
@@ -28,7 +42,7 @@ const distStep = cost.aRoll + cost.aAero; // flat-step cost per ground metre (ro
   // Two adjacent cells, hA=0, hB=3 (uphill). One horizontal edge between them.
   const H = 1, W = 2;
   const dem = { height: new Float32Array([0, 3]), mask: new Uint8Array([1, 1]), H, W, dxM, dyM: 10 };
-  const lines = [[[0, 0], [0, 1]]];
+  const lines = [[ctr(0, 0), ctr(0, 1)]];
   const g = GraphEngine.buildGraph(lines, dem, { stepCells: 1, junctionMode: "shared" });
   const { costAB, costBA } = GraphEngine.directedCosts(g, { cost });
   const gridUp = GraphEngine.stepCost(dxM, 3, cost);   // +3/10 = 30% ≥ climbThr ⇒ no aero: aRoll*10 + beta*3
@@ -42,12 +56,26 @@ const distStep = cost.aRoll + cost.aAero; // flat-step cost per ground metre (ro
   ok("downhill v2 recovery applied", approx(gridDn, wantDn), `got ${gridDn} want ${wantDn}`);
 }
 
+// ---- 1b. sampling registration: cell values live at cell centres ------------
+// Regression for the half-cell shift: sampleHeight used to treat height[r*W+c]
+// as sitting at INTEGER (r, c), displacing every node height / edge profile /
+// deck endpoint by half a cell (and low-pass filtering the terrain).
+{
+  const dem = { height: new Float32Array([1, 2, 3, 4]), mask: new Uint8Array(4).fill(1), H: 2, W: 2, dxM: 10, dyM: 10 };
+  const s = (r, c) => GraphEngine.sampleHeight(dem.height, dem.mask, dem.H, dem.W, r, c);
+  ok("centre (0.5,0.5) samples cell (0,0) exactly", s(0.5, 0.5) === 1, `got ${s(0.5, 0.5)}`);
+  ok("centre (1.5,1.5) samples cell (1,1) exactly", s(1.5, 1.5) === 4, `got ${s(1.5, 1.5)}`);
+  ok("corner (1,1) is the 4-neighbour average", approx(s(1, 1), 2.5), `got ${s(1, 1)}`);
+  ok("outer corner (0,0) clamps to cell (0,0)", s(0, 0) === 1, `got ${s(0, 0)}`);
+  ok("edge midpoint (0.5,1) averages the top row", approx(s(0.5, 1), 1.5), `got ${s(0.5, 1)}`);
+}
+
 // ---- 2. planarization: X-crossing, no shared vertex -------------------------
 {
   const dem = flatDem(5, 5, 0);
   const lines = [
-    [[0, 0], [4, 4]], // main diagonal
-    [[0, 4], [4, 0]], // anti-diagonal — crosses the first at (2,2), no shared vtx
+    [ctr(0, 0), ctr(4, 4)], // main diagonal
+    [ctr(0, 4), ctr(4, 0)], // anti-diagonal — crosses the first at (2.5,2.5), no shared vtx
   ];
   const shared = GraphEngine.buildGraph(lines, dem, { junctionMode: "shared" });
   ok("shared: 4 nodes (endpoints only)", shared.nNodes === 4, `nNodes=${shared.nNodes}`);
@@ -58,25 +86,44 @@ const distStep = cost.aRoll + cost.aAero; // flat-step cost per ground metre (ro
   ok("crossings: 4 edges (split at center)", crossed.nEdges === 4, `nEdges=${crossed.nEdges}`);
 
   // Connectivity: shared mode leaves two components; crossings joins them.
-  const comps = (g) => {
-    const seen = new Uint8Array(g.nNodes); let c = 0;
-    for (let s = 0; s < g.nNodes; s++) {
-      if (seen[s]) continue; c++; const stack = [s]; seen[s] = 1;
-      while (stack.length) { const u = stack.pop(); for (let he = g.csrHead[u]; he < g.csrHead[u + 1]; he++) { const v = g.csrTarget[he]; if (!seen[v]) { seen[v] = 1; stack.push(v); } } }
-    }
-    return c;
-  };
-  ok("shared: 2 disconnected components", comps(shared) === 2, `comps=${comps(shared)}`);
-  ok("crossings: 1 connected component", comps(crossed) === 1, `comps=${comps(crossed)}`);
+  ok("shared: 2 disconnected components", graphComps(shared) === 2, `comps=${graphComps(shared)}`);
+  ok("crossings: 1 connected component", graphComps(crossed) === 1, `comps=${graphComps(crossed)}`);
+}
+
+// ---- 2b. crossings mode also junctions T-touches (endpoint on interior) -----
+// Regression: segIntersect only finds PROPER crossings (both params strictly
+// interior), so a line ENDPOINT resting on another line's segment interior —
+// the standard T-junction in non-noded .gpkg / hand-drawn networks — used to
+// create no junction and the network silently split into components.
+{
+  const dem = flatDem(5, 5, 0);
+  const lines = [
+    [ctr(0, 0), ctr(0, 4)], // through-street along row 0
+    [ctr(2, 2), ctr(0, 2)], // stub whose endpoint lands ON the street's interior
+  ];
+  const shared = GraphEngine.buildGraph(lines, dem, { junctionMode: "shared" });
+  ok("T: shared mode stays split (2 comps)", graphComps(shared) === 2, `comps=${graphComps(shared)}`);
+  const crossed = GraphEngine.buildGraph(lines, dem, { junctionMode: "crossings" });
+  ok("T: crossings mode connects (1 comp)", graphComps(crossed) === 1, `comps=${graphComps(crossed)}`);
+  ok("T: street split at the touch (4 nodes / 3 edges)", crossed.nNodes === 4 && crossed.nEdges === 3,
+     `nNodes=${crossed.nNodes} nEdges=${crossed.nEdges}`);
+  // A deck endpoint touching a DIFFERENT-layer street is a vertical
+  // separation (ramp end under a viaduct), not a junction — same suppression
+  // rule as the proper-crossing scan.
+  const over = GraphEngine.buildGraph(lines, dem, {
+    junctionMode: "crossings",
+    lineMeta: [{ deck: false, layer: 0 }, { deck: true, layer: 1 }],
+  });
+  ok("T: different-layer deck touch stays split", graphComps(over) === 2, `comps=${graphComps(over)}`);
 }
 
 // ---- 3. density passes follow edges (linear chain) --------------------------
 {
   const dem = flatDem(1, 4, 0);
-  const lines = [[[0, 0], [0, 1], [0, 2], [0, 3]]]; // 3 segments → edges 0,1,2
+  const lines = [[ctr(0, 0), ctr(0, 1), ctr(0, 2), ctr(0, 3)]]; // 3 segments → edges 0,1,2
   const g = GraphEngine.buildGraph(lines, dem, { junctionMode: "shared" });
   ok("chain: 4 nodes / 3 edges", g.nNodes === 4 && g.nEdges === 3);
-  const refNode = GraphEngine.nearestNode(g, 0, 0);
+  const refNode = GraphEngine.nearestNode(g, 0.5, 0.5);
   const res = GraphEngine.computeGraph(g, { mode: "density", densityMode: "from", cost, eMax: 0, refNodes: [refNode] });
   // Subtree sizes from the root: 3, 2, 1 along the chain.
   const passes = Array.from(res.edgePasses).sort((a, b) => b - a);
@@ -87,9 +134,9 @@ const distStep = cost.aRoll + cost.aAero; // flat-step cost per ground metre (ro
 // ---- 4. dijkstra path reconstruction + energy (flat chain) ------------------
 {
   const dxM = 10, dem = flatDem(1, 4, 0, dxM, 10);
-  const lines = [[[0, 0], [0, 1], [0, 2], [0, 3]]];
+  const lines = [[ctr(0, 0), ctr(0, 1), ctr(0, 2), ctr(0, 3)]];
   const g = GraphEngine.buildGraph(lines, dem, { junctionMode: "shared" });
-  const src = GraphEngine.nearestNode(g, 0, 0), dst = GraphEngine.nearestNode(g, 0, 3);
+  const src = GraphEngine.nearestNode(g, 0.5, 0.5), dst = GraphEngine.nearestNode(g, 0.5, 3.5);
   const res = GraphEngine.computeGraph(g, { mode: "from", cost, eMax: 0, srcNode: src, dstNode: dst, wantPath: true });
   ok("path reaches dst", !!res.path && res.path.nodes[0] === dst && res.path.nodes[res.path.nodes.length - 1] === src);
   ok("path length == 3 cells", approx(res.path.lengthM, 3 * dxM), `got ${res.path.lengthM}`);
@@ -99,11 +146,10 @@ const distStep = cost.aRoll + cost.aAero; // flat-step cost per ground metre (ro
 // ---- 5. budget prunes the search --------------------------------------------
 {
   const dxM = 10, dem = flatDem(1, 10, 0, dxM, 10);
-  const lines = [[Array.from({ length: 10 }, (_, c) => [0, c])][0]]; // one 9-segment chain
   const chain = [];
-  for (let c = 0; c < 10; c++) chain.push([0, c]);
+  for (let c = 0; c < 10; c++) chain.push(ctr(0, c)); // one 9-segment chain
   const g = GraphEngine.buildGraph([chain], dem, { junctionMode: "shared" });
-  const src = GraphEngine.nearestNode(g, 0, 0);
+  const src = GraphEngine.nearestNode(g, 0.5, 0.5);
   // budget = 2.5 flat steps → only ~2 edges reachable
   const eMax = 2.5 * distStep * dxM;
   const res = GraphEngine.computeGraph(g, { mode: "from", cost, eMax, srcNode: src, dstNode: -1 });
@@ -115,11 +161,11 @@ const distStep = cost.aRoll + cost.aAero; // flat-step cost per ground metre (ro
 {
   const dem = flatDem(3, 3, 0);
   const lines = [
-    [[0, 0], [0, 1], [0, 2]], // top: 2 unit edges (cheapest)
-    [[0, 0], [2, 1], [0, 2]], // bottom: 2 longer diagonal edges
+    [ctr(0, 0), ctr(0, 1), ctr(0, 2)], // top: 2 unit edges (cheapest)
+    [ctr(0, 0), ctr(2, 1), ctr(0, 2)], // bottom: 2 longer diagonal edges
   ];
   const g = GraphEngine.buildGraph(lines, dem, { junctionMode: "shared" });
-  const src = GraphEngine.nearestNode(g, 0, 0), dst = GraphEngine.nearestNode(g, 0, 2);
+  const src = GraphEngine.nearestNode(g, 0.5, 0.5), dst = GraphEngine.nearestNode(g, 0.5, 2.5);
   const res = GraphEngine.computeGraph(g, { mode: "from", cost, eMax: 0, srcNode: src, dstNode: dst, wantTopN: true, nRoutes: 2, penalty: 4 });
   ok("top-N returns 2 routes", res.routes && res.routes.length === 2, `got ${res.routes && res.routes.length}`);
   if (res.routes && res.routes.length === 2) {
@@ -134,9 +180,9 @@ const distStep = cost.aRoll + cost.aAero; // flat-step cost per ground metre (ro
   const dxM = 10, W = 6;
   // Heights rise +5 m per cell to the right: uphill edges are the costliest.
   const dem = { height: new Float32Array(Array.from({ length: W }, (_, c) => c * 5)), mask: new Uint8Array(W).fill(1), H: 1, W, dxM, dyM: 10 };
-  const chain = []; for (let c = 0; c < W; c++) chain.push([0, c]);
+  const chain = []; for (let c = 0; c < W; c++) chain.push(ctr(0, c));
   const g = GraphEngine.buildGraph([chain], dem, { junctionMode: "shared" });
-  const src = GraphEngine.nearestNode(g, 0, 0);
+  const src = GraphEngine.nearestNode(g, 0.5, 0.5);
   const res = GraphEngine.computeGraph(g, { mode: "from", cost, eMax: 0, srcNode: src, dstNode: -1, maximize: true, maximizeLength: 3 });
   ok("maximize walk has L=3 edges", res.path && res.path.edges.length === 3, `got ${res.path && res.path.edges.length}`);
   const want = 3 * (cost.aRoll * dxM + cost.beta * 5); // three uphill steps (≥climbThr ⇒ no aero)
@@ -147,18 +193,18 @@ const distStep = cost.aRoll + cost.aAero; // flat-step cost per ground metre (ro
 {
   const dem = flatDem(1, 4, 0); // W=4 → valid cols 0..3
   // Chain runs off the right edge: cols 0..5; cols 4,5 are out of extent.
-  const chain = [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5]];
+  const chain = [ctr(0, 0), ctr(0, 1), ctr(0, 2), ctr(0, 3), ctr(0, 4), ctr(0, 5)];
   const g = GraphEngine.buildGraph([chain], dem, { junctionMode: "shared" });
   let invalid = 0;
   for (let i = 0; i < g.nNodes; i++) if (!g.nodeValid[i]) invalid++;
   ok("out-of-extent nodes marked invalid", invalid === 2, `invalid=${invalid}`);
-  const src = GraphEngine.nearestNode(g, 0, 0);
+  const src = GraphEngine.nearestNode(g, 0.5, 0.5);
   const res = GraphEngine.computeGraph(g, { mode: "density", densityMode: "from", cost, eMax: 0, refNodes: [src] });
   const reached = Array.from(res.edgePasses).filter((p) => p > 0).length;
   ok("passes stop at the DEM extent (3 in-bounds edges)", reached === 3, `reached=${reached}`);
 }
 
-// Connected-component count over the graph CSR — shared by the crossings tests.
+// Connected-component count over the graph CSR — shared across the tests.
 function graphComps(g) {
   const seen = new Uint8Array(g.nNodes); let c = 0;
   for (let s = 0; s < g.nNodes; s++) {
@@ -174,10 +220,10 @@ function graphComps(g) {
   // A 5-cell line over a valley: ends at 10 m, middle dips to 0 (the DEM shows
   // the gap under the deck). The deck should read flat at 10 m end-to-end.
   const dem = { height: new Float32Array([10, 0, 0, 0, 10]), mask: new Uint8Array(5).fill(1), H: 1, W: 5, dxM, dyM: 10 };
-  const chain = [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4]];
+  const chain = [ctr(0, 0), ctr(0, 1), ctr(0, 2), ctr(0, 3), ctr(0, 4)];
   const mkRes = (lineMeta) => {
     const g = GraphEngine.buildGraph([chain], dem, { junctionMode: "shared", lineMeta });
-    const src = GraphEngine.nearestNode(g, 0, 0), dst = GraphEngine.nearestNode(g, 0, 4);
+    const src = GraphEngine.nearestNode(g, 0.5, 0.5), dst = GraphEngine.nearestNode(g, 0.5, 4.5);
     return GraphEngine.computeGraph(g, { mode: "from", cost, eMax: 0, srcNode: src, dstNode: dst, wantPath: true });
   };
   const plain = mkRes(null);
@@ -187,10 +233,59 @@ function graphComps(g) {
   ok("deck is cheaper than following the valley", deck.path.energy < plain.path.energy - 1e-6, `deck ${deck.path.energy} vs plain ${plain.path.energy}`);
 }
 
+// ---- 9b. Phase C: deck CHAINS flatten end-to-end (multi-way bridges) --------
+// Regression: a bridge split into consecutive OSM ways used to flatten
+// per-way, so each shared joint sampled the DEM UNDER the deck and the
+// profile V-dipped to the valley floor at every joint.
+{
+  const dxM = 10;
+  // Ground: 12 m at col 0 falling into a 0 m valley, back up to 6 m at col 6.
+  const groundRow = [12, 4, 0, 0, 0, 4, 6];
+  const dem = { height: new Float32Array(groundRow), mask: new Uint8Array(7).fill(1), H: 1, W: 7, dxM, dyM: 10 };
+  const way1 = [ctr(0, 0), ctr(0, 1), ctr(0, 2), ctr(0, 3)];
+  const way2 = [ctr(0, 3), ctr(0, 4), ctr(0, 5), ctr(0, 6)];
+  const g = GraphEngine.buildGraph([way1, way2], dem, {
+    junctionMode: "shared",
+    lineMeta: [{ deck: true, layer: 1 }, { deck: true, layer: 1 }],
+  });
+  // Deck profile elevation at the joint node: read the stored profiles' end
+  // samples of every edge incident to it.
+  const jointElevs = (graph, r, c) => {
+    const j = GraphEngine.nearestNode(graph, r, c), out = [];
+    for (let e = 0; e < graph.nEdges; e++) {
+      if (graph.edgeA[e] === j) out.push(graph.profH[graph.profOff[e]]);
+      if (graph.edgeB[e] === j) out.push(graph.profH[graph.profOff[e + 1] - 1]);
+    }
+    return out;
+  };
+  // Chain line runs 12 → 6 over 6 cells; the joint sits at arc 3/6 ⇒ 9 m —
+  // NOT the 0 m valley floor the per-way flattening would give it.
+  const elevs = jointElevs(g, 0.5, 3.5);
+  ok("chain joint keeps the deck aloft (9 m, not 0 m)",
+     elevs.length === 2 && elevs.every((h) => approx(h, 9)), `got [${elevs.join(", ")}]`);
+  // Crossing the whole chain costs 6 gentle-descent steps (dh = −1 each).
+  const src = GraphEngine.nearestNode(g, 0.5, 0.5), dst = GraphEngine.nearestNode(g, 0.5, 6.5);
+  const res = GraphEngine.computeGraph(g, { mode: "from", cost, eMax: 0, srcNode: src, dstNode: dst, wantPath: true });
+  const want = 6 * GraphEngine.stepCost(dxM, -1, cost);
+  ok("chain deck cost == linear end-to-end grade", approx(res.path.energy, want), `got ${res.path.energy} want ${want}`);
+
+  // A 3+-way deck junction is NOT a simple chain: those ways fall back to
+  // per-way flattening, so the joint reads the ground under it again.
+  const dem2 = { height: new Float32Array([...groundRow, ...groundRow, ...groundRow]), mask: new Uint8Array(21).fill(1), H: 3, W: 7, dxM, dyM: 10 };
+  const way3 = [ctr(0, 3), ctr(2, 3)];
+  const g3 = GraphEngine.buildGraph([way1, way2, way3], dem2, {
+    junctionMode: "shared",
+    lineMeta: [{ deck: true, layer: 1 }, { deck: true, layer: 1 }, { deck: true, layer: 1 }],
+  });
+  const elevs3 = jointElevs(g3, 0.5, 3.5);
+  ok("3-way deck junction falls back to per-way (ground joint)",
+     elevs3.length === 3 && elevs3.every((h) => approx(h, 0)), `got [${elevs3.join(", ")}]`);
+}
+
 // ---- 10. Phase C: layer-aware junction suppression (overpass) ---------------
 {
   const dem = flatDem(5, 5, 0);
-  const lines = [[[0, 0], [4, 4]], [[0, 4], [4, 0]]]; // cross at (2,2), no shared vtx
+  const lines = [[ctr(0, 0), ctr(4, 4)], [ctr(0, 4), ctr(4, 0)]]; // cross at (2.5,2.5), no shared vtx
   // A deck (layer 1) crossing a ground road (layer 0): no junction -> 2 components.
   const over = GraphEngine.buildGraph(lines, dem, { junctionMode: "crossings", lineMeta: [{ deck: true, layer: 1 }, { deck: false, layer: 0 }] });
   ok("overpass: crossing suppressed (no center node)", over.nNodes === 4, `nNodes=${over.nNodes}`);
@@ -236,6 +331,45 @@ function graphComps(g) {
     const g = GraphEngine.buildGraph([[[1, 1], [3, 21]], [[3, 1], [1, 21]]], flatDem(24, 24, 0), { junctionMode: "crossings" });
     ok("crossings: shallow-diagonal X is one component", graphComps(g) === 1, `comps=${graphComps(g)}`);
   }
+}
+
+// ---- 12. cross-module cost parity: stepCost === energy-worker v2Edge --------
+// The guard that keeps the graph engine from drifting off the grid engine:
+// load the REAL energy-worker.js the way test-worker-pool.mjs does and assert
+// stepCost(d, dh, c) === v2Edge(d, dh, c) EXACTLY (bit-for-bit, not approx)
+// across flat / threshold / steep-climb / gentle- and steep-descent samples.
+{
+  const src = readFileSync(join(here, "energy-worker.js"), "utf8");
+  const sandbox = { postMessage: () => {}, self: {}, performance, console };
+  // The worker defines v2Edge as a top-level function in the Function scope;
+  // append a return to pull the live implementation out.
+  const v2Edge = new Function(...Object.keys(sandbox), src + "\n;return v2Edge;")(...Object.values(sandbox));
+  ok("energy-worker v2Edge extracted", typeof v2Edge === "function");
+  const bundles = [
+    cost,                                                                       // this suite's bundle
+    { aRoll: 1, aAero: 0.5, beta: 30, climbThr: 0.05, abRatio: 0.05, epsOffset: 0.13 }, // test-worker-pool's
+  ];
+  const dists = [1, 5, 10, Math.SQRT2 * 10, 30]; // incl. an irrational diagonal
+  let checked = 0, mismatches = 0;
+  for (const c of bundles) for (const d of dists) {
+    const dhs = [
+      0,                     // flat
+      c.climbThr * d,        // exactly AT the aero threshold (≥ boundary)
+      c.climbThr * d - 1e-9, // just under it (aero still applies)
+      0.3 * d, 1.0 * d,      // steep climbs
+      -0.01 * d,             // gentle descent (ε clamps at 1)
+      -c.abRatio * d,        // ε = 1 boundary
+      -0.3 * d, -1.0 * d,    // steep descents (ε floors at 0, energy floors at 0)
+    ];
+    for (const dh of dhs) {
+      checked++;
+      if (GraphEngine.stepCost(d, dh, c) !== v2Edge(d, dh, c)) {
+        mismatches++;
+        console.log(`        mismatch d=${d} dh=${dh}: stepCost=${GraphEngine.stepCost(d, dh, c)} v2Edge=${v2Edge(d, dh, c)}`);
+      }
+    }
+  }
+  ok(`stepCost === v2Edge exactly on all ${checked} samples`, mismatches === 0, `${mismatches} mismatch(es)`);
 }
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);

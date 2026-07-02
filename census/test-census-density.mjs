@@ -15,7 +15,7 @@ import * as GeoTIFF from "geotiff";
 import JSZip from "jszip";
 import {
   loadDem, lonLatToRC, pointsToRefs, runDensity, loadWorker,
-  buildMetadata, writeBundle,
+  buildMetadata, writeBundle, deriveCost,
 } from "./census-density.mjs";
 
 let failures = 0;
@@ -87,7 +87,9 @@ const main = async () => {
   assert(refs.every(([r, c]) => dem.mask[r * dem.W + c] === 1), "all kept refs are passable");
 
   console.log("harness density matches the engine across code paths");
-  const params = { mode: "from", alpha: 1, beta: 30, eta: 0.3, eMax: 0 };
+  // Non-default physics knobs so the comparison also proves the params flow
+  // through deriveCost (the readCost mirror) rather than being ignored.
+  const params = { mode: "from", mass: 80, pFlat: 100, eMax: 0 };
   const result = runDensity(dem, refs, params);   // partial-merge → Float64 passes
   assert(result.passes instanceof Float64Array && result.energy instanceof Float32Array,
     "returns Float64 passes + Float32 energy (matches downloadBundle's float64 passes.tif)");
@@ -96,7 +98,7 @@ const main = async () => {
   const baseMsg = {
     kind: "run", H, W, dx: dem.dxM, dy: dem.dyM,
     seedR: -1, seedC: -1, goalR: -1, goalC: -1,
-    mode: "from", densityMode: "from", alpha: 1, beta: 30, eta: 0.3, eMax: 0, eMaxMode: "leg",
+    mode: "from", densityMode: "from", cost: deriveCost(params), eMax: 0, eMaxMode: "leg",
     wantDensity: true, maximize: false, maximizeLength: 0,
   };
 
@@ -146,6 +148,9 @@ const main = async () => {
   const md = buildMetadata(dem, refs, { ...params, timestamp: "2026-06-18T00:00:00.000Z" }, result);
   assert(md.dem.H === H && md.dem.W === W, "metadata.dem dims = DEM dims (import requires exact match)");
   assert(md.schemaVersion === 3 && md.params.wantDensity === true, "v3 density metadata");
+  assert(md.params.mass === 80 && md.params.pFlat === 100 && md.params.crr === 0.008
+    && md.params.climbThr === 0.02 && !("alpha" in md.params) && !("eta" in md.params),
+    "v2 physics params recorded (app.js property names, no v1 alpha/eta)");
   assert(md.params.refPoints.length === refs.length, "refPoints persisted");
   const outPath = join(tmp, "out.zip");
   await writeBundle(outPath, dem, md, result);

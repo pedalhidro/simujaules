@@ -74,8 +74,8 @@ Little-endian binary framing, see `src/main.rs` header comment:
 - `POST /density` — `[u32 json_len][json params][f32 height×N][u8 mask×N][u8 network×N?][portals?]`
   → `[u32 json_len][json {elapsed_ms, refs}][f64 passes×N][f32 energy×N]`
 - `POST /single` — same request framing (driven by `src` + `want_passes`
-  instead of `ref_points`)
-  → `[u32 json_len][json {elapsed_ms, passes}][f32 energy×N][f32 passes×N?]`
+  instead of `ref_points`; `maximize` is rejected with a 400 — browser-only)
+  → `[u32 json_len][json {elapsed_ms, passes}][f32 energy×N][f64 passes×N?]`
 - `GET /health` — `{"ok":true,"version":…,"cores":…,"mem_budget_bytes":…}`
 
 The cost model and passes/density math are a port of `energy-worker.js`
@@ -85,7 +85,10 @@ endpoints against the JS worker.
 Energies match bit-for-bit (the f32/f64 round trips mirror the JS
 Float32Array exactly). Passes can differ from the JS worker only where two
 paths have EXACTLY equal f64 cost — the radix heap pops ties in a different
-order, and either optimal tree is valid.
+order, and either optimal tree is valid. `/single` passes are accumulated and
+shipped as f64 because the JS single-source branch returns a Float64Array
+(counts exceed 2^24 on big DEMs, where f32 would round); density's internal
+passes stay f32, matching the JS `densityField`'s Float32Array.
 
 ```sh
 cargo build --release

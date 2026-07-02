@@ -66,6 +66,29 @@ const portalLenM = new Float64Array([ 1500, 800, 2000 ]);
 const portalHU = new Float64Array([ NaN, 730, 712 ]);
 const portalHV = new Float64Array([ NaN, 705, 718 ]);
 
+// Network masks for the hasNetwork cases (eff_mask = dem_mask AND network_mask
+// in both engines). The diagonal band includes the refs/seed.
+const netMask = new Uint8Array(N);
+for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) netMask[r * W + c] = Math.abs(r - c) < 90 ? 1 : 0;
+// A network that EXCLUDES the DEM's height extremes (only the middle 70% of the
+// height range, refs forced back in). The JS worker derives maximize's
+// maxEdgeCost from the RAW DEM mask BEFORE effMask exists — a backend scanning
+// the effective mask instead inverts against a smaller range and diverges
+// wholesale, which is exactly what the maximize+net case below must catch.
+let rawMinH = Infinity, rawMaxH = -Infinity;
+for (let i = 0; i < N; i++) if (mask[i]) { rawMinH = Math.min(rawMinH, height[i]); rawMaxH = Math.max(rawMaxH, height[i]); }
+const netMaskInner = new Uint8Array(N);
+for (let i = 0; i < N; i++) {
+  const f = (height[i] - rawMinH) / (rawMaxH - rawMinH);
+  netMaskInner[i] = f > 0.15 && f < 0.85 ? 1 : 0;
+}
+for (const [r, c] of refs) netMaskInner[r * W + c] = 1; // keep every ref on the eff mask
+{ // guard: vacuous test if the network doesn't actually trim the height range
+  let m = Infinity, M = -Infinity;
+  for (let i = 0; i < N; i++) if (mask[i] && netMaskInner[i]) { m = Math.min(m, height[i]); M = Math.max(M, height[i]); }
+  if (m <= rawMinH || M >= rawMaxH) throw new Error("netMaskInner failed to trim the height range");
+}
+
 const cases = [];
 for (const portals of [false, true]) {
   for (const dmode of ["from", "to", "round"]) {
@@ -77,20 +100,30 @@ for (const portals of [false, true]) {
 // max_edge_cost derivation are identical in both engines but were never
 // parity-checked, so a future divergence would slip past the suite.
 cases.push({ dmode: "from", eMax: 0, eMaxMode: "leg", maximize: true });
+// Network-constrained density (the backend parses a second mask off the wire):
+// every mode, plus the total-budget and portal combinations.
+for (const dmode of ["from", "to", "round"]) cases.push({ dmode, eMax: 20000, eMaxMode: "leg", network: netMask });
+cases.push({ dmode: "round", eMax: 20000, eMaxMode: "total", network: netMask });
+cases.push({ dmode: "from", eMax: 20000, eMaxMode: "leg", portals: true, network: netMask });
+// maximize + network, with the height extremes excluded from the network —
+// catches a backend deriving the maximize height range from the effective
+// (network-ANDed) mask instead of the raw DEM mask.
+cases.push({ dmode: "from", eMax: 0, eMaxMode: "leg", maximize: true, network: netMaskInner });
 
-for (const { dmode, eMax, eMaxMode, portals = false, maximize = false } of cases) {
+for (const { dmode, eMax, eMaxMode, portals = false, maximize = false, network = null } of cases) {
   {
     const nPortals = portals ? portalU.length : 0;
     // backend
     const params = {
       h: H, w: W, dx: 30, dy: 30, cost, eMax, eMaxMode,
-      densityMode: dmode, refPoints: refs, hasNetwork: false, maximize,
+      densityMode: dmode, refPoints: refs, hasNetwork: !!network, maximize,
       nPortals,
     };
     const json = new TextEncoder().encode(JSON.stringify(params));
     const head = new Uint8Array(4);
     new DataView(head.buffer).setUint32(0, json.length, true);
     const parts = [head, json, height, mask];
+    if (network) parts.push(network);
     if (portals) parts.push(portalU, portalV, portalLenM, portalHU, portalHV);
     const resp = await fetch(`http://${ADDR}/density`, { method: "POST", body: new Blob(parts) });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
@@ -106,6 +139,7 @@ for (const { dmode, eMax, eMaxMode, portals = false, maximize = false } of cases
       seedR: -1, seedC: -1, goalR: -1, goalC: -1, mode: dmode,
       wantDensity: true, refPoints: refs, densityMode: dmode, maximize,
       height: new Float32Array(height), mask: new Uint8Array(mask),
+      networkMask: network ? new Uint8Array(network) : null,
       portalU: portals ? portalU : null,
       portalV: portals ? portalV : null,
       portalLenM: portals ? portalLenM : null,
@@ -123,7 +157,7 @@ for (const { dmode, eMax, eMaxMode, portals = false, maximize = false } of cases
     const ok = maxD < 1e-15 && maxE < 1e-3 && bad === 0;
     allOk = allOk && ok;
     console.log(
-      `mode=${dmode} eMax=${eMax}${eMaxMode === "total" ? " (total)" : ""}${portals ? " +portals" : ""}${maximize ? " (maximize)" : ""}: ` +
+      `mode=${dmode} eMax=${eMax}${eMaxMode === "total" ? " (total)" : ""}${portals ? " +portals" : ""}${network ? " +net" : ""}${maximize ? " (maximize)" : ""}: ` +
       `max|Δdensity|=${maxD.toExponential(2)}, ` +
       `max|Δenergy|=${maxE.toExponential(2)}, finite-mismatch=${bad} ${ok ? "✓" : "✗"}`,
     );
@@ -135,11 +169,7 @@ for (const { dmode, eMax, eMaxMode, portals = false, maximize = false } of cases
 // returning the RAW energy field (not averaged) + optional passes counts. Mirror
 // the JS worker's from/to/round single-point branch. Cover network-constrained
 // (the eff_mask = dem_mask AND network_mask path) and bridge portals too.
-const SR = 128, SC = 128;
-// A diagonal band that includes the seed — exercises the network constraint
-// (and so the shared eff_mask path) on both engines.
-const netMask = new Uint8Array(N);
-for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) netMask[r * W + c] = Math.abs(r - c) < 90 ? 1 : 0;
+const SR = 128, SC = 128; // seed — inside the diagonal netMask band above
 
 const singleCases = [];
 for (const portals of [false, true]) {
@@ -171,9 +201,15 @@ for (const { dmode, eMax, eMaxMode, portals, hasNetwork, wantPasses } of singleC
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
   const buf = await resp.arrayBuffer();
   const jlen = new DataView(buf).getUint32(0, true);
+  // Wire-format guard: /single passes ship as f64 (the JS worker's
+  // single-source branch returns Float64Array — counts exceed 2^24 on big
+  // DEMs, where f32 would round), so the decoded values below compare EXACTLY
+  // against the JS reference. A backend regressing to f32 fails right here.
+  const expect = 4 + jlen + 4 * N + (wantPasses ? 8 * N : 0);
+  if (buf.byteLength !== expect) throw new Error(`/single response ${buf.byteLength} B, expected ${expect} B`);
   let off = 4 + jlen;
   const energy = new Float32Array(buf.slice(off, off + 4 * N)); off += 4 * N;
-  const passes = wantPasses ? new Float32Array(buf.slice(off, off + 4 * N)) : null;
+  const passes = wantPasses ? new Float64Array(buf.slice(off, off + 8 * N)) : null;
 
   // JS reference — the worker's single-source branch (wantDensity false).
   const ref = runWorker({
@@ -204,6 +240,25 @@ for (const { dmode, eMax, eMaxMode, portals, hasNetwork, wantPasses } of singleC
     `max|Δenergy|=${maxE.toExponential(2)}, finite-mismatch=${bad}` +
     `${wantPasses ? `, max|Δpasses|=${maxP.toExponential(2)}` : ""} ${ok ? "✓" : "✗"}`,
   );
+}
+
+// /single rejects maximize (browser-only by design — the app never sends it,
+// so a 400 beats silently computing a degenerate max_edge_cost=0 field).
+{
+  const params = {
+    h: H, w: W, dx: 30, dy: 30, cost, eMax: 0, eMaxMode: "leg",
+    densityMode: "from", src: [SR, SC], wantPasses: false, hasNetwork: false,
+    maximize: true, nPortals: 0,
+  };
+  const json = new TextEncoder().encode(JSON.stringify(params));
+  const head = new Uint8Array(4);
+  new DataView(head.buffer).setUint32(0, json.length, true);
+  const resp = await fetch(`http://${ADDR}/single`, {
+    method: "POST", body: new Blob([head, json, height, mask]),
+  });
+  const ok = resp.status === 400;
+  allOk = allOk && ok;
+  console.log(`[single] maximize=true → HTTP ${resp.status} (expect 400) ${ok ? "✓" : "✗"}`);
 }
 
 server.kill();

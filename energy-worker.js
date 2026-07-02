@@ -6,9 +6,9 @@
 // and shipped identically to this worker AND the Rust backend, so they stay
 // bit-parity):
 //   cost = { aRoll, aAero, beta, climbThr, abRatio, epsOffset }
-//     aRoll  = m·g·Crr / k_eff           (J per ground metre, always)
-//     aAero  = ½·ρ·CdA·v_f² / k_eff       (J per ground metre, only OFF climbs)
-//     beta   = m·g / k_eff               (J per metre of climb)
+//     aRoll  = m·g·Crr / k_eff           (kJ per ground metre, always)
+//     aAero  = ½·ρ·CdA·v_f² / k_eff       (kJ per ground metre, only OFF climbs)
+//     beta   = m·g / k_eff               (kJ per metre of climb)
 //     climbThr = climb-grade threshold   (grade ≥ this ⇒ drop aero, e.g. 0.02)
 //     abRatio  = Crr + ½ρCdA·v_f²/(m·g)  (flat-resistance grade, = α/β)
 //     epsOffset = 0.13                   (empirical descent-recovery offset)
@@ -560,8 +560,14 @@ function densityField(opts) {
 // Penalty applies to the destination cell of each edge. The gravitational
 // (beta * dh) term is NOT penalized — climb is unavoidable.
 //
-// Heuristic: aRoll * straight-line + beta * max(0, h_goal - h_here).
-// Admissible because both bounds are required by any feasible path.
+// `reverse` mirrors dijkstra()'s: each search edge here→nbr is scored with the
+// opposite-direction cost (dh = hHere − hNbr), so the returned energy measures
+// travel goal→start (mode "to": from the dst marker to the seed), matching the
+// reverse field. The heuristic below flips its climb term accordingly.
+//
+// Heuristic: see the derivation at `descFloor` below — admissible AND
+// consistent under the v2 cost model (the old aRoll·dist bound was NOT: cheap
+// descents undercut it, so top-N route #1 could come out suboptimal).
 function astar(opts) {
   const {
     height, mask, H, W,
@@ -574,6 +580,7 @@ function astar(opts) {
     eMax = 0,                      // 0 = no budget; >0 abandon past this
     maximize = false,              // invert edge cost against maxEdgeCost
     maxEdgeCost = 0,
+    reverse = false,               // score edges in the opposite travel direction
   } = opts;
   const N = H * W;
   const diag = Math.hypot(dx, dy);
@@ -603,17 +610,40 @@ function astar(opts) {
   // In maximize mode we don't have a useful admissible heuristic for the
   // inverted cost (it would be an upper bound on the remaining path,
   // which depends on path length). Falling back to h=0 makes A* behave
-  // as Dijkstra — slower, but correctness is preserved.
-  // Rolling-only distance term (aRoll, the minimum per-distance edge cost — climbing
-  // edges carry no aero) keeps the heuristic a lower bound, as the v1 `alpha` did.
+  // as Dijkstra — slower, but correctness is preserved (h=0 is admissible
+  // for any non-negative cost).
+  //
+  // Otherwise: admissible + consistent per-metre floors on the v2 cost.
+  // Descent credit bound: ε·s ≤ (1 − epsOffset)·abRatio for EVERY grade s
+  // (s ≤ abRatio ⇒ ε ≤ 1−epsOffset so ε·s ≤ (1−epsOffset)·abRatio;
+  //  s > abRatio ⇒ ε·s = max(0, abRatio − epsOffset·s) < (1−epsOffset)·abRatio),
+  // so a descent metre costs at least descFloor. A climb/flat metre costs at
+  // least climbFloor (aero drops at grades ≥ climbThr). Then, with distLB the
+  // straight-line remaining distance (a true lower bound on path length):
+  //   h1 = min(climbFloor, descFloor)·distLB
+  //   h2 = min(aRoll, descFloor)·distLB + beta·(net climb to the goal)
+  // h2's distance coefficient is NOT min(climbFloor, descFloor): on a climb
+  // edge the beta term already claims beta·dh, leaving only aRoll·d guaranteed
+  // on top (aero may be dropped). Both are edge-consistent (h(u)−h(v) ≤
+  // cost(u,v): the distance parts because their coefficients lower-bound every
+  // per-metre cost net of the beta term; the beta term only shrinks across
+  // descents, whose cost is ≥ descFloor·d), so h = max(h1, h2) is too — and
+  // the iterative top-N penalties only ADD cost, so admissibility against the
+  // penalised graph is preserved. Under `reverse` the remaining search leg
+  // idx→goal is travelled goal→idx, so the climb term flips to the rise FROM
+  // the goal UP to here.
+  const descFloor = Math.max(0, cost.aRoll + cost.aAero - (1 - cost.epsOffset) * cost.beta * cost.abRatio);
+  const climbFloor = cost.aRoll + Math.min(cost.aAero, cost.beta * cost.climbThr);
+  const minPerM = Math.min(climbFloor, descFloor);
+  const distCoefClimb = Math.min(cost.aRoll, descFloor);
   const heuristic = maximize ? (() => 0) : (idx) => {
     const r = (idx / W) | 0;
     const c = idx - r * W;
     const dr = (r - goalR) * dy;
     const dc = (c - goalC) * dx;
-    const straight = Math.hypot(dr, dc);
-    const climb = Math.max(0, hGoal - height[idx]);
-    return cost.aRoll * straight + cost.beta * climb;
+    const distLB = Math.hypot(dr, dc);
+    const climb = reverse ? Math.max(0, height[idx] - hGoal) : Math.max(0, hGoal - height[idx]);
+    return Math.max(minPerM * distLB, distCoefClimb * distLB + cost.beta * climb);
   };
 
   E[startIdx] = 0;
@@ -655,7 +685,7 @@ function astar(opts) {
       if (!mask[nIdx] || settled[nIdx]) continue;
 
       const hNbr = height[nIdx];
-      const dh = hNbr - hHere;
+      const dh = reverse ? hHere - hNbr : hNbr - hHere;
       const dist = dists[k];
 
       let edge = v2Edge(dist, dh, cost);
@@ -1261,10 +1291,12 @@ self.onmessage = (ev) => {
     try {
       const g = msg.graph, p = msg.params;
       // Snap src/dst/ref pixel coords to graph nodes here — the main thread has
-      // no engine; the graph (and nearestNode) live in the worker.
-      if (p.srcRC) p.srcNode = GraphEngine.nearestNode(g, p.srcRC[0], p.srcRC[1]);
-      if (p.dstRC) p.dstNode = GraphEngine.nearestNode(g, p.dstRC[0], p.dstRC[1]);
-      if (p.refRCs) p.refNodes = p.refRCs.map((rc) => GraphEngine.nearestNode(g, rc[0], rc[1]));
+      // no engine; the graph (and nearestNode) live in the worker. Integer
+      // [r,c] cells index at CORNERS while the graph nodes carry fractional
+      // grid coords (centres at integer+0.5) — snap from the cell centre.
+      if (p.srcRC) p.srcNode = GraphEngine.nearestNode(g, p.srcRC[0] + 0.5, p.srcRC[1] + 0.5);
+      if (p.dstRC) p.dstNode = GraphEngine.nearestNode(g, p.dstRC[0] + 0.5, p.dstRC[1] + 0.5);
+      if (p.refRCs) p.refNodes = p.refRCs.map((rc) => GraphEngine.nearestNode(g, rc[0] + 0.5, rc[1] + 0.5));
       const res = GraphEngine.computeGraph(g, p);
       const transfer = [res.edgePasses.buffer];
       if (res.edgeEnergy) transfer.push(res.edgeEnergy.buffer);
@@ -1543,6 +1575,10 @@ self.onmessage = (ev) => {
           repulsionMode, distUsed,
           eMax,
           maximize, maxEdgeCost,
+          // Mode "to" fields/paths measure travel dst→seed (dijkstra
+          // reverse:true) — score the routes in that same direction. Round
+          // stays forward-only (outbound leg); app.js discloses that.
+          reverse: mode === "to",
         });
         if (!res.path) break;
         let shared = 0;

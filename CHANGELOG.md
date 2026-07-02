@@ -9,6 +9,64 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v49 — 2026-07-02
+
+**Correctness fixes from a full-repo review** (`docs/review-2026-07-01.md`), spanning
+the browser engine, the graph engine, the Rust backend, and app.js:
+
+- **Top-N routes.** The A\* heuristic overcharged gentle descents under the v2 model
+  (up to 3.3×), so route #1 could cost more than the energy field's own optimum —
+  replaced with a heuristic derived from the model's true per-metre cost floors
+  (admissible **and** consistent; proof is in the code comment). Routes in **"até"**
+  mode now score the real travel direction (destination → reference), matching the
+  field and best path, instead of always scoring reference → destination.
+- **Maximizar energia** (dormant since v36 — no UI toggle, but the engine and native
+  backend still implement it) ignored the kJ energy budget while inverting costs,
+  silently pruning the whole field on any realistic budget. The budget is now forced
+  to 0 under maximize on every path (browser, native backend, graph), with the `#e-max`
+  input greyed out (and re-enabled) the moment the toggle exists again.
+- **Graph mode ("seguir os vetores")** sampled terrain **half a cell off** the raster
+  engine's grid convention — every node height, edge profile and deck ground-endpoint
+  was displaced and low-pass filtered. Fixed at the source (`sampleHeight`); also
+  fixed the matching half-cell shift in energy/passes rasterisation and in
+  source/destination/reference node snapping. A street ending on another street's
+  interior (a **T-junction**) now correctly joins the network in *cruzamentos* mode
+  instead of silently splitting into disconnected components. A bridge/tunnel mapped
+  as several consecutive OSM ways now flattens as **one continuous deck** instead of
+  dipping to the valley floor at each joint. Node snap tolerance is now capped at
+  **15 m** on coarse DEMs (was a flat 0.5 cells → 45 m on COP90 90 m).
+- **Native backend.** "Maximizar" density runs under a network constraint now derive
+  their height range from the full DEM, matching the browser engine (previously
+  diverged wholesale whenever the network excluded the DEM's height extremes).
+  `/single` passes counts are now exact on very large DEMs (shipped as 64-bit floats,
+  matching the browser engine above 2²⁴ counts); `/single` now rejects
+  `maximize` with a clear error instead of silently returning a degenerate field.
+
+**Hardening.** A crafted `.gpkg` file with a non-numeric `srs_id` could inject HTML
+on load — the value is now coerced at the source. Importing a bundle mid-compute now
+cancels the running job before swapping the grid underneath it. The compute-time
+estimate no longer sticks on "estimating…" forever if the calibration probe fails —
+it retries on the next run.
+
+**PWA & deploy.** Every site deploy was silently deleting the cloud orchestrator's
+VM startup script (`vm/` was missing from the deploy exclude list) — fixed; the
+service worker now fetches the precached app shell past the browser's HTTP cache, so
+a version bump can no longer install a stale or mixed-version app; and large data
+files (GeoTIFF DEMs, `.gpkg` networks — e.g. the 145 MB *Viário RMSampa* example) are
+no longer pulled into the offline cache or silently re-downloaded in the background.
+
+**i18n.** The OSM bridge/tunnel pull's status messages are now translated (PT/EN),
+and round-trip runs with top-N routes note that alternative-route energies cover the
+outbound leg only.
+
+**Docs & offline tooling.** The README, in-app help modal, `llms.txt` and JSON-LD
+metadata described the **retired v1 α/β/η cost model** — rewritten to the v2 physics
+model that's actually shipped (mass/Crr/CdA/ρ/k\_eff/climb-threshold). Density docs
+now correctly say passes are **summed** (not averaged) across reference points. The
+offline census-density pipeline (`census/census-density.mjs`), broken since v44's
+physics-model change, sends the v2 cost bundle again; its README now points at the
+live `gs://simujaules` bucket instead of the retired `telhas` one.
+
 ## v48 — 2026-06-29
 
 **Source→destination route comparison.** With *"Comparar com cenário sem

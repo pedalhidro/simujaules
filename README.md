@@ -1,4 +1,8 @@
-# Simujoules (sampasimu)
+# Simujaules (sampasimu)
+
+> **Simujaules** is a deliberate, affective respelling of *joules* — only the
+> branding and hostname; internal code identifiers and the legacy vocab path
+> keep the old `simujoules` spelling.
 
 A static-site, build-step-free PWA that computes asymmetric-cost cycling
 **energy fields** over digital elevation models (DEMs). Load a GeoTIFF DEM (or
@@ -8,28 +12,36 @@ the minimum energy to ride from/to/round-trip every cell — via Dijkstra on an
 upload, the DEM never leaves the machine. UI in Brazilian Portuguese and
 English. Originally a port of a QGIS Processing algorithm.
 
-Live app: <https://telhas.pedalhidrografi.co/simujoules/> (PWA, works offline
-after first load).
+Live app: <https://simujaules.pedalhidrografi.co/> (PWA, works offline after
+first load).
 
 ## What it computes
 
-- **Energy field** — for every DEM cell, the minimum energy to ride from (or to,
-  or round-trip via) an anchor. Cost of moving between adjacent cells with height
-  difference Δh over ground distance d:
-  - uphill/flat: `α·d + β·Δh`
-  - downhill: `max(0, α·d − η·β·|Δh|)`
-  - α = cost per flat metre, β = cost per metre climbed, η ∈ [0,1] = fraction of
-    climb energy recovered on descent. With the defaults (α = 0.008, β = 1.0)
-    one energy unit ≈ the work to climb 1 m (≈ 0.8–1 kJ for an ~85 kg
-    rider + bike).
+- **Energy field** — for every DEM cell, the minimum energy (kJ) to ride from
+  (or to, or round-trip via) an anchor. The cost model (v2) is derived from
+  physical inputs — total rider+bike mass (default m = 75 kg), rolling
+  resistance Crr, drag area CdA, air density ρ, drivetrain efficiency k_eff,
+  cruise power on the flat P_flat, a climb-grade threshold (~2%), and smoothing
+  knobs — folded once into a kJ-unit coefficient bundle
+  `{aRoll, aAero, β, climbThr, abRatio, ε-offset}`. Cost of moving between
+  adjacent cells with height difference Δh over ground distance d:
+  - uphill/flat: `aRoll·d + aAero·d + β·Δh` — the aero term is dropped at/above
+    the climb threshold; `β = m·g/k_eff/1000 ≈ 0.76 kJ/m` at defaults.
+  - downhill: `max(0, aRoll·d + aAero·d − ε·β·|Δh|)` with
+    `ε = clamp01(min(1, abRatio·d/|Δh|) − 0.13)` — gentle grades recover most
+    of the resistive cost, steep ones none.
+  - The canonical derivation lives in the external *bicycling-energy-model*
+    notes; `energy-worker.js`'s header + `app.js` `readCost()` are the in-repo
+    reference.
 - **Passes count** ("natural corridors") — for each cell, how many optimal paths
   traverse it (subtree size in the shortest-path tree). Highlights the terrain's
   natural highways. Round-trip mode counts only within-budget trajectories.
 - **Top-N alternative routes** between two points, via iterative penalisation
   (per-cell / linear / quadratic repulsion) so alternatives genuinely diverge.
-- **Multi-reference density** — passes counts averaged over K reference points
+- **Multi-reference density** — passes counts summed over K reference points
   (clicked, or sampled pseudo-/quasi-randomly via Sobol or Halton sequences),
-  normalised to a density field. Runs on a multi-core **worker pool** (sized by
+  normalised to a density field; magnitudes grow ~linearly with K, so compare
+  runs only at matching K. Runs on a multi-core **worker pool** (sized by
   cores + memory); an optional native Rust backend accelerates large runs.
 - **Energy budgets** — prune the search at a maximum energy; in round-trip mode,
   cap each leg or the out-plus-back total.
@@ -68,7 +80,7 @@ after first load).
 - `sw.js`, `manifest.webmanifest`, `icons/` — the PWA shell.
 - `backend/` — optional native compute server (Rust + rayon). Off by default; see
   [backend/README.md](backend/README.md).
-- `deploy.sh` — stages and rsyncs the deployable files to `gs://telhas/simujoules`.
+- `deploy.sh` — stages and rsyncs the deployable files to `gs://simujaules`.
 - `test-*.mjs`, `backend/test-backend.mjs` — the node test suites (see below).
 - `dem/`, `fabdem/`, `vocab/`, `qgis/` — example DEMs, the FABDEM fetcher, the
   export vocabulary, and the original QGIS plugins this was ported from.
@@ -105,18 +117,18 @@ maximize stay browser-only. Memory-budget tuning, the binary protocol, and the
 
 ## Deploy
 
-For the production target (`gs://telhas/simujoules`, served at
-`https://telhas.pedalhidrografi.co/simujoules/`):
+For the production target (`gs://simujaules`, served at
+`https://simujaules.pedalhidrografi.co/`):
 
     ./deploy.sh
 
 The script (no arguments) stages just the deployable files — skipping the Rust
 source, QGIS plugins, and test harnesses — and rsyncs them with `gcloud storage`
-(not `gsutil`). `telhas.pedalhidrografi.co` is fronted by **Cloudflare** (origin
-= the GCS bucket directly), so cache invalidation is a Cloudflare purge: set
-`CF_API_TOKEN` (Zone › Cache Purge) and `CF_ZONE_ID` to enable it (skipped if
-unset). See the header comment in `deploy.sh` for the Cloudflare cache-rule
-gotcha around `sw.js`.
+(not `gsutil`). `simujaules.pedalhidrografi.co` is fronted by **Cloudflare**
+(origin = the GCS bucket directly, NOT Google Cloud CDN), so cache invalidation
+is a Cloudflare purge: set `CF_API_TOKEN` (Zone › Cache Purge) and `CF_ZONE_ID`
+to enable it (skipped if unset). See the header comment in `deploy.sh` for the
+Cloudflare cache-rule gotcha around `sw.js`.
 
 For any other static host (GitHub/Cloudflare Pages, S3 + CloudFront, Netlify,
 etc.) drop the same set of files manually. No backend required.

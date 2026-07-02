@@ -47,14 +47,17 @@ python build_fgb.py            # -> setores_br_pop.fgb  (~450 MB, indexed)
 
 # 3. upload (NOT via deploy.sh — the .fgb is cloud-only)
 gcloud storage cp setores_br_pop.fgb \
-  gs://telhas/simujoules/census/setores_br_pop.fgb \
+  gs://simujaules/census/setores_br_pop.fgb \
   --content-type=application/octet-stream --cache-control="public, max-age=86400"
 ```
+
+> **Do not refresh the old `gs://telhas/simujoules/census/` copy** — it's dead
+> since the app moved to its own bucket; the app never reads it.
 
 FlatGeobuf carries a packed Hilbert R-tree, so the browser fetches only the
 bbox slice (a few hundred KB for a city), never the whole file — a raw `.gpkg`
 **cannot** be range-queried over HTTP, which is why we convert. The app reads
-the **direct GCS URL** (`storage.googleapis.com/telhas/…`, native Range +
+the **direct GCS URL** (`storage.googleapis.com/simujaules/…`, native Range +
 bucket CORS), set as `CENSUS_FGB_URL` in `app.js`. To repoint, change that
 constant.
 
@@ -66,14 +69,14 @@ cat > cors.json <<'JSON'
 [{ "maxAgeSeconds": 3600, "method": ["GET","HEAD"], "origin": ["*"],
    "responseHeader": ["Content-Type","Cache-Control","Content-Range","Content-Length","Accept-Ranges","ETag"] }]
 JSON
-gcloud storage buckets update gs://telhas --cors-file=cors.json
+gcloud storage buckets update gs://simujaules --cors-file=cors.json
 ```
 
 Verify end-to-end before relying on it in the app (queries the SP city bbox):
 
 ```sh
 curl -s -o /dev/null -D - -H "Range: bytes=0-7" \
-  https://storage.googleapis.com/telhas/simujoules/census/setores_br_pop.fgb | grep -i 206   # 206 Partial Content
+  https://storage.googleapis.com/simujaules/census/setores_br_pop.fgb | grep -i 206   # 206 Partial Content
 ogrinfo -spat -46.77 -23.60 -46.59 -23.48 setores_br_pop.fgb setores | head   # local sanity
 node test-census-sampler.mjs                                                   # sampler math (mirrors app.js)
 ```
@@ -148,9 +151,16 @@ CDN `<script>` tags use). Then:
 node census-density.mjs \
   --dem ../dem/sampa_geral.tif \
   --points points.geojson \
-  --mode from --alpha 1 --beta 30 --eta 0.3 \
+  --mode from --mass 75 --pflat 80 \
   -o simujoules-census.zip
 ```
+
+Cost knobs are the app's **v2 physics inputs** — `--mass 75 --crr 0.008
+--cda 0.45 --rho 1.1 --keff 0.97 --pflat 80 --climb-thr 2 --ksmooth 1`
+(defaults shown = the app's UI defaults; `--climb-thr` is in %). The harness
+folds them into the `{aRoll, aAero, beta, …}` cost bundle exactly like the
+app's `readCost()` (hand-kept mirror). The v1 `--alpha/--beta/--eta` flags
+were removed with the v2 cost model.
 
 It loads the DEM, converts each point to a DEM pixel (dropping out-of-extent /
 nodata points, logged), then runs the **same** `densityField` engine the PWA

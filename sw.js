@@ -3,15 +3,20 @@
 // Caching strategy:
 //   PRECACHE — same-origin app shell, installed atomically. Bumping the
 //              VERSION constant invalidates this on next activate.
-//   RUNTIME  — opportunistic cache for cross-origin libs (Leaflet, GeoTIFF,
-//              JSZip, proj4, sql.js) and fetched tile images. Populated on
-//              first network success; cache-first thereafter with a quiet
-//              background revalidation so updates land on the second load.
+//   RUNTIME  — opportunistic cache for same-origin/CORS runtime fetches:
+//              CDN libs (Leaflet, GeoTIFF, JSZip, proj4, sql.js), fonts,
+//              small data files. Populated on first network success;
+//              cache-first thereafter with a quiet background revalidation
+//              so updates land on the second load.
 //
-// What we *don't* cache:
-//   - Large DEM rasters (.tif/.tiff). Per the chosen scope (PWA shell only),
-//     DEMs are network-only. The user picks a fresh DEM, the worker sees a
-//     bare-metal fetch, no storage hit.
+// What we *don't* cache (deliberately):
+//   - Basemap/overlay tile images — tile layers load without crossorigin, so
+//     their responses are opaque and refused by the non-2xx guard in handle().
+//   - Large data files: DEM rasters (.tif/.tiff) and GeoPackages (.gpkg) are
+//     exempted from the fetch handler entirely (network/HTTP cache only), and
+//     anything over MAX_RUNTIME_BYTES is skipped as a belt-and-braces cap.
+//     The user picks a fresh DEM, the worker sees a bare-metal fetch, no
+//     storage hit.
 //   - Anything that isn't a GET. POST/PUT/DELETE are passed through.
 //
 // To force an update during dev, bump VERSION and reload — `activate` purges
@@ -393,9 +398,32 @@
 //              unconstrained partner now also traces a path to the destination.
 //              Hovering/tapping either route shows BOTH routes' energy + length
 //              (and the Δ) — bound as a hover tooltip and a click/tap popup.
-const VERSION  = "v48";
+//   v48 → v49: Full-repo review fix batch (docs/review-2026-07-01.md): admissible
+//              A* top-N heuristic + correct "até"-mode route direction; maximize
+//              no longer silently empties under an energy budget; graph-mode
+//              half-cell terrain/rasterisation/snap fix, T-junctions, chained
+//              deck flattening, metre-capped snap tolerance; native-backend
+//              maximize+network parity and exact large-DEM /single passes;
+//              crafted-.gpkg XSS hardening, bundle-import compute cancellation,
+//              calibration-probe error recovery; deploy no longer deletes the
+//              cloud VM startup script; SW precache bypasses the HTTP cache (no
+//              more stale/mixed-version installs) and stops caching big DEM/GPKG
+//              files; i18n + v1→v2 cost-model doc fixes; census pipeline fixed.
+const VERSION  = "v49";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
+
+// Belt-and-braces cap on RUNTIME entries: the .tif/.gpkg exemption above the
+// fetch handler already keeps the known big files out, but any other huge
+// response would both bloat the cache AND get fully re-downloaded in the
+// background on every reuse (stale-while-revalidate). Responses whose
+// Content-Length parses above this are served but never cached.
+const MAX_RUNTIME_BYTES = 30 * 1024 * 1024;
+
+function withinRuntimeCap(res) {
+  const len = parseInt(res.headers.get("content-length") || "", 10);
+  return !(Number.isFinite(len) && len > MAX_RUNTIME_BYTES);
+}
 
 // Paths are relative to the SW's scope (the deploy root). Keep this list
 // in sync with what index.html actually loads — anything missing from here
@@ -423,7 +451,12 @@ const PRECACHE_URLS = [
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(PRECACHE)
-      .then((cache) => cache.addAll(PRECACHE_URLS))
+      // cache: "reload" — the precache must bypass the browser HTTP cache
+      // (deploy.sh serves app.js/workers with max-age=3600), or a VERSION
+      // bump can install a stale, mixed-version shell. Still atomic.
+      .then((cache) => cache.addAll(
+        PRECACHE_URLS.map((u) => new Request(u, { cache: "reload" })),
+      ))
       // skipWaiting: don't sit in the "waiting" state behind the previous
       // SW. Combined with clients.claim() below, the new code takes effect
       // on the very next page load instead of after every tab is closed.
@@ -448,10 +481,11 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(req.url);
 
-  // Skip DEMs entirely — they're huge and the user opted out of caching
-  // them. Returning without calling respondWith() lets the browser handle
-  // the request normally.
-  if (/\.tiff?$/i.test(url.pathname)) return;
+  // Skip big data files entirely — DEM rasters and GeoPackage networks
+  // (the "Viário RMSampa" example alone is ~145 MB) go straight to the
+  // network/HTTP cache. Returning without calling respondWith() lets the
+  // browser handle the request normally.
+  if (/\.(tiff?|gpkg)$/i.test(url.pathname)) return;
 
   // For top-level navigation requests, try the network first so deploys
   // propagate quickly; fall back to the cached shell for offline launch
@@ -498,7 +532,7 @@ async function handle(event) {
     // Background refresh, ignored failures — offline browsing is fine.
     event.waitUntil(
       fetch(req).then((res) => {
-        if (res && res.ok) {
+        if (res && res.ok && withinRuntimeCap(res)) {
           const copy = res.clone();
           return caches.open(RUNTIME).then((c) => c.put(req, copy));
         }
@@ -509,9 +543,10 @@ async function handle(event) {
 
   try {
     const res = await fetch(req);
-    if (res && res.ok && res.status < 400) {
-      // Cache only successful responses. opaque (cross-origin no-cors)
-      // and 4xx/5xx are skipped to avoid poisoning the cache.
+    if (res && res.ok && res.status < 400 && withinRuntimeCap(res)) {
+      // Cache only successful responses. opaque (cross-origin no-cors),
+      // 4xx/5xx and over-cap bodies are skipped to avoid poisoning or
+      // bloating the cache.
       const copy = res.clone();
       event.waitUntil(caches.open(RUNTIME).then((c) => c.put(req, copy)));
     }

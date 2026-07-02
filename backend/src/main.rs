@@ -34,7 +34,8 @@
 //     request body:  same framing as /density, driven by Params.src +
 //                    Params.want_passes instead of ref_points
 //     response body: [u32 json_len][json {"elapsed_ms":…,"passes":bool}]
-//                    [f32 energy × N][f32 passes × N — only when want_passes]
+//                    [f32 energy × N][f64 passes × N — only when want_passes;
+//                    f64 like the JS worker's Float64Array subtreePasses]
 //   GET /health → {"ok":true,"version":…,"cores":…,"mem_budget_bytes":…,
 //                  "idle_seconds":…}  (idle_seconds = agora − último cálculo)
 //
@@ -203,9 +204,12 @@ struct Scratch {
     parents: Vec<i32>,
     settled: Vec<u8>,
     order: Vec<u32>,
-    // f32 (not f64): subtree counts are exact integers up to 2^24 and only
-    // ever divided into the f64 `Acc.density` (widened below), so this is
-    // bit-parity-safe vs the JS worker on the test grid while saving 4 B/cell.
+    // f32 (not f64): matches the JS densityField's Float32Array passes, and
+    // subtree counts widen exactly into the f64 `Acc.density` below — so the
+    // DENSITY path stays bit-parity while saving 4 B/cell. The /single path
+    // does NOT use this field: the JS single-source branch returns Float64Array
+    // passes (counts exceed 2^24 on big DEMs, where f32 would round), so
+    // compute_single accumulates in f64 via subtree_passes_f64 instead.
     passes: Vec<f32>,
     heap: RadixHeap,
 }
@@ -426,6 +430,35 @@ fn subtree_passes(s: &mut Scratch, include: Option<&[u8]>) {
     }
 }
 
+/// f64 twin of subtree_passes for the /single response: the JS worker's
+/// single-source branch returns a Float64Array (subtreePasses — counts exceed
+/// 2^24 on big DEMs, where f32 would round), so /single accumulates AND ships
+/// f64. Density keeps the f32 Scratch.passes (which matches the JS
+/// densityField's Float32Array). Reads the Scratch's parents/order without
+/// touching its f32 passes.
+fn subtree_passes_f64(s: &Scratch, include: Option<&[u8]>) -> Vec<f64> {
+    let mut passes = vec![0.0f64; s.e.len()];
+    match include {
+        Some(inc) => {
+            for &i in &s.order {
+                passes[i as usize] = f64::from(inc[i as usize]);
+            }
+        }
+        None => {
+            for &i in &s.order {
+                passes[i as usize] = 1.0;
+            }
+        }
+    }
+    for &i in s.order.iter().rev() {
+        let par = s.parents[i as usize];
+        if par >= 0 {
+            passes[par as usize] += passes[i as usize];
+        }
+    }
+    passes
+}
+
 struct Acc {
     density: Vec<f64>,
     energy_sum: Vec<f64>,
@@ -545,14 +578,19 @@ fn density_mem_budget_bytes() -> u64 {
     total.saturating_sub(3_000_000_000).max(2_000_000_000)
 }
 
-fn compute_density(g: &Grid, p: &Params, portals: &PortalAdj) -> (Vec<f64>, Vec<f32>) {
+fn compute_density(g: &Grid, dem_mask: &[u8], p: &Params, portals: &PortalAdj) -> (Vec<f64>, Vec<f32>) {
     let n = g.h * g.w;
 
-    // Same MAX_EDGE_COST bound as the JS worker's maximize mode.
+    // Same MAX_EDGE_COST bound as the JS worker's maximize mode. JS-parity
+    // requirement: energy-worker.js derives the height range from the RAW DEM
+    // mask BEFORE effMask exists (~lines 1329-1346), so this scans `dem_mask`,
+    // NOT g.mask (the DEM AND network effective mask) — a network that
+    // excludes the DEM's height extremes must not shrink the range, or the
+    // engines invert against different maxEdgeCost and diverge wholesale.
     let max_edge_cost = if p.maximize {
         let (mut min_h, mut max_h) = (f64::INFINITY, f64::NEG_INFINITY);
         for i in 0..n {
-            if g.mask[i] != 0 {
+            if dem_mask[i] != 0 {
                 let v = g.height[i] as f64;
                 min_h = min_h.min(v);
                 max_h = max_h.max(v);
@@ -667,11 +705,15 @@ fn compute_density(g: &Grid, p: &Params, portals: &PortalAdj) -> (Vec<f64>, Vec<
 /// Single-source energy field — port of energy-worker.js's from/to/round
 /// single-point path (the non-density branch). Returns the raw per-cell energy
 /// (NOT averaged like density) and, when `want_passes`, the per-cell passes
-/// count (subtree sizes). Maximize/top-N/path stay browser-only (the backend
-/// produces no routes), so this is energy + passes only. Round mode sums the
-/// forward + backward legs (masking over-budget sums in "total" mode) and
-/// filters passes to round-trip-feasible endpoints — exactly like the worker.
-fn compute_single(g: &Grid, p: &Params, portals: &PortalAdj) -> (Vec<f32>, Vec<f32>) {
+/// count (subtree sizes) as f64 — the JS branch returns Float64Array, and
+/// counts exceed 2^24 on big DEMs where f32 would round (density's f32 passes
+/// stay untouched; they mirror the JS densityField's Float32Array).
+/// Maximize/top-N/path stay browser-only (the backend produces no routes;
+/// handle_single rejects maximize with a 400), so this is energy + passes
+/// only. Round mode sums the forward + backward legs (masking over-budget
+/// sums in "total" mode) and filters passes to round-trip-feasible endpoints
+/// — exactly like the worker.
+fn compute_single(g: &Grid, p: &Params, portals: &PortalAdj) -> (Vec<f32>, Vec<f64>) {
     let n = g.h * g.w;
     let (sr, sc) = (p.src[0], p.src[1]);
     // Off-grid seed → empty field (defensive; the app always sends a valid cell).
@@ -707,9 +749,11 @@ fn compute_single(g: &Grid, p: &Params, portals: &PortalAdj) -> (Vec<f32>, Vec<f
             }
         }
         let passes = if p.want_passes {
-            subtree_passes(&mut s_f, Some(&include));
-            subtree_passes(&mut s_b, Some(&include));
-            (0..n).map(|i| s_f.passes[i] + s_b.passes[i]).collect()
+            // f64 leg sum, like the JS worker's `passes[i] += pb[i]` on
+            // Float64Arrays.
+            let pf = subtree_passes_f64(&s_f, Some(&include));
+            let pb = subtree_passes_f64(&s_b, Some(&include));
+            (0..n).map(|i| pf[i] + pb[i]).collect()
         } else {
             vec![0.0; n]
         };
@@ -719,8 +763,7 @@ fn compute_single(g: &Grid, p: &Params, portals: &PortalAdj) -> (Vec<f32>, Vec<f
         dijkstra_tree(g, sr, sc, p, reverse, max_edge_cost, portals, &mut s);
         let energy = s.e.clone();
         let passes = if p.want_passes {
-            subtree_passes(&mut s, None);
-            s.passes.clone()
+            subtree_passes_f64(&s, None)
         } else {
             vec![0.0; n]
         };
@@ -799,14 +842,18 @@ fn respond_binary(req: tiny_http::Request, out: Vec<u8>, want_gz: bool) {
 const MAX_BODY: u64 = 2 * 1024 * 1024 * 1024;
 
 /// Read + frame-parse a /density or /single body into (params, height,
-/// eff_mask, portals). The framing, masks, and portal layout are identical for
-/// both endpoints. On malformed input returns (http_status, json_error_body);
+/// dem_mask, net_eff_mask, portals). The framing, masks, and portal layout are
+/// identical for both endpoints. `net_eff_mask` is Some(DEM AND network) when
+/// has_network, else None (use dem_mask as-is) — the RAW dem_mask is returned
+/// alongside because maximize must derive its height range from it (JS parity:
+/// energy-worker.js computes maxEdgeCost over the raw mask BEFORE effMask,
+/// ~line 1330). On malformed input returns (http_status, json_error_body);
 /// the caller keeps `req` to send the response. `require_refs` rejects an empty
 /// ref_points list (/density needs them; /single uses `src` instead).
 fn parse_grid_request(
     req: &mut tiny_http::Request,
     require_refs: bool,
-) -> Result<(Params, Vec<f32>, Vec<u8>, PortalAdj), (u16, String)> {
+) -> Result<(Params, Vec<f32>, Vec<u8>, Option<Vec<u8>>, PortalAdj), (u16, String)> {
     let declared = req.body_length().unwrap_or(0) as u64;
     if declared > MAX_BODY {
         return Err((413, r#"{"error":"body too large"}"#.to_string()));
@@ -867,16 +914,18 @@ fn parse_grid_request(
     let mut height = vec![0f32; n];
     bytemuck::cast_slice_mut::<f32, u8>(&mut height).copy_from_slice(&body[off..off + 4 * n]);
     off += 4 * n;
-    let dem_mask = &body[off..off + n];
+    let dem_mask: Vec<u8> = body[off..off + n].to_vec();
     off += n;
-    // Effective mask = DEM mask AND network mask, like the JS worker.
-    let eff_mask: Vec<u8> = if params.has_network {
+    // Effective mask = DEM mask AND network mask, like the JS worker. None
+    // when no network ships (the callers then run on dem_mask directly).
+    let net_eff_mask: Option<Vec<u8>> = if params.has_network {
         let net = &body[off..off + n];
         off += n;
-        (0..n).map(|i| (dem_mask[i] != 0 && net[i] != 0) as u8).collect()
+        Some((0..n).map(|i| (dem_mask[i] != 0 && net[i] != 0) as u8).collect())
     } else {
-        dem_mask.to_vec()
+        None
     };
+    let eff_mask: &[u8] = net_eff_mask.as_deref().unwrap_or(&dem_mask);
     // Bridge portals (optional). Built on the effective mask + the height array,
     // identically to the JS worker, so portal costs match bit-for-bit.
     let pc = params.n_portals;
@@ -902,31 +951,32 @@ fn parse_grid_request(
         if params.maximize {
             HashMap::new()
         } else {
-            build_portals(&pu, &pv, &pl, &phu, &phv, &height, &eff_mask, &params)
+            build_portals(&pu, &pv, &pl, &phu, &phv, &height, eff_mask, &params)
         }
     } else {
         HashMap::new()
     };
     let _ = off;
-    Ok((params, height, eff_mask, portals))
+    Ok((params, height, dem_mask, net_eff_mask, portals))
 }
 
 fn handle_density(mut req: tiny_http::Request) {
     let t0 = Instant::now();
-    let (params, height, eff_mask, portals) = match parse_grid_request(&mut req, true) {
+    let (params, height, dem_mask, net_eff_mask, portals) = match parse_grid_request(&mut req, true) {
         Ok(v) => v,
         Err((code, msg)) => return respond_json(req, code, &msg),
     };
     let n = params.h * params.w;
     let grid = Grid {
         height: &height,
-        mask: &eff_mask,
+        mask: net_eff_mask.as_deref().unwrap_or(&dem_mask),
         h: params.h,
         w: params.w,
         dx: params.dx,
         dy: params.dy,
     };
-    let (density, energy) = compute_density(&grid, &params, &portals);
+    // dem_mask rides along for maximize's height range (raw-mask JS parity).
+    let (density, energy) = compute_density(&grid, &dem_mask, &params, &portals);
 
     let mut meta = format!(
         r#"{{"elapsed_ms":{:.1},"refs":{}}}"#,
@@ -964,19 +1014,31 @@ fn handle_density(mut req: tiny_http::Request) {
 // `src` + `want_passes` instead of `ref_points`. Response:
 //   [u32 json_len][json {"elapsed_ms":…,"passes":bool}]
 //   [f32 energy × N]            (always)
-//   [f32 passes × N]            (only when want_passes)
+//   [f64 passes × N]            (only when want_passes — f64 like the JS
+//                                worker's Float64Array subtreePasses; counts
+//                                exceed 2^24 on big DEMs, f32 would round)
 // No JSON padding: the app slice-copies both arrays (cheap for a single search),
-// so the f32 views don't need alignment.
+// so the views don't need alignment.
 fn handle_single(mut req: tiny_http::Request) {
     let t0 = Instant::now();
-    let (params, height, eff_mask, portals) = match parse_grid_request(&mut req, false) {
+    let (params, height, dem_mask, net_eff_mask, portals) = match parse_grid_request(&mut req, false) {
         Ok(v) => v,
         Err((code, msg)) => return respond_json(req, code, &msg),
     };
+    // Maximize is browser-only by design (the backend produces no inverted
+    // field on /single) — reject loudly instead of silently computing a
+    // degenerate max_edge_cost=0 field.
+    if params.maximize {
+        return respond_json(
+            req,
+            400,
+            r#"{"error":"maximize is browser-only; /single does not support it"}"#,
+        );
+    }
     let n = params.h * params.w;
     let grid = Grid {
         height: &height,
-        mask: &eff_mask,
+        mask: net_eff_mask.as_deref().unwrap_or(&dem_mask),
         h: params.h,
         w: params.w,
         dx: params.dx,
@@ -989,7 +1051,7 @@ fn handle_single(mut req: tiny_http::Request) {
         t0.elapsed().as_secs_f64() * 1000.0,
         params.want_passes
     );
-    let mut out = Vec::with_capacity(4 + meta.len() + 4 * n + if params.want_passes { 4 * n } else { 0 });
+    let mut out = Vec::with_capacity(4 + meta.len() + 4 * n + if params.want_passes { 8 * n } else { 0 });
     out.extend_from_slice(&(meta.len() as u32).to_le_bytes());
     out.extend_from_slice(meta.as_bytes());
     out.extend_from_slice(bytemuck::cast_slice(&energy));

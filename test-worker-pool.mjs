@@ -136,6 +136,66 @@ function assert(cond, label) {
   assert(r.routes.every((x, i) => i === 0 || x.energy >= r.routes[i - 1].energy - 1e-9),
     "route energies non-decreasing");
 }
+{
+  console.log("A* optimality on descents (admissible heuristic)");
+  // Two masked corridors from seed to goal, both dropping 90 m overall:
+  //   B (decoy, row 25): a steep 2-step drop (ε = 0, no recovery) then flat —
+  //     under the old aRoll·dist heuristic its f is constant along the row, so
+  //     the goal settled through it FIRST even though it's ~50% more expensive;
+  //   A (optimal, via row 5): flat at the top, then a long gentle descent at
+  //     grade = abRatio where a metre costs only epsOffset·(aRoll+aAero) —
+  //     the régime the old heuristic overestimated (inadmissible).
+  // Route #1 must match the Dijkstra field's E[goal] — the true optimum.
+  const H2 = 50, W2 = 120, N2 = H2 * W2;
+  const hgt = new Float32Array(N2).fill(890);
+  const msk = new Uint8Array(N2); // all blocked; carve the corridors below
+  const cost2 = { aRoll: 1, aAero: 0, beta: 30, climbThr: 0.05, abRatio: 1 / 30, epsOffset: 0.13 };
+  // Corridor B: row 25, cols 5..115 — drop 890→845→800 then flat at 800.
+  for (let c = 5; c <= 115; c++) {
+    const i = 25 * W2 + c;
+    msk[i] = 1;
+    hgt[i] = c === 5 ? 890 : c === 6 ? 845 : 800;
+  }
+  // Corridor A: connector (rows 5..24, col 5, flat 890), row 5 cols 5..115
+  // (flat to col 65, then −1 m/step = grade 1/30), connector (rows 6..24,
+  // col 115) continuing the same gentle descent down to 800 at the goal.
+  for (let r = 5; r <= 24; r++) { const i = r * W2 + 5; msk[i] = 1; hgt[i] = 890; }
+  for (let c = 5; c <= 115; c++) {
+    const i = 5 * W2 + c;
+    msk[i] = 1;
+    hgt[i] = c <= 65 ? 890 : 890 - (c - 65);       // 890 → 840 at col 115
+  }
+  for (let r = 6; r <= 24; r++) { const i = r * W2 + 115; msk[i] = 1; hgt[i] = 840 - 2 * (r - 5); } // 838 → 802
+  const dmsg = (over) => ({
+    kind: "run", H: H2, W: W2, dx: 30, dy: 30, cost: cost2,
+    seedR: 25, seedC: 5, goalR: 25, goalC: 115, mode: "from",
+    height: new Float32Array(hgt), mask: new Uint8Array(msk), ...over,
+  });
+  const r = run(dmsg({ wantTopN: true, nRoutes: 1 }));
+  const goalIdx = 25 * W2 + 115;
+  assert(r.routes?.length >= 1, "descent grid: a route was found");
+  assert(Number.isFinite(r.energy[goalIdx]), "descent grid: goal reachable in the field");
+  const dE = Math.abs(r.routes[0].energy - r.energy[goalIdx]);
+  assert(dE < 1e-2,
+    `route #1 is optimal: energy = E[goal] (${r.routes[0].energy.toFixed(1)} vs ${r.energy[goalIdx].toFixed(1)}, |Δ| = ${dE.toExponential(1)})`);
+  // Sanity: the decoy corridor really is more expensive than the optimum —
+  // otherwise this test wouldn't distinguish the heuristics.
+  assert(r.energy[goalIdx] < 3300 - 1, `decoy corridor strictly worse (E[goal] = ${r.energy[goalIdx].toFixed(1)} < 3300)`);
+}
+{
+  console.log("mode-to top-N routes score the travel direction dst→seed");
+  // On asymmetric terrain the seed→dst and dst→seed energies differ; the
+  // top-1 route in mode "to" must measure the SAME direction as the field /
+  // best path (travel dst→seed), i.e. equal E_to[goal] = pathEnergy.
+  const to = run(msg({ mode: "to", wantTopN: true, nRoutes: 1 }));
+  const from = run(msg({ mode: "from", wantTopN: true, nRoutes: 1 }));
+  assert(Math.abs(from.pathEnergy - to.pathEnergy) > 1,
+    `terrain is asymmetric (from ${from.pathEnergy.toFixed(1)} vs to ${to.pathEnergy.toFixed(1)}) — the test bites`);
+  const dTo = Math.abs(to.routes[0].energy - to.pathEnergy);
+  assert(dTo < 5e-2, `mode "to" route #1 energy = reverse-field E[dst] (|Δ| = ${dTo.toExponential(1)})`);
+  const dFrom = Math.abs(from.routes[0].energy - from.pathEnergy);
+  assert(dFrom < 5e-2, `mode "from" route #1 energy = field E[dst] (|Δ| = ${dFrom.toExponential(1)})`);
+}
 
 // ---- 2. pooled density partials ≡ single-run density ----
 const refs = [[40, 60], [100, 200], [180, 30], [220, 230], [128, 128], [30, 240]];

@@ -178,6 +178,8 @@ const STRINGS = {
   "route.network":       { pt: "rota na rede", en: "network route" },
   "route.terrain":       { pt: "rota no terreno", en: "terrain route" },
   "route.delta":         { pt: "Δ rede − terreno", en: "Δ network − terrain" },
+  "route.terrain_meta":  { pt: "rota no terreno E: <span class=\"v\">{0}</span>, L=<span class=\"v\">{1} km</span>", en: "terrain route E: <span class=\"v\">{0}</span>, L=<span class=\"v\">{1} km</span>" },
+  "route.round_note":    { pt: "energia das rotas alternativas: apenas o trecho de ida", en: "alternative-route energies: outbound leg only" },
   "net.interp":          { pt: "Interpolar entre células fora da rede", en: "Interpolate across non-network cells" },
   "net.max_distance":    { pt: "distância máx (células)", en: "max distance (cells)" },
   "net.smoothing":       { pt: "suavizações", en: "smoothing iters" },
@@ -302,7 +304,7 @@ const STRINGS = {
   "help.p.workers":      { pt: "Avançado: paraleliza a densidade entre este número de Web Workers. 0 = auto (dimensionado pelos núcleos e memória disponível). Só aumente se sua máquina tiver mais RAM do que o navegador reporta — cada worker usa cerca de 5 GB em um DEM grande, então exceder pode travar a aba.", en: "Advanced: parallelise density across this many Web Workers. 0 = auto (sized to cores and available memory). Only raise it if your machine has more RAM than the browser reports — each worker needs roughly 5 GB on a large DEM, so over-committing can crash the tab." },
   "param.maximize":      { pt: "Maximizar energia (inverter otimização)", en: "Maximize energy (reverse optimization)" },
   "param.max_length":    { pt: "Comprimento L (arestas, 0 = sem restrição)", en: "Path length L (edges, 0 = unconstrained)" },
-  "help.p.maximize":     { pt: "0: Dijkstra invertido (geometricamente curto, custo denso). L>0: DP em camadas encontra o caminho de custo máximo com exatamente L arestas entre src e dst. Limite de memória ≈ 256 MB ⇒ L·H·W precisa caber; DEMs grandes limitam L a poucas dezenas.", en: "0: inverted Dijkstra (geometrically short, cost-dense). L>0: layered DP finds the max-cost path of exactly L edges from src to dst. Memory cap ≈ 256 MB ⇒ L·H·W must fit; large DEMs limit L to a few dozen." },
+  "help.p.maximize":     { pt: "0: Dijkstra invertido (geometricamente curto, custo denso). L>0: DP em camadas encontra o caminho de custo máximo com exatamente L arestas entre src e dst. Limite de memória ≈ 256 MB ⇒ L·H·W precisa caber; DEMs grandes limitam L a poucas dezenas. O orçamento de energia não se aplica neste modo (os custos invertidos estão em outra unidade).", en: "0: inverted Dijkstra (geometrically short, cost-dense). L>0: layered DP finds the max-cost path of exactly L edges from src to dst. Memory cap ≈ 256 MB ⇒ L·H·W must fit; large DEMs limit L to a few dozen. The energy budget does not apply in this mode (the inverted costs are in different units)." },
   "param.n_refs":        { pt: "N referências", en: "N references" },
   "param.ref_source":    { pt: "Origem das referências", en: "Reference source" },
   "ref.click":           { pt: "clicar no mapa", en: "click on map" },
@@ -405,6 +407,7 @@ const STRINGS = {
   "order.move_down":     { pt: "Mover para baixo", en: "Move down" },
   "estimate.calibrating":{ pt: "≈ estimando…", en: "≈ estimating…" },
   "param.budget.title":  { pt: "≤0 = ∞ (sem orçamento)", en: "≤0 = ∞ (no budget)" },
+  "param.budget.maximize_title": { pt: "Sem efeito ao maximizar: os custos são invertidos (outra unidade), então o orçamento em kJ não se aplica.", en: "No effect under maximize: costs are inverted (different units), so the kJ budget doesn't apply." },
   "compute.need_dem":    { pt: "Carregue um DEM primeiro", en: "Load a DEM first" },
   "compute.need_src":    { pt: "Clique no mapa para definir a origem", en: "Click the map to set the source" },
   "compute.need_ref":    { pt: "Defina ao menos 1 ponto de referência", en: "Place at least 1 reference point" },
@@ -465,6 +468,11 @@ const STRINGS = {
   "io.gpkg_invalid":     { pt: "Arquivo .gpkg inválido (sem gpkg_geometry_columns).", en: "Invalid .gpkg (no gpkg_geometry_columns)." },
   "io.gpkg_no_lines":    { pt: "Nenhuma linha encontrada no .gpkg.", en: "No line features found in the .gpkg." },
   "bridges.need_geographic": { pt: "As pontes precisam de um DEM geográfico (lon/lat).", en: "Bridges need a geographic (lon/lat) DEM." },
+  "bridges.osm_need_geographic": { pt: "Puxar pontes do OSM precisa de um DEM geográfico (lon/lat).", en: "OSM bridge pull needs a geographic (lon/lat) DEM." },
+  "bridges.pull_failed":     { pt: "Falha ao puxar pontes do OSM: {0}", en: "OSM bridge pull failed: {0}" },
+  "bridges.none_overpass":   { pt: "O Overpass não retornou pontes/túneis nesta extensão.", en: "Overpass returned no bridges/tunnels in this extent." },
+  "bridges.none_usable":     { pt: "{0}: nenhuma ponte/túnel utilizável neste DEM.", en: "{0}: no usable bridges/tunnels on this DEM." },
+  "bridges.loaded":          { pt: "{0} tabuleiro(s) de ponte/túnel carregado(s).", en: "{0} bridge/tunnel deck(s) loaded." },
   "ref.export_done":     { pt: "{0} referência(s) exportada(s).", en: "Exported {0} reference(s)." },
   "credit":              { pt: "feito por Cláudio e dirigido pelos neogeógrafos geomorfológicos", en: "made by Cláudio, directed by the geomorphological neo-geographers" },
 
@@ -486,10 +494,10 @@ const STRINGS = {
   "help.h.bundle":       { pt: "Salvar / restaurar", en: "Save / reload" },
   "help.p.bundle":       { pt: "<em>Baixar bundle (.zip)</em> empacota um <code>metadata.jsonld</code> com todos os parâmetros, mais GeoTIFFs georeferenciados (energy.tif, passes.tif, network.tif, impassable.tif) que abrem direto no QGIS. Para reproduzir: carregue o mesmo DEM, depois leia o JSON-LD ou ZIP.", en: '<em>Download bundle (.zip)</em> packs a <code>metadata.jsonld</code> with every parameter, plus georeferenced GeoTIFFs (energy.tif, passes.tif, network.tif, impassable.tif) that open directly in QGIS. To reproduce: load the same DEM, then read the JSON-LD or ZIP back.' },
   "help.h.cost":         { pt: "Modelo de custo assimétrico", en: "Asymmetric cost model" },
-  "help.p.cost":         { pt: "Cada movimento entre células adjacentes (4 cardeais + 4 diagonais) tem custo em \"joules normalizados\". Com <code>Δh = h_v − h_u</code>:", en: 'Each move between adjacent cells (4 cardinal + 4 diagonal) costs "normalised joules". With <code>Δh = h_v − h_u</code>:' },
-  "help.formula":        { pt: "subida (Δh ≥ 0):  α·dist + β·Δh\ndescida (Δh < 0): max(0, α·dist − η·β·|Δh|)",
-                           en: "uphill (Δh ≥ 0):   α·dist + β·Δh\ndownhill (Δh < 0): max(0, α·dist − η·β·|Δh|)" },
-  "help.p.cost_extra":   { pt: "Padrão <code>α = 0.008</code> (8 mJ/m horizontal), <code>β = 1</code> (1 J/m de subida), <code>η = 0.1</code> (10% da descida vira recuperação). Modelo grosseiro de ciclista: andar no plano custa pouco, subir custa muito, descer pode até <em>devolver</em> energia até zero.", en: 'Default <code>α = 0.008</code> (8 mJ/m horizontal), <code>β = 1</code> (1 J/m climbing), <code>η = 0.1</code> (10% of the climb is recovered). A rough cyclist model: flat is cheap, climbing is expensive, descending can <em>refund</em> down to zero.' },
+  "help.p.cost":         { pt: "Cada movimento entre células adjacentes (4 cardeais + 4 diagonais) custa em kJ, pelo modelo v2: os parâmetros físicos (massa total <em>m</em>, <em>Crr</em>, <em>CdA</em>, <em>ρ</em>, eficiência <em>k_eff</em>, potência de cruzeiro no plano, limiar de subida, suavização) são reduzidos uma vez ao pacote <code>{a_rol, a_aero, β, limiar, α/β, ε_offset}</code> (kJ/m e kJ). Com <code>Δh = h_v − h_u</code> e <code>d</code> a distância no chão:", en: 'Each move between adjacent cells (4 cardinal + 4 diagonal) costs kJ, per the v2 model: the physical parameters (total mass <em>m</em>, <em>Crr</em>, <em>CdA</em>, <em>ρ</em>, efficiency <em>k_eff</em>, cruise power on the flat, climb threshold, smoothing) are folded once into the bundle <code>{a_roll, a_aero, β, threshold, α/β, ε_offset}</code> (kJ/m and kJ). With <code>Δh = h_v − h_u</code> and <code>d</code> the ground distance:' },
+  "help.formula":        { pt: "subida (Δh ≥ 0):  a_rol·d + (a_aero·d se rampa < limiar) + β·Δh\ndescida (Δh < 0): max(0, a_rol·d + a_aero·d − ε·β·|Δh|)\nε = clamp₀₁(min(1, (α/β)·d/|Δh|) − 0.13)",
+                           en: "uphill (Δh ≥ 0):   a_roll·d + (a_aero·d if grade < threshold) + β·Δh\ndownhill (Δh < 0): max(0, a_roll·d + a_aero·d − ε·β·|Δh|)\nε = clamp₀₁(min(1, (α/β)·d/|Δh|) − 0.13)" },
+  "help.p.cost_extra":   { pt: "Nos padrões (75 kg, Crr 0.008, CdA 0.45, ρ 1.1, k_eff 0.97, 80 W no plano), <code>β = m·g/k_eff ≈ 0.76 kJ/m</code> de subida; o arrasto (<code>a_aero</code>) só é cobrado abaixo do <em>limiar de subida</em> (2%) — subindo forte a velocidade cai e o arrasto some. Na descida a recuperação <code>ε</code> depende da rampa: descidas suaves devolvem quase todo o custo de resistência, descidas íngremes não devolvem nada (nunca abaixo de zero). Com <em>maximizar</em> ligado o orçamento de energia não se aplica (custos invertidos).", en: 'At the defaults (75 kg, Crr 0.008, CdA 0.45, ρ 1.1, k_eff 0.97, 80 W on the flat), <code>β = m·g/k_eff ≈ 0.76 kJ/m</code> of climb; aero (<code>a_aero</code>) is only charged below the <em>climb threshold</em> (2%) — on a steep climb speed drops and drag vanishes. Downhill the recovery <code>ε</code> depends on grade: gentle descents refund most of the resistance cost, steep ones refund nothing (never below zero). With <em>maximize</em> on, the energy budget does not apply (inverted costs).' },
   "help.h.field":        { pt: "Campo de energia", en: "Energy field" },
   "help.p.field":        { pt: "Dijkstra sobre todas as células passáveis a partir do ponto-fonte (ou para o ponto-destino, com arestas reversas) dá o custo mínimo de chegar a cada célula. É isso que a camada <em>Energia</em> renderiza.", en: 'Dijkstra over all passable cells starting from the source (or terminating at the destination, with reversed edges) gives the minimum cost to reach each cell. That\'s what the <em>Energy</em> layer renders.' },
   "help.h.modes":        { pt: "Modos", en: "Modes" },
@@ -1157,11 +1165,27 @@ document.addEventListener("DOMContentLoaded", () => {
   // Top-N toggle reveals N + penalty + repulsion inputs
   const topnCheck = document.getElementById("want-topn");
   // Maximise toggle reveals the L-length input. Sync once on load so the
-  // panel state matches the checkbox after a bundle reload too.
+  // panel state matches the checkbox after a bundle reload too. #maximize
+  // has had no UI control since v36 (engine + backend still support the
+  // mode; only the toggle was pulled) — this stays dormant (maxCheck null,
+  // guarded below) until/unless the control is restored.
   const maxCheck = document.getElementById("maximize");
   const maxExtra = document.getElementById("maximize-extra");
   if (maxCheck && maxExtra) {
-    const sync = () => { maxExtra.style.display = maxCheck.checked ? "" : "none"; estimateRunTime(); };
+    const sync = () => {
+      maxExtra.style.display = maxCheck.checked ? "" : "none";
+      // The energy budget (real kJ) has no meaning against maximize's
+      // INVERTED costs (maxEdgeCost units) — the run ignores it, so grey
+      // the input out and say why in its tooltip (via data-i18n-title so a
+      // language toggle keeps the right text).
+      const eMaxInput = document.getElementById("e-max");
+      if (eMaxInput) {
+        eMaxInput.disabled = maxCheck.checked;
+        eMaxInput.dataset.i18nTitle = maxCheck.checked ? "param.budget.maximize_title" : "param.budget.title";
+        eMaxInput.title = t(eMaxInput.dataset.i18nTitle);
+      }
+      estimateRunTime();
+    };
     maxCheck.addEventListener("change", sync);
     sync();
   }
@@ -1776,6 +1800,9 @@ const state = {
   calibration: null,
   calibrationGen: 0,
   probeWorker: null,
+  // Set when the calibration probe errors: estimateRunTime blanks the
+  // estimate instead of showing "estimating…" forever (computeDone retries).
+  calibrationFailed: false,
   backendCores: null,
   // Snapshot of the last compute's config (engine, refs, budget, mode), taken
   // at run start so the post-compute online correction can compare the
@@ -2505,6 +2532,7 @@ async function loadDemFromArrayBuffer(buf, label) {
   // fresh probe lands.
   state.calibration = null;
   state.calibrationGen++;
+  state.calibrationFailed = false;
   if (state.probeWorker) { state.probeWorker.terminate(); state.probeWorker = null; }
   // Drop any previously loaded vector network — its rasterised mask is
   // sized to the *previous* DEM's H×W and would corrupt the next compute
@@ -2998,7 +3026,12 @@ async function loadVectorNetwork(file) {
     // "geom", but "geometry"/"shape" exist in the wild; hardcoding "geom"
     // made those files fail to load.
     const geomCol   = cont[0].values[0][1] || "geom";
-    const srsId     = cont[0].values[0][2];
+    // SQLite lets TEXT live in INTEGER columns, so a crafted .gpkg could
+    // smuggle HTML through srs_id into the innerHTML sinks below (and into
+    // the gpkg_spatial_ref_sys query). Coerce once at the source; the
+    // 0 fallback means "undefined SRS" and keeps the isSrcWgs check working.
+    const rawSrsId  = Number(cont[0].values[0][2]);
+    const srsId     = Number.isFinite(rawSrsId) ? rawSrsId : 0;
 
     // Detect attribute columns we can flag bridges/tunnels with — OSM-export
     // schemas vary: some have dedicated bridge/tunnel/layer columns, others
@@ -3310,7 +3343,10 @@ async function loadOsmNetwork() {
         lines.push(latlngs);
         const tg = el.tags || {};
         const deck = (tg.bridge && tg.bridge !== "no") || tg.tunnel === "yes";
-        const layer = parseInt(tg.layer, 10) || (tg.tunnel === "yes" ? -1 : 1);
+        // 0-safe: an explicit layer=0 is a real value (|| would coerce it to
+        // the default); missing/unparseable keeps the tunnel −1 / bridge 1.
+        const layerParsed = parseInt(tg.layer, 10);
+        const layer = Number.isFinite(layerParsed) ? layerParsed : (tg.tunnel === "yes" ? -1 : 1);
         meta.push(deck ? { deck: true, layer } : { deck: false, layer: 0 });
         if (deck) bridgeCandidates.push({ latlngs, kind: tg.tunnel === "yes" ? "tunnel" : "bridge", layer, name: tg["bridge:name"] || tg.name || null });
       }
@@ -3345,12 +3381,12 @@ function llToCell(lat, lng) {
 }
 
 async function loadOsmBridges() {
-  if (!state.dem) { status.innerHTML = '<span style="color:#ff6b6b">Load a DEM first.</span>'; return; }
+  if (!state.dem) { status.innerHTML = `<span style="color:#ff6b6b">${t("status.load_dem_first")}</span>`; return; }
   // OSM coords are lon/lat; the cell mapping (llToCell) only holds for a
   // geographic (EPSG:4326) DEM. Refuse on a projected DEM rather than place
   // bridges on garbage cells (mirrors the map-click / ref-file guards).
   if (!state.dem.isGeographic) {
-    status.innerHTML = '<span style="color:#ff6b6b">OSM bridge pull needs a geographic (lon/lat) DEM.</span>';
+    status.innerHTML = `<span style="color:#ff6b6b">${t("bridges.osm_need_geographic")}</span>`;
     return;
   }
   const { originX, originY, H, W, dx, dy } = state.dem;
@@ -3360,7 +3396,7 @@ async function loadOsmBridges() {
   const west  = Math.max(b.getWest(),  originX);
   const east  = Math.min(b.getEast(),  originX + W * dx);
   if (!(south < north && west < east)) {
-    status.innerHTML = '<span style="color:#ff6b6b">The current map view doesn\'t intersect the DEM — pan to the DEM first.</span>';
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.osm_no_intersect")}</span>`;
     return;
   }
   const withTunnels = !!document.getElementById("bridge-tunnels")?.checked;
@@ -3416,11 +3452,11 @@ async function loadOsmBridges() {
         eleB: vEle[vEle.length - 1] ?? wayEle ?? lastTagged ?? null,
       });
     }
-    if (!ways.length) throw new Error("Overpass returned no bridges/tunnels in this extent.");
+    if (!ways.length) throw new Error(t("bridges.none_overpass"));
     installBridgesFromWays(ways, "OSM");
   } catch (err) {
     console.error("[osm-bridges]", err);
-    status.innerHTML = `<span style="color:#ff6b6b">OSM bridge pull failed: ${escapeHtml(err.message)}</span>`;
+    status.innerHTML = `<span style="color:#ff6b6b">${t("bridges.pull_failed", escapeHtml(err.message))}</span>`;
   } finally {
     progress.classList.remove("active");
     if (btn) btn.disabled = false;
@@ -3431,7 +3467,7 @@ async function loadOsmBridges() {
 // bridge way at its abutments, so the first/last vertex are the ground ends.
 function installBridgesFromWays(ways, sourceLabel) {
   if (!state.dem.isGeographic) {
-    status.innerHTML = '<span style="color:#ff6b6b">Bridges need a geographic (lon/lat) DEM.</span>';
+    status.innerHTML = `<span style="color:#ff6b6b">${t("bridges.need_geographic")}</span>`;
     return false;
   }
   const { H, W, dxM, dyM, mask } = state.dem;
@@ -3457,7 +3493,7 @@ function installBridgesFromWays(ways, sourceLabel) {
       eleA: Number.isFinite(w.eleA) ? w.eleA : null, eleB: Number.isFinite(w.eleB) ? w.eleB : null });
   }
   if (!bridges.length) {
-    status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(sourceLabel)}: no usable bridges/tunnels on this DEM.</span>`;
+    status.innerHTML = `<span style="color:#ff6b6b">${t("bridges.none_usable", escapeHtml(sourceLabel))}</span>`;
     return false;
   }
   state.bridges = bridges;
@@ -3466,7 +3502,7 @@ function installBridgesFromWays(ways, sourceLabel) {
   updateBridgeMeta();
   applyBridgeOverlay();
   markBridgesDirty(true);
-  status.textContent = `${bridges.length} bridge/tunnel deck(s) loaded.`;
+  status.textContent = t("bridges.loaded", bridges.length);
   return true;
 }
 
@@ -3503,6 +3539,7 @@ function markBridgesDirty(reprobe = false) {
   if (reprobe && state.dem) {
     state.calibration = null;
     state.calibrationGen++;
+    state.calibrationFailed = false;
     if (state.probeWorker) { state.probeWorker.terminate(); state.probeWorker = null; }
     startCalibrationProbe();
   }
@@ -3862,6 +3899,7 @@ function markImpassableDirty(reprobe = false) {
   if (reprobe && state.dem) {
     state.calibration = null;
     state.calibrationGen++;
+    state.calibrationFailed = false;
     if (state.probeWorker) { state.probeWorker.terminate(); state.probeWorker = null; }
     startCalibrationProbe();
   }
@@ -4558,7 +4596,11 @@ function rasterizeGraphEnergy(graph, result) {
     const steps = Math.max(1, Math.ceil(Math.hypot(r1 - r0, c1 - c0)));
     for (let s = 0; s <= steps; s++) {
       const f = s / steps;
-      const rr = Math.round(r0 + (r1 - r0) * f), cc = Math.round(c0 + (c1 - c0) * f);
+      // Fractional coords: integer values are cell CORNERS, so point r lives
+      // in cell floor(r) — round() would shift the stamp half a cell. Clamp
+      // so a point exactly on the far boundary lands in the edge cell.
+      const rr = Math.min(H - 1, Math.max(0, Math.floor(r0 + (r1 - r0) * f)));
+      const cc = Math.min(W - 1, Math.max(0, Math.floor(c0 + (c1 - c0) * f)));
       const ev = (fA ? eA : eB) * (1 - f) + (fB ? eB : eA) * f;
       for (let pdr = -halfWidth; pdr <= halfWidth; pdr++) {
         const rrr = rr + pdr; if (rrr < 0 || rrr >= H) continue;
@@ -4596,7 +4638,9 @@ function rasterizeGraphPasses(graph, edgePasses) {
     const steps = Math.max(1, Math.ceil(Math.hypot(r1 - r0, c1 - c0)));
     for (let s = 0; s <= steps; s++) {
       const f = s / steps;
-      const rr = Math.round(r0 + (r1 - r0) * f), cc = Math.round(c0 + (c1 - c0) * f);
+      // Same corner-based convention as rasterizeGraphEnergy: floor + clamp.
+      const rr = Math.min(H - 1, Math.max(0, Math.floor(r0 + (r1 - r0) * f)));
+      const cc = Math.min(W - 1, Math.max(0, Math.floor(c0 + (c1 - c0) * f)));
       for (let pdr = -halfWidth; pdr <= halfWidth; pdr++) {
         const rrr = rr + pdr; if (rrr < 0 || rrr >= H) continue;
         for (let pdc = -halfWidth; pdc <= halfWidth; pdc++) {
@@ -5480,7 +5524,7 @@ runBtn.addEventListener("click", async () => {
   // sane range, so edge weights stay non-negative and the time estimate finite).
   const cost = readCost();
   const eMaxRaw = parseFloat(document.getElementById("e-max")?.value);
-  const eMax = Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0;
+  let eMax = Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0;
   // Round mode only: budget caps each leg ("leg", default — totals reach
   // 2·eMax) or the round-trip sum ("total").
   const eMaxMode = document.getElementById("e-max-mode")?.value || "leg";
@@ -5500,6 +5544,11 @@ runBtn.addEventListener("click", async () => {
   // refuses if L·H·W exceeds the cap.
   const maximize       = !!document.getElementById("maximize")?.checked;
   const maximizeLength = Math.max(0, parseInt(document.getElementById("maximize-length")?.value, 10) || 0);
+  // The budget is in REAL kJ, but under maximize every edge cost is INVERTED
+  // against MAX_EDGE_COST (hundreds of kJ per edge) — a realistic budget
+  // would prune the whole field to empty. The budget does not apply; forcing
+  // 0 here covers every payload built below (baseMsg, backend, graph).
+  if (maximize) eMax = 0;
   // Density follows the global Mode select instead of having its own
   // direction toggle.
   const densityMode  = mode;
@@ -5771,22 +5820,9 @@ runBtn.addEventListener("click", async () => {
         [filled.buffer, mask.buffer, networkMask.buffer],
       );
     };
-    const cores = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
-    // Budget the interp pool against deviceMemory like densityPoolSize (GB, spec-
-    // capped at 8) with the #max-workers override, instead of a fixed 1.5 GB that
-    // pinned huge DEMs to ONE worker. Each worker holds the full grid (~6·N bytes:
-    // energy f32 + mask + networkMask) since rays read past band edges. The interp
-    // runs AFTER the Dijkstra workers are freed (and in Cloud mode the browser
-    // never ran them), so this RAM is genuinely available.
-    const devMemGB = navigator.deviceMemory || 4;
-    const memBudget = Math.max(1.5e9, devMemGB * 1e9 * 0.45);
-    const memCap = Math.max(1, Math.floor(memBudget / (6 * N)));
-    const userMax = parseInt(document.getElementById("max-workers")?.value, 10);
-    const overrideN = Number.isFinite(userMax) && userMax > 0 ? userMax : 0;
-    const bandCap = Math.ceil(H / 64);
-    const P = overrideN
-      ? Math.max(1, Math.min(bandCap, overrideN))
-      : Math.max(1, Math.min(cores, memCap, bandCap));
+    // Pool sizing lives in interpPoolSize — shared with the time estimate
+    // (predictInterpMs) so runner and estimator can never drift.
+    const P = interpPoolSize(N, H);
     if (P <= 1) {
       // Single worker — smoothing handled worker-side in the same job.
       const { mask, networkMask } = interpPayload();
@@ -6085,16 +6121,18 @@ runBtn.addEventListener("click", async () => {
       try {
         const dv = new DataView(buf);
         const jlen = dv.getUint32(0, true);
-        const expect = 4 + jlen + 4 * N + (wantPasses ? 4 * N : 0);
+        const expect = 4 + jlen + 4 * N + (wantPasses ? 8 * N : 0);
         if (buf.byteLength !== expect) {
           throw new Error(`backend response ${buf.byteLength} B, expected ${expect} B`);
         }
         let off = 4 + jlen;
         // Slice-copy (a single search, so the copy is cheap and the views need
-        // no alignment): energy first, then passes when present.
+        // no alignment): f32 energy first, then f64 passes when present — the
+        // backend ships /single passes as f64, matching the JS worker's
+        // Float64Array (counts exceed 2^24 on big DEMs).
         const energy = new Float32Array(buf.slice(off, off + 4 * N));
         off += 4 * N;
-        const passes = wantPasses ? new Float32Array(buf.slice(off, off + 4 * N)) : null;
+        const passes = wantPasses ? new Float64Array(buf.slice(off, off + 8 * N)) : null;
         progressBar.style.width = "100%";
         return { energy, passes };
       } catch (err) {
@@ -6435,8 +6473,13 @@ runBtn.addEventListener("click", async () => {
       height: grid.height, mask: grid.mask,
       H: state.dem.H, W: state.dem.W, dxM: state.dem.dxM, dyM: state.dem.dyM,
     };
+    // Node-snap tolerance: the engine takes CELLS, but a fixed 0.5 scales with
+    // resolution (45 m on COP90 — coarse DEMs collapse distinct junctions).
+    // Cap the physical size at 15 m; on FABDEM 30 m this stays exactly 0.5.
+    const cellMetres = Math.min(state.dem.dxM, state.dem.dyM);
+    const snapTolCells = Math.min(0.5, 15 / cellMetres);
     wb.postMessage(
-      { kind: "graphBuild", lines: networkLinesToCellLines(), dem, opts: { junctionMode: graphJunctionMode(), snapTolCells: 0.5, stepCells: 1, lineMeta: state.networkLinesMeta }, gen },
+      { kind: "graphBuild", lines: networkLinesToCellLines(), dem, opts: { junctionMode: graphJunctionMode(), snapTolCells, stepCells: 1, lineMeta: state.networkLinesMeta }, gen },
       [dem.height.buffer, dem.mask.buffer],
     );
   };
@@ -6619,16 +6662,19 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
         (r.shared > 0 ? `, shared <span class="v">${r.shared}</span>` : "")
       );
     }
+    // Round mode: the round FIELD is fwd+bwd, but the A* alternatives are
+    // still scored seed→goal only (by design) — say so, or the route
+    // energies look inconsistent with the field.
+    if ((document.getElementById("mode")?.value || "from") === "round") {
+      meta.push(t("route.round_note"));
+    }
   } else if (pathEnergy != null) {
     meta.push(`path E: <span class="v">${pathEnergy.toExponential(3)}</span>`);
     meta.push(`length: <span class="v">${(pathLengthM / 1000).toFixed(2)} km</span>`);
   }
   // Compare run: the unconstrained best terrain route, alongside the network one.
   if (pathAlt && pathAlt.length && pathAltEnergy != null) {
-    meta.push(
-      `terrain route E: <span class="v">${pathAltEnergy.toExponential(3)}</span>, ` +
-      `L=<span class="v">${(pathAltLengthM / 1000).toFixed(2)} km</span>`
-    );
+    meta.push(t("route.terrain_meta", pathAltEnergy.toExponential(3), (pathAltLengthM / 1000).toFixed(2)));
   }
   resultMeta.innerHTML = meta.join("<br/>");
   resultMeta.removeAttribute("data-i18n"); // live stats — don't let a lang toggle reset to "—"
@@ -7531,7 +7577,8 @@ function sampleDemElevation(lat, lng) {
   if (!state.dem || !state.dem.isGeographic) return null;
   const { H, W, height, mask } = state.dem;
   const [rf, cf] = latLngToCellFrac(lat, lng);
-  const r = Math.round(rf), c = Math.round(cf);
+  // Corner-based fractional coords: the point lies in cell floor(r), not round(r).
+  const r = Math.floor(rf), c = Math.floor(cf);
   if (r < 0 || r >= H || c < 0 || c >= W) return null;
   const idx = r * W + c;
   return mask[idx] ? height[idx] : null;
@@ -7728,6 +7775,27 @@ function densityPoolSize({ N, K, round }) {
   return overrideN
     ? Math.max(1, Math.min(K, overrideN))
     : Math.max(1, Math.min(K, cores, memCap));
+}
+
+// Interp worker-pool size, shared by runInterp AND the time estimate
+// (predictInterpMs) so they can never drift — same rule as densityPoolSize.
+// Each band worker holds the FULL grid (~6·N bytes: energy f32 + mask +
+// networkMask) since rays read past band edges; budgeted against
+// deviceMemory (spec-capped at 8 GB) with the #max-workers override
+// (clamped by the band cap). The interp runs AFTER the Dijkstra workers are
+// freed (and in Cloud mode the browser never ran them), so this RAM is
+// genuinely available.
+function interpPoolSize(N, H) {
+  const cores = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
+  const devMemGB = navigator.deviceMemory || 4;
+  const memBudget = Math.max(1.5e9, devMemGB * 1e9 * 0.45);
+  const memCap = Math.max(1, Math.floor(memBudget / (6 * N)));
+  const userMax = parseInt(document.getElementById("max-workers")?.value, 10);
+  const overrideN = Number.isFinite(userMax) && userMax > 0 ? userMax : 0;
+  const bandCap = Math.ceil(H / 64);
+  return overrideN
+    ? Math.max(1, Math.min(bandCap, overrideN))
+    : Math.max(1, Math.min(cores, memCap, bandCap));
 }
 
 // Cache the native backend's core count from /health so the time estimate's
@@ -7980,6 +8048,16 @@ function startCalibrationProbe() {
   state.probeWorker = w;
   w.onmessage = (ev) => {
     const m = ev.data;
+    if (m.kind === "error") {
+      // The probe threw in the worker — don't leak the worker or leave the
+      // estimate stuck on "estimating…" until the next DEM load. Flag the
+      // failure so estimateRunTime blanks instead; computeDone retries later.
+      console.warn("[probe] calibration probe failed:", m.message);
+      w.terminate();
+      if (state.probeWorker === w) state.probeWorker = null;
+      if (probeGen === state.calibrationGen) { state.calibrationFailed = true; estimateRunTime(); }
+      return;
+    }
     if (m.kind !== "probe-done") return;
     w.terminate();
     if (state.probeWorker === w) state.probeWorker = null;
@@ -8008,7 +8086,11 @@ function startCalibrationProbe() {
     };
     estimateRunTime();
   };
-  w.onerror = () => { w.terminate(); if (state.probeWorker === w) state.probeWorker = null; };
+  w.onerror = () => {
+    w.terminate();
+    if (state.probeWorker === w) state.probeWorker = null;
+    if (probeGen === state.calibrationGen) { state.calibrationFailed = true; estimateRunTime(); }
+  };
 
   // Cell cap: bound the probe's search time (the 3 s / ~1 s target) yet stay
   // unsaturated. min(fixed, 0.4·N) keeps it < N (so it always anchors below
@@ -8025,6 +8107,7 @@ function startCalibrationProbe() {
     },
     [probeHeight.buffer, mask.buffer],
   );
+  state.calibrationFailed = false; // a fresh probe is in flight
   estimateRunTime(); // show "estimating…" until the probe lands
 }
 
@@ -8068,14 +8151,6 @@ const GRAPH_MS_PER_EDGE = 5e-5;
 const INTERP_MS_PER_CELL = 5e-6;        // per cell per maxDist unit (banded)
 const INTERP_SMOOTH_MS_PER_CELL = 5e-6; // per cell per 3×3 smoothing pass (banded)
 
-// Mirror runInterp's worker-pool sizing so the interp estimate matches the
-// real banding (memory-capped on huge DEMs → often 1 worker there).
-function interpPoolSize(N) {
-  const cores = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
-  const H = state.dem?.H || 1;
-  return Math.max(1, Math.min(cores, Math.floor(1.5e9 / (6 * N)), Math.ceil(H / 64)));
-}
-
 // Graph edge count for the graph-mode estimate — the built graph if cached,
 // else the network polyline segment count (≈ edges) before it's built.
 function networkEdgeCount() {
@@ -8099,7 +8174,7 @@ function predictGraphComputeMs(opts) {
 // runs single-worker; raster-constrained interp is banded across the pool.
 function predictInterpMs(opts) {
   if (!opts.interp || !(opts.N > 0)) return 0;
-  const poolN = opts.graph ? 1 : interpPoolSize(opts.N);
+  const poolN = opts.graph ? 1 : interpPoolSize(opts.N, state.dem?.H || 1);
   const fill = INTERP_MS_PER_CELL * opts.N * Math.max(1, opts.interpMaxDist || 50);
   const smooth = INTERP_SMOOTH_MS_PER_CELL * opts.N * (opts.smoothIters || 0);
   // The IDW fill is banded across the pool; smoothing is a single post-merge
@@ -8199,7 +8274,9 @@ function currentRunOpts(cal, N) {
     maximize: !!document.getElementById("maximize")?.checked,
     wantPath: !!state.dst,
     refs: state.refPoints?.length || 0,
-    eMax: Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0,
+    // Mirror the runner: the kJ budget is ignored under maximize (inverted
+    // costs), so the reach model must assume full grid there too.
+    eMax: !document.getElementById("maximize")?.checked && Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0,
     mode, alpha,
     backend: computeMode() !== "browser",
     graph,
@@ -8221,7 +8298,12 @@ function estimateRunTime() {
   if (!state.dem) { out.textContent = ""; return; }
 
   const cal = state.calibration;
-  if (!cal) { out.textContent = t("estimate.calibrating"); return; }
+  if (!cal) {
+    // Probe errored → no anchor for a number; stay blank instead of showing
+    // "estimating…" forever (computeDone retries the probe after each run).
+    out.textContent = state.calibrationFailed ? "" : t("estimate.calibrating");
+    return;
+  }
 
   const N = state.dem.H * state.dem.W;
   const opts = currentRunOpts(cal, N);
@@ -8253,8 +8335,9 @@ function updateCloudTransferEstimate() {
   // header is negligible against the grid.
   const up = 4 * N + N + (hasNetwork ? N : 0) + nPortals * 32;
   // Download: density returns f64 density (8·N) + f32 energy (4·N); single
-  // returns f32 energy (4·N) + optional f32 passes (4·N).
-  const down = wantDensity ? (8 * N + 4 * N) : (4 * N + (wantPasses ? 4 * N : 0));
+  // returns f32 energy (4·N) + optional f64 passes (8·N — the /single wire
+  // ships passes as f64 to match the JS worker's Float64Array).
+  const down = wantDensity ? (8 * N + 4 * N) : (4 * N + (wantPasses ? 8 * N : 0));
   // Rough wire time at the assumed link speeds (bytes·8 / (Mbps·1e6)).
   const wireMs = (up * 8 / (UPLINK_MBPS * 1e6) + down * 8 / (DOWNLINK_MBPS * 1e6)) * 1000;
   line.textContent = t("cloud.transfer", formatBytes(up), formatBytes(down), formatDuration(wireMs));
@@ -9543,6 +9626,10 @@ async function loadBundleFile(file) {
 }
 
 function applyMetadataToUI(md, bin = {}) {
+  // Bundle import mutates the compute grid (networkMask/impassable below) —
+  // per the invariant, cancel any in-flight run BEFORE anything a result
+  // would render against changes. Importing a bundle supersedes it anyway.
+  cancelActiveCompute();
   const p = md.params || {};
   const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
   const check = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.checked = !!v; };
@@ -9684,6 +9771,10 @@ function applyMetadataToUI(md, bin = {}) {
   if (topnCheck) topnCheck.dispatchEvent(new Event("change"));
   const densityCheck = document.getElementById("want-density");
   if (densityCheck) densityCheck.dispatchEvent(new Event("change"));
+  // maximize reveals the L-length input and greys out the (inapplicable)
+  // energy-budget field — resync those too.
+  const maximizeCheck = document.getElementById("maximize");
+  if (maximizeCheck) maximizeCheck.dispatchEvent(new Event("change"));
 
   // Restore src/dst pixel positions. If a DEM is loaded that matches the
   // bundle's DEM dimensions, place markers right away; otherwise hold the
