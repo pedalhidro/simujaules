@@ -9,6 +9,36 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v48 — 2026-06-29
+
+**Source→destination route comparison.** With *"Comparar com cenário sem
+rede"* on, the *"Cenário exibido"* picker now switches the best **route** too,
+not just the energy/passes field:
+
+- **`sem restrição`** → the unconstrained best **terrain route**, in **blue**.
+- **`restrito à rede`** → the network-constrained best **route**, in **orange**.
+- **`diferença`** → **both** routes together (terrain blue + network orange).
+
+The colours match the density difference view exactly (`TERR_BLUE` /
+`NET_ORANGE`, additive complements). One best route per scenario — top-N
+collapses to the optimum here.
+
+**Hover / tap a route to compare.** Pointing at *either* line shows BOTH
+routes' energy + length at once (network in orange, terrain in blue) plus the
+Δ (the energy cost of staying on the network), with the line you're on
+emphasised. Bound as a hover tooltip *and* a click/tap popup, so it works on
+desktop and touch.
+
+Implementation: the compare run's unconstrained partner — previously fired
+energy/passes-only (`goalR/goalC = -1`) — now keeps the destination so it also
+traces the terrain route (`pathAlt`). Works in both raster network-mask mode
+(`startComparePair`) and graph "seguir os vetores" mode
+(`computeUnconstrainedEnergy`). The route renderers (`rerenderCachedResult`,
+`renderGraphOverlay`) honour the scenario picker, and in raster mode the
+terrain route round-trips through bundles (`path_alt.geojson`; graph-mode
+compare routes don't round-trip — graph results never do). Render/dispatch
+only — no change to the energy engine or the Rust backend.
+
 ## v47 — 2026-06-29
 
 Reverted the MTPI basemaps added in v46 — they were meant for amora, not

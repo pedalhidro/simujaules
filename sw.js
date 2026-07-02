@@ -384,7 +384,16 @@
 //              and Bacia do Paraná 30 m (native z12). XYZ tiles from
 //              telhas.pedalhidrografi.co; maxNativeZoom over-scales past native.
 //   v46 → v47: Revert the v46 MTPI basemaps — they belong in amora, not Simujaules.
-const VERSION  = "v47";
+//   v47 → v48: Source→destination ROUTE comparison. With "Comparar com cenário
+//              sem rede" on, the "Cenário exibido" picker now switches the best
+//              ROUTE too, not just the field: terrain (unconstrained) route in
+//              blue, network (constrained) route in orange, both in the difference
+//              view — matching the density difference colours. Single best per
+//              scenario. Works in raster network-mask mode AND graph mode; the
+//              unconstrained partner now also traces a path to the destination.
+//              Hovering/tapping either route shows BOTH routes' energy + length
+//              (and the Δ) — bound as a hover tooltip and a click/tap popup.
+const VERSION  = "v48";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

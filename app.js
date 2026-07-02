@@ -175,6 +175,9 @@ const STRINGS = {
   "esrc.constrained":    { pt: "restrito à rede", en: "network-constrained" },
   "esrc.unconstrained":  { pt: "sem restrição", en: "unconstrained" },
   "esrc.difference":     { pt: "diferença (custo da rede)", en: "difference (network cost)" },
+  "route.network":       { pt: "rota na rede", en: "network route" },
+  "route.terrain":       { pt: "rota no terreno", en: "terrain route" },
+  "route.delta":         { pt: "Δ rede − terreno", en: "Δ network − terrain" },
   "net.interp":          { pt: "Interpolar entre células fora da rede", en: "Interpolate across non-network cells" },
   "net.max_distance":    { pt: "distância máx (células)", en: "max distance (cells)" },
   "net.smoothing":       { pt: "suavizações", en: "smoothing iters" },
@@ -4468,6 +4471,63 @@ function computeNetworkGraphToken() {
   return `${state.networkFeatureCount}|${graphJunctionMode()}|${state.dem ? state.dem.W + "x" + state.dem.H : "0"}|imp${state.impassableToken}`;
 }
 
+// Difference-view scenario colours, the single source of truth shared by the
+// density passes overlay AND the source→destination route polylines: network /
+// constrained = warm orange, terrain / unconstrained = azure blue. They are
+// additive complements (sum to white where both routes coincide) and stay
+// discriminable under red–green colour-blindness. Keeping the route lines on the
+// same constants means they never drift from the field tints.
+const NET_ORANGE = [255, 165, 60];
+const TERR_BLUE  = [0, 90, 195];
+const NET_ORANGE_CSS = `rgb(${NET_ORANGE[0]}, ${NET_ORANGE[1]}, ${NET_ORANGE[2]})`;
+const TERR_BLUE_CSS  = `rgb(${TERR_BLUE[0]}, ${TERR_BLUE[1]}, ${TERR_BLUE[2]})`;
+
+// Flat raster-index path → Leaflet [lat,lng] cell-centre polyline.
+function rasterPathToLatLngs(p) {
+  const { W, originX, originY, dx, dy } = state.dem;
+  return p.map((idx) => {
+    const rr = (idx / W) | 0;
+    const cc = idx - rr * W;
+    return [originY - (rr + 0.5) * dy, originX + (cc + 0.5) * dx];
+  });
+}
+
+// Comparison content for a compare route line: shows BOTH the network and the
+// terrain route's energy + length (and the Δ), so hovering / tapping EITHER line
+// compares the two at once. `focus` ("network" | "terrain") bolds the line you
+// are pointing at. Returns an HTML string (energies/lengths are numbers; the
+// labels come from the trusted STRINGS table but are escaped defensively).
+function compareRoutesContent(netE, netL, terrE, terrL, focus) {
+  const fmtE = (e) => Number.isFinite(e) ? e.toExponential(2) : "—";
+  const fmtL = (l) => Number.isFinite(l) ? (l / 1000).toFixed(2) + " km" : "—";
+  const row = (swatch, label, e, l, on) => {
+    const dot = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;` +
+      `background:${swatch};margin-right:5px;vertical-align:middle"></span>`;
+    const body = `${dot}${escapeHtml(label)}: E <span class="v">${fmtE(e)}</span> · ${fmtL(l)}`;
+    return on ? `<strong>${body}</strong>` : body;
+  };
+  let html =
+    row(NET_ORANGE_CSS, t("route.network"), netE, netL, focus === "network") + "<br/>" +
+    row(TERR_BLUE_CSS,  t("route.terrain"), terrE, terrL, focus === "terrain");
+  // Δ = network − terrain ≥ 0: the energy cost of staying on the network.
+  if (Number.isFinite(netE) && Number.isFinite(terrE)) {
+    const d = netE - terrE;
+    const pct = terrE > 0 ? (d / terrE) * 100 : null;
+    html += `<br/>${escapeHtml(t("route.delta"))}: <span class="v">${d >= 0 ? "+" : ""}${d.toExponential(2)}</span>` +
+      (pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(0)}%)` : "");
+  }
+  return html;
+}
+
+// Attach the compare content to a route line as BOTH a hover tooltip (desktop)
+// and a click/tap popup (touch), so the energy comparison is reachable however
+// the user points at it. `focus` flags which line this is.
+function bindRouteCompare(layer, focus, netE, netL, terrE, terrL) {
+  const html = compareRoutesContent(netE, netL, terrE, terrL, focus);
+  layer.bindTooltip(html, { sticky: true });
+  layer.bindPopup(html);
+}
+
 // Draw a path/route (sequence of node ids) as a polyline over the edges.
 function drawGraphPath(graph, p, colour, group) {
   if (!p || !p.nodes || !p.nodes.length) return;
@@ -4622,7 +4682,7 @@ function buildGraphFieldLayer(graph, field, { pane, greyscale, tint, minId, maxI
 // "Draw network". Reads style knobs live → recolours on restyle, no recompute.
 function renderGraphOverlay() {
   if (!state.lastGraphResult || !state.dem) return;
-  const { graph, result, energyAlt, passesAlt } = state.lastGraphResult;
+  const { graph, result, energyAlt, passesAlt, pathAlt, pathAltEnergy, pathAltLengthM } = state.lastGraphResult;
   const { W, H } = state.dem;
   if (state.passesOverlay) { state.passesOverlay.remove(); state.passesOverlay = null; }
   removeGraphLayers();
@@ -4671,7 +4731,6 @@ function renderGraphOverlay() {
   // overlap, discriminable under red–green colour-blindness). Single-scenario
   // views stay greyscale, matching raster mode.
   const diffView = energySel === "difference";
-  const NET_ORANGE = [255, 165, 60], TERR_BLUE = [0, 90, 195];
   const numOr = (id, fb) => { const v = parseFloat(document.getElementById(id)?.value); return Number.isFinite(v) ? v : fb; };
   const intOr = (id, fb) => { const v = parseInt(document.getElementById(id)?.value, 10); return Number.isFinite(v) ? v : fb; };
   const phB = (id, v) => { const el = document.getElementById(id); if (el) el.placeholder = v; };
@@ -4762,7 +4821,34 @@ function renderGraphOverlay() {
   }
   applyPassesOverlay();
   const routesGroup = L.layerGroup();
-  if (result.routes && result.routes.length) {
+  if (energyAlt && pathAlt && pathAlt.length) {
+    // Compare run: the scenario picker switches the BEST ROUTE the same way it
+    // switches the field — the network (graph) route in orange, the unconstrained
+    // terrain (raster) route in blue, both together in the difference view. Single
+    // best per scenario (top-N collapses to the optimum here).
+    const showNetRoute  = energySel === "constrained" || energySel === "difference";
+    const showTerrRoute = energySel === "unconstrained" || energySel === "difference";
+    const netGraphPath = result.path || (result.routes && result.routes.length ? result.routes[0] : null);
+    const netE = netGraphPath ? netGraphPath.energy : null;
+    const netL = netGraphPath ? netGraphPath.lengthM : null;
+    if (showTerrRoute) {
+      const ln = L.polyline(rasterPathToLatLngs(pathAlt), {
+        color: TERR_BLUE_CSS, weight: 4, opacity: 0.95, pane: "routesPane",
+      });
+      bindRouteCompare(ln, "terrain", netE, netL, pathAltEnergy, pathAltLengthM);
+      routesGroup.addLayer(ln);
+    }
+    if (showNetRoute && netGraphPath) {
+      // Draw the graph route directly (interactive) rather than via drawGraphPath
+      // (which is interactive:false) so it carries the compare tooltip/popup too.
+      const pts = netGraphPath.nodes.map((n) => cellFracToLatLng(graph.nodeR[n], graph.nodeC[n]));
+      const ln = L.polyline(pts, {
+        color: NET_ORANGE_CSS, weight: 4, opacity: 0.95, pane: "routesPane",
+      });
+      bindRouteCompare(ln, "network", netE, netL, pathAltEnergy, pathAltLengthM);
+      routesGroup.addLayer(ln);
+    }
+  } else if (result.routes && result.routes.length) {
     for (let i = 0; i < result.routes.length; i++) drawGraphPath(graph, result.routes[i], routeColour(i, result.routes.length), routesGroup);
   } else if (result.path) {
     drawGraphPath(graph, result.path, "#4cc9f0", routesGroup);
@@ -6077,6 +6163,13 @@ runBtn.addEventListener("click", async () => {
       if (primary.passes && secondary.passes) {
         primary.passesAlt = { unconstrained: secondary.passes };
       }
+      // The secondary now also traces the unconstrained best TERRAIN route (only
+      // when a destination is set) → the compare route view's blue line.
+      if (secondary.path && secondary.path.length) {
+        primary.pathAlt = secondary.path;
+        primary.pathAltEnergy = secondary.pathEnergy ?? null;
+        primary.pathAltLengthM = secondary.pathLengthM ?? null;
+      }
       computeDone(primary);
     };
     const wA = spawnWorker((m) => {
@@ -6097,16 +6190,18 @@ runBtn.addEventListener("click", async () => {
       else if (m.kind === "error") computeFailed(m.message);
     });
     {
-      // No network, no path/top-N extras — same mode/cost/budget; passes
-      // mirror the primary so the overlay is comparable across scenarios.
-      // Bridges are terrain, so the composed grid applies here too (only the
-      // networkMask constraint slot differs from the primary).
+      // No network — same mode/cost/budget; passes mirror the primary so the
+      // overlay is comparable across scenarios. Bridges are terrain, so the
+      // composed grid applies here too (only the networkMask constraint slot
+      // differs from the primary). We KEEP baseMsg's goalR/goalC so the
+      // unconstrained partner ALSO traces the best TERRAIN route to the
+      // destination (single best — no top-N/interp); that's the compare route
+      // view's blue line.
       const { height, mask, transfer } = buildComputeGrid();
       wB.postMessage(
         {
           ...baseMsg,
           height, mask, networkMask: null,
-          goalR: -1, goalC: -1,
           wantTopN: false,
           wantNetworkInterp: false,
           maximizeLength: 0,
@@ -6178,16 +6273,18 @@ runBtn.addEventListener("click", async () => {
   // raster), present only for the density partner (the from/to partner is
   // energy-only). Used for the graph-mode difference's 3C.b terrain channel.
   const computeUnconstrainedEnergy = () => {
-    if (wantDensity) return computeDensityField({ useNetwork: false }).then((r) => ({ energy: r.energy, passes: r.passes || null }));
+    if (wantDensity) return computeDensityField({ useNetwork: false }).then((r) => ({ energy: r.energy, passes: r.passes || null, path: null, pathEnergy: null, pathLengthM: null }));
     return new Promise((resolve) => {
       const w = spawnWorker((m) => {
-        if (m.kind === "done") resolve({ energy: m.energy, passes: m.passes || null });
+        if (m.kind === "done") resolve({ energy: m.energy, passes: m.passes || null, path: m.path || null, pathEnergy: m.pathEnergy ?? null, pathLengthM: m.pathLengthM ?? null });
         else if (m.kind === "error") { computeFailed(m.message); resolve(null); }
       });
       const { height, mask, transfer } = buildComputeGrid();
-      // Same mode/cost/budget as the graph run; no network, no path/top-N/interp.
+      // Same mode/cost/budget as the graph run; no network, no top-N/interp. We
+      // KEEP baseMsg's goalR/goalC so the partner ALSO traces the best TERRAIN
+      // route to the destination → the compare route view's blue line.
       w.postMessage(
-        { ...baseMsg, height, mask, networkMask: null, goalR: -1, goalC: -1, wantTopN: false, maximizeLength: 0, wantNetworkInterp: false },
+        { ...baseMsg, height, mask, networkMask: null, wantTopN: false, maximizeLength: 0, wantNetworkInterp: false },
         transfer,
       );
     });
@@ -6227,6 +6324,7 @@ runBtn.addEventListener("click", async () => {
       // diff is the energy COST of being restricted to the network (clamped ≥ 0).
       let energyAlt = null;
       let passesAlt = null;
+      let terrainPath = null, terrainPathEnergy = null, terrainPathLengthM = null;
       if (graphCompareOn && eGrid) {
         status.textContent = t("status.computing");
         const unconR = await computeUnconstrainedEnergy();
@@ -6241,6 +6339,13 @@ runBtn.addEventListener("click", async () => {
         // Terrain (free-movement) passes as a RASTER → the difference view's 3C.b
         // channel. Present for density compares; null for from/to (energy-only partner).
         if (unconR.passes) passesAlt = { unconstrained: unconR.passes };
+        // The unconstrained best TERRAIN route (raster) for the compare route view's
+        // blue line — only present when a destination is set (from/to/round).
+        if (unconR.path && unconR.path.length) {
+          terrainPath = unconR.path;
+          terrainPathEnergy = unconR.pathEnergy ?? null;
+          terrainPathLengthM = unconR.pathLengthM ?? null;
+        }
       }
 
       // Finalise the run now (the partner, if any, is done).
@@ -6250,7 +6355,7 @@ runBtn.addEventListener("click", async () => {
       updateRunButtonState();
       state.computeStartedAt = 0;
       setGroupOpen("result-group", true); // graph compute done → reveal results (3)
-      state.lastGraphResult = { graph, result, energyAlt, passesAlt };
+      state.lastGraphResult = { graph, result, energyAlt, passesAlt, pathAlt: terrainPath, pathAltEnergy: terrainPathEnergy, pathAltLengthM: terrainPathLengthM };
       state.graphEnergyRaster = null;
       renderGraphOverlay();   // passes corridors show immediately
       // Learn the graph engine's real per-edge cost (corrGraph). The graph's
@@ -6449,7 +6554,7 @@ runBtn.addEventListener("click", async () => {
 });
 
 // ------- Render -------
-function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs, energyAlt, passesAlt }) {
+function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs, energyAlt, passesAlt, pathAlt, pathAltEnergy, pathAltLengthM }) {
   // A grid result supersedes any graph-mode overlay.
   removeGraphLayers();
   state.lastGraphResult = null;
@@ -6459,6 +6564,11 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
     energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs,
     energyAlt: energyAlt || null,
     passesAlt: passesAlt || null,
+    // Compare runs also carry the unconstrained best TERRAIN route (blue), shown
+    // alongside / instead of the network route (orange) per the scenario picker.
+    pathAlt: pathAlt || null,
+    pathAltEnergy: pathAltEnergy ?? null,
+    pathAltLengthM: pathAltLengthM ?? null,
   };
 
   // The displayed-scenario selector only makes sense after a compare run.
@@ -6512,6 +6622,13 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
   } else if (pathEnergy != null) {
     meta.push(`path E: <span class="v">${pathEnergy.toExponential(3)}</span>`);
     meta.push(`length: <span class="v">${(pathLengthM / 1000).toFixed(2)} km</span>`);
+  }
+  // Compare run: the unconstrained best terrain route, alongside the network one.
+  if (pathAlt && pathAlt.length && pathAltEnergy != null) {
+    meta.push(
+      `terrain route E: <span class="v">${pathAltEnergy.toExponential(3)}</span>, ` +
+      `L=<span class="v">${(pathAltLengthM / 1000).toFixed(2)} km</span>`
+    );
   }
   resultMeta.innerHTML = meta.join("<br/>");
   resultMeta.removeAttribute("data-i18n"); // live stats — don't let a lang toggle reset to "—"
@@ -6651,7 +6768,34 @@ function rerenderCachedResult() {
     });
   }
 
-  if (routes && routes.length > 0 && isGeographic) {
+  if (r.pathAlt && r.pathAlt.length > 0 && isGeographic) {
+    // Compare run: the scenario picker switches the BEST ROUTE the same way it
+    // switches the field. Network (constrained) route in orange, unconstrained
+    // TERRAIN route in blue, both together in the difference view — matching the
+    // density difference colours. Single best per scenario (top-N collapses to
+    // the optimum route here).
+    const netPath = (path && path.length) ? path
+      : (routes && routes.length ? routes[0].path : null);
+    const netE = r.pathEnergy ?? (routes && routes.length ? routes[0].energy : null);
+    const netL = r.pathLengthM ?? (routes && routes.length ? routes[0].length : null);
+    const terrE = r.pathAltEnergy, terrL = r.pathAltLengthM;
+    const showNet  = energySel === "constrained" || energySel === "difference";
+    const showTerr = energySel === "unconstrained" || energySel === "difference";
+    if (showTerr) {
+      const ln = L.polyline(pathToLatLngs(r.pathAlt), {
+        color: TERR_BLUE_CSS, weight: 4, opacity: 0.95, pane: "routesPane",
+      }).addTo(map);
+      bindRouteCompare(ln, "terrain", netE, netL, terrE, terrL);
+      state.routeLines.push(ln);
+    }
+    if (showNet && netPath) {
+      const ln = L.polyline(pathToLatLngs(netPath), {
+        color: NET_ORANGE_CSS, weight: 4, opacity: 0.95, pane: "routesPane",
+      }).addTo(map);
+      bindRouteCompare(ln, "network", netE, netL, terrE, terrL);
+      state.routeLines.push(ln);
+    }
+  } else if (routes && routes.length > 0 && isGeographic) {
     // Top-N: colour each route by rank using the routes-colormap, with a
     // weight that decays slightly so the optimal route reads strongest.
     for (let i = 0; i < routes.length; i++) {
@@ -9086,6 +9230,8 @@ function buildMetadata(result, withOutputs = true) {
       maxPasses:   state.lastPassesAutoMax ?? null,
       pathEnergy:  result?.pathEnergy ?? null,
       pathLengthM: result?.pathLengthM ?? null,
+      pathAltEnergy:  result?.pathAltEnergy ?? null,
+      pathAltLengthM: result?.pathAltLengthM ?? null,
     },
   };
 
@@ -9145,6 +9291,10 @@ function buildMetadata(result, withOutputs = true) {
       path: result.path && result.path.length ? {
         format: "GeoJSON",
         file:   "path.geojson",
+      } : null,
+      pathAlt: result.pathAlt && result.pathAlt.length ? {
+        format: "GeoJSON",
+        file:   "path_alt.geojson",
       } : null,
     };
   }
@@ -9290,6 +9440,15 @@ async function downloadBundle() {
         length_m: r.pathLengthM,
       }), null, 2));
     }
+    // Compare run: the unconstrained best TERRAIN route, so the scenario picker's
+    // route comparison comes back on import without a recompute (mirrors energyAlt).
+    if (r.pathAlt && r.pathAlt.length && !graphMode) {
+      zip.file("path_alt.geojson", JSON.stringify(pathFCFromIndices(r.pathAlt, dem, {
+        scenario: "terrain",
+        energy: r.pathAltEnergy,
+        length_m: r.pathAltLengthM,
+      }), null, 2));
+    }
     // "Follow the vectors" result → per-edge GeoJSON (passes/energy/length).
     if (state.lastGraphResult) {
       zip.file("graph_edges.geojson", JSON.stringify(
@@ -9369,6 +9528,8 @@ async function loadBundleFile(file) {
       if (rGeo) { try { bin.routesFC = JSON.parse(await rGeo.async("string")); } catch {} }
       const pGeo = zip.file("path.geojson");
       if (pGeo) { try { bin.pathFC = JSON.parse(await pGeo.async("string")); } catch {} }
+      const paGeo = zip.file("path_alt.geojson");
+      if (paGeo) { try { bin.pathAltFC = JSON.parse(await paGeo.async("string")); } catch {} }
     } else if (/\.jsonld?$|\.json$/i.test(file.name)) {
       md = JSON.parse(await file.text());
     } else {
@@ -9652,10 +9813,11 @@ function applyMetadataToUI(md, bin = {}) {
     const passesOk = bin.passes && bin.passes.length === N;
     const routes = routesFromFC(bin.routesFC || null, state.dem);
     const path = routes ? null : pathFromFC(bin.pathFC || null, state.dem);
+    const pathAlt = pathFromFC(bin.pathAltFC || null, state.dem);
     // Render whenever we recovered anything drawable; routes take precedence
     // over a lone path (renderResult draws one or the other, mirroring a
     // fresh compute where top-N and maximize are mutually exclusive).
-    if (energyOk || passesOk || routes || path) {
+    if (energyOk || passesOk || routes || path || pathAlt) {
       // Rebuild the compare scenarios from the alt rasters so the displayed-
       // scenario picker + the difference/unconstrained views come back (not just
       // the toggle). renderResult shows #energy-source-row when these are present.
@@ -9674,6 +9836,9 @@ function applyMetadataToUI(md, bin = {}) {
         elapsedMs:   md.elapsedMs ?? 0,
         energyAlt,
         passesAlt,
+        pathAlt,
+        pathAltEnergy:  md.stats?.pathAltEnergy ?? null,
+        pathAltLengthM: md.stats?.pathAltLengthM ?? null,
       };
       renderResult(synth);
       setGroupOpen("result-group", true); // bundle loaded a result → reveal it
