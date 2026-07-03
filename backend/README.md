@@ -97,3 +97,20 @@ node test-backend.mjs          # starts the binary, compares vs energy-worker.js
 
 Note: the optional network-interpolation (IDW fill) step still runs in the
 browser worker after the backend returns — it's visualisation-only and cheap.
+
+### Upgrading a pre-v49 binary
+
+v49 changed the `/single` passes wire format from f32×N to f64×N
+(`subtree_passes_f64`, matching the JS single-source branch's Float64Array —
+counts exceed 2^24 on big DEMs). The app's decoder accepts either layout (it
+detects the response length and widens f32→f64 for a stale binary, logging a
+console warning), so an old binary still works, just with passes that are
+inexact above 2^24 cells. **Rebuild to get exact counts**: `cargo build
+--release` from a checkout with this change. If you run the backend on the
+cloud compute VM, note that `vm/startup-script.sh` caches the compiled binary
+on the boot disk across stop/start ("só o primeiro boot compila") — a VM
+provisioned before this change keeps its old binary indefinitely across
+stop/start cycles. To force a rebuild on next boot, either delete the cached
+binary (`rm /opt/simujoules/simujoules-backend` over SSH, then let the
+orchestrator start it again) or delete the VM entirely so the orchestrator
+recreates it from scratch.

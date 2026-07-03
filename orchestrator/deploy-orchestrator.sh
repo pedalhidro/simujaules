@@ -42,6 +42,24 @@ ENV_VARS="${ENV_VARS},FIREWALL_RULE=${FIREWALL_RULE:-simu-compute-allow-443}"
 ENV_VARS="${ENV_VARS},CF_ZONE_ID=${CF_ZONE_ID}"
 ENV_VARS="${ENV_VARS},STARTUP_SCRIPT_URL=${STARTUP_SCRIPT_URL:-gs://simujaules/vm/startup-script.sh}"
 ENV_VARS="${ENV_VARS},REAP_IDLE_DAYS=${REAP_IDLE_DAYS:-30}"
+# Repassa SÓ um valor explicitamente fornecido pelo chamador — NÃO tem default
+# aqui (ao contrário das outras vars acima). Um default apontando pra um objeto
+# GCS que ninguém publicou faria vm/startup-script.sh tentar baixá-lo; o script
+# agora tolera isso (fail-open: cai pro binário em cache ou build do fonte —
+# ver vm/startup-script.sh), mas é melhor o operador saber que precisa publicar
+# o binário pra evitar o build de ~10 min em toda VM recriada do zero.
+ENV_VARS="${ENV_VARS},BACKEND_BINARY_URL=${BACKEND_BINARY_URL:-}"
+
+if [[ -z "${BACKEND_BINARY_URL:-}" ]]; then
+  echo ">> AVISO: BACKEND_BINARY_URL não definido." >&2
+  echo "   VMs recriadas pelo orquestrador (após /cloud/delete ou o reaper de" >&2
+  echo "   30 dias) vão compilar o backend do fonte no boot (~10 min) em vez de" >&2
+  echo "   baixar um binário pronto. Publique-o uma vez com:" >&2
+  echo "     gsutil cp backend/target/release/simujoules-backend gs://simujaules/vm/simujoules-backend" >&2
+  echo "   e rode este script de novo com:" >&2
+  echo "     BACKEND_BINARY_URL=https://storage.googleapis.com/simujaules/vm/simujoules-backend" >&2
+  echo >&2
+fi
 
 # Secrets montados como variáveis de ambiente (lidos do Secret Manager).
 SECRETS="CLOUD_AUTH_TOKEN=simu-cloud-token:latest"

@@ -30,12 +30,13 @@ liga o backend nativo e aponta o orquestrador pra ela.
 
 ```sh
 cd vm/
+export CLOUD_AUTH_TOKEN=algum-valor  # obrigatório mesmo em --dry-run (o bake recusa rodar sem ele)
 
 # 1. Veja o que seria executado (NÃO cobra nada):
 ./bake-instance.sh --dry-run
 
 # 2. Provisione de verdade (CRIA a VM — começa a poder cobrar quando ligada):
-./bake-instance.sh
+CLOUD_AUTH_TOKEN=<o token real de produção> ./bake-instance.sh
 ```
 
 Ao final a VM `simu-compute` existe e está **STOPPED**. O bake imprime os

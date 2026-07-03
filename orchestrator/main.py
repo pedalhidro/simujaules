@@ -13,9 +13,15 @@ só cuida do ciclo de vida:
                              firewall pro IP do navegador; aponta o DNS pro IP
                              efêmero atual. Idempotente.
   • GET  /cloud/status     — estado (do GCP) + dataUrl + IP externo.
-  • POST /cloud/stop       — para a VM agora.
-  • POST /cloud/keepalive  — no-op (compat. com o app; o custo é contido pelo
-                             idle-watchdog DENTRO da VM, não por lease aqui).
+  • POST /cloud/stop       — para a VM agora, A MENOS que outro client_id
+                             (header X-Simu-Client) tenha uma lease válida
+                             (keepalive há < 180s) — ver LEASES.
+  • POST /cloud/keepalive  — registra a lease do client_id, se o header
+                             X-Simu-Client vier setado (compat: sem ele, é um
+                             no-op puro, como antes). O backstop de CUSTO
+                             continua sendo o idle-watchdog DENTRO da VM, não
+                             esta lease — ela só adia um /cloud/stop explícito
+                             por até 180s de keepalives ausentes.
   • POST /cloud/create     — cria a VM explicitamente (raro; /start já cria).
   • POST /cloud/delete     — deleta a VM explicitamente.
   • POST /cloud/reap       — (Cloud Scheduler) deleta a VM se parada há mais de
@@ -37,16 +43,23 @@ Credenciais: roda com a service account do Cloud Run (ADC automático). O
 `google-cloud-compute` é importado PREGUIÇOSAMENTE pra que `DRY_RUN=1` rode sem
 o pacote e sem tocar a nuvem (testes locais).
 
-Estado: praticamente SEM estado em memória (o Cloud Run escala a zero e pode ter
-várias instâncias). Cada chamada lê o estado da VM do GCP. O backstop de custo
-mora na VM (idle-watchdog + teto de uptime) e no reaper de 30 dias — não há
-mais lease/sweeper de processo aqui.
+Estado: quase todo lido do GCP a cada chamada (o Cloud Run escala a zero e pode
+rodar várias instâncias — mas aqui é sempre --max-instances=1). O ÚNICO estado
+em memória de processo é: (a) LEASES, um dict client_id→expiração usado só pra
+/cloud/stop não derrubar um usuário concorrente (nunca mantém a VM viva por si
+só); e (b) o conjunto de IPs recentes do firewall, esse PERSISTIDO na própria
+description da regra (não em memória) porque sobreviver a um cold start
+importa pra ele. O backstop de CUSTO mora na VM (idle-watchdog + teto de
+uptime + max_run_duration enforçado pelo GCP) e no reaper de 30 dias.
 """
 
 import hmac
+import ipaddress
+import json
 import logging
 import os
 import sys
+import threading
 import time
 
 import requests
@@ -112,6 +125,15 @@ IMAGE_PROJECT = _env("IMAGE_PROJECT", "debian-cloud")
 BOOT_DISK_GB = _env_int("BOOT_DISK_GB", 50)
 MAX_MEM_GB = _env("MAX_MEM_GB", "320")
 BACKEND_BINARY_URL = _env("BACKEND_BINARY_URL", "")
+# Backstops de custo (ver vm/startup-script.sh e vm/idle-watchdog.sh):
+#   MAX_UPTIME_S_META  — teto do watchdog DENTRO da VM (repassado por metadata,
+#                        paridade com bake-instance.sh).
+#   MAX_RUN_DURATION_S — teto ENFORÇADO PELO PRÓPRIO GCP (Scheduling), backstop
+#                        independente de o startup-script rodar com sucesso
+#                        (uma falha no primeiro boot deixaria a VM sem watchdog
+#                        e sem qualquer teto).
+MAX_UPTIME_S_META = _env_int("MAX_UPTIME_S_META", 7200)
+MAX_RUN_DURATION_S = _env_int("MAX_RUN_DURATION_S", 14400)
 # startup-script.sh lido de um objeto GCS (a SA da VM precisa de objectViewer).
 STARTUP_SCRIPT_URL = _env("STARTUP_SCRIPT_URL", "gs://simujaules/vm/startup-script.sh")
 # SA da VM (vazio = SA default do projeto). Precisa só de storage.objectViewer no
@@ -254,12 +276,15 @@ def _gcp_create_instance():
     inst.tags = compute_v1.Tags(items=[NETWORK_TAG])
 
     # Scheduling: SPOT + STOP-on-preempt (igual ao bake). STANDARD não leva
-    # instance_termination_action.
+    # instance_termination_action nem max_run_duration. max_run_duration é o
+    # teto de execução ENFORÇADO PELO GCP — backstop de custo mesmo que o
+    # startup-script (e portanto o watchdog em-guest) nunca chegue a rodar.
     sched = compute_v1.Scheduling()
     sched.provisioning_model = PROVISIONING_MODEL
     if PROVISIONING_MODEL == "SPOT":
         sched.instance_termination_action = "STOP"
         sched.automatic_restart = False
+        sched.max_run_duration = compute_v1.Duration(seconds=MAX_RUN_DURATION_S)
     inst.scheduling = sched
 
     # Disco de boot a partir da família de imagem.
@@ -301,6 +326,7 @@ def _gcp_create_instance():
         "data-host": DATA_HOST,
         "app-origin": APP_ORIGIN,
         "max-mem-gb": str(MAX_MEM_GB),
+        "max-uptime-s": str(MAX_UPTIME_S_META),
         "backend-binary-url": BACKEND_BINARY_URL,
         "auth-token": CLOUD_AUTH_TOKEN,
         "cf-api-token": CF_API_TOKEN,
@@ -313,34 +339,93 @@ def _gcp_create_instance():
     instances.insert(project=GCP_PROJECT, zone=GCP_ZONE, instance_resource=inst)
 
 
-def _gcp_tighten_firewall(client_ip):
-    """Aperta FIREWALL_RULE pro /32 do client_ip em tcp:DATA_PORT (443).
+# Aperto do firewall: um lock de processo (gunicorn --threads 8 nesta mesma
+# instância Cloud Run) serializa a sequência ler-podar-mesclar-patchear pra
+# duas threads não disputarem um firewalls.patch() com leituras defasadas uma
+# da outra.
+_firewall_lock = threading.Lock()
 
-    Best-effort: loga e segue em caso de falha. Cacheia o último IP pra não
-    repatchar quando não mudou.
+# IPs recentes que devem continuar liberados na regra: janela de 2h, no máximo
+# 8 entradas. PERSISTIDOS na própria description da regra (não num dict só-em-
+# memória) — o Cloud Run escala a ZERO entre sessões (min-instances=0; o
+# keepalive do app para assim que o compute termina), então um cache
+# só-em-processo trataria todo IP já liberado como desconhecido logo no
+# primeiro request após qualquer gap de inatividade, reproduzindo o bug
+# original (repointing mútuo) numa escala de tempo maior.
+_RECENT_IP_MAX_AGE_S = 2 * 3600
+_RECENT_IP_MAX_COUNT = 8
+_FW_RECENT_MARKER = " || recent_ips="
+
+
+def _fw_description_base():
+    return (f"Simujaules plano de dados (Caddy/TLS porta {DATA_PORT}); origem "
+            "apertada pelo orquestrador pro(s) /32 do(s) navegador(es) recente(s)")
+
+
+def _parse_recent_ips(description):
+    """Lê {ip: last_seen_epoch} embutido na description da regra (fonte de
+    verdade compartilhada entre threads/instâncias — ver _firewall_lock acima).
+    """
+    if not description or _FW_RECENT_MARKER not in description:
+        return {}
+    try:
+        raw = description.split(_FW_RECENT_MARKER, 1)[1]
+        data = json.loads(raw)
+        return {ip: float(ts) for ip, ts in data.items()}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _prune_recent_ips(recent, now):
+    pruned = {ip: ts for ip, ts in recent.items()
+              if now - ts <= _RECENT_IP_MAX_AGE_S}
+    if len(pruned) > _RECENT_IP_MAX_COUNT:
+        # Mantém só os N mais recentes.
+        pruned = dict(
+            sorted(pruned.items(), key=lambda kv: kv[1], reverse=True)[:_RECENT_IP_MAX_COUNT]
+        )
+    return pruned
+
+
+def _gcp_tighten_firewall(client_ip, reset=False):
+    """Aperta FIREWALL_RULE pro(s) IP(s) recente(s) (client_ip + os que ainda
+    não expiraram) em tcp:DATA_PORT (443).
+
+    MERGE em vez de substituir por um único /32: dois usuários concorrentes
+    com o mesmo token compartilhado não se derrubam mutuamente a cada poll de
+    /cloud/status (cada um repointing o outro pra fora). `reset=True` (usado
+    por ensure_up ao criar/ligar a VM do zero) descarta o histórico e começa
+    uma sessão nova só com este client_ip. Best-effort: loga e segue em caso
+    de falha; pula o patch se o conjunto de faixas não mudou.
     """
     if not client_ip:
         return
-    if getattr(_gcp_tighten_firewall, "last_ip", None) == client_ip:
-        return
-    try:
-        from google.cloud import compute_v1
+    with _firewall_lock:
+        try:
+            from google.cloud import compute_v1
 
-        _, firewalls = _gcp()
-        rule = firewalls.get(project=GCP_PROJECT, firewall=FIREWALL_RULE)
-        rule.source_ranges = [f"{client_ip}/32"]
-        allowed = compute_v1.Allowed()
-        allowed.I_p_protocol = "tcp"
-        allowed.ports = [str(DATA_PORT)]
-        rule.allowed = [allowed]
-        firewalls.patch(
-            project=GCP_PROJECT, firewall=FIREWALL_RULE, firewall_resource=rule
-        )
-        _gcp_tighten_firewall.last_ip = client_ip
-        log.info("firewall %s apertado p/ %s/32 tcp:%d",
-                 FIREWALL_RULE, client_ip, DATA_PORT)
-    except Exception as e:  # noqa: BLE001
-        log.warning("não consegui apertar o firewall %s: %s", FIREWALL_RULE, e)
+            _, firewalls = _gcp()
+            rule = firewalls.get(project=GCP_PROJECT, firewall=FIREWALL_RULE)
+            now = _now()
+            recent = {} if reset else _parse_recent_ips(rule.description)
+            recent[client_ip] = now
+            recent = _prune_recent_ips(recent, now)
+            new_ranges = sorted(f"{ip}/32" for ip in recent)
+            if new_ranges == sorted(rule.source_ranges or []):
+                return
+            rule.source_ranges = new_ranges
+            allowed = compute_v1.Allowed()
+            allowed.I_p_protocol = "tcp"
+            allowed.ports = [str(DATA_PORT)]
+            rule.allowed = [allowed]
+            rule.description = _fw_description_base() + _FW_RECENT_MARKER + json.dumps(recent)
+            firewalls.patch(
+                project=GCP_PROJECT, firewall=FIREWALL_RULE, firewall_resource=rule
+            )
+            log.info("firewall %s apertado p/ %s tcp:%d",
+                      FIREWALL_RULE, ", ".join(new_ranges), DATA_PORT)
+        except Exception as e:  # noqa: BLE001
+            log.warning("não consegui apertar o firewall %s: %s", FIREWALL_RULE, e)
 
 
 # ---------------------------------------------------------------------------
@@ -494,18 +579,48 @@ def ensure_up(client_ip):
     """Garante a VM ligada (cria se ausente, liga se parada), aperta firewall e
     aponta o DNS pro IP atual. Retorna (STATE, eta_seconds)."""
     state, ip, _ = get_instance()
+    # Início de sessão nova (a VM estava ausente/parada/em erro): reseta o
+    # conjunto de IPs liberados no firewall só pro client_ip atual, em vez de
+    # herdar IPs de uma sessão anterior que pode já ter acabado.
+    fresh_start = state in (STATE_ABSENT, STATE_STOPPED, STATE_ERROR)
 
     if state == STATE_ABSENT:
         if DRY_RUN:
             _dry_create()
         else:
-            _gcp_create_instance()
+            try:
+                _gcp_create_instance()
+            except Exception as e:  # noqa: BLE001
+                # gunicorn --threads 8: duas /cloud/start podem ambas ver
+                # ABSENT e ambas chamarem instances.insert; a perdedora recebe
+                # 409/AlreadyExists — não é um erro real, a VM está sendo
+                # criada mesmo assim. Qualquer OUTRO erro (auth/quota) deve
+                # continuar subindo como 500 pro cliente cair pro fallback.
+                from google.api_core.exceptions import AlreadyExists, Conflict
+
+                if not isinstance(e, (AlreadyExists, Conflict)):
+                    raise
+                log.info("create do %s raced — instância já sendo criada (%s)",
+                         INSTANCE_NAME, e)
         eta = 240  # cria do zero: startup-script + cert DNS-01
     elif state in (STATE_STOPPED, STATE_ERROR):
         if DRY_RUN:
             _dry_start()
         else:
-            _gcp_start_instance()
+            try:
+                _gcp_start_instance()
+            except Exception as e:  # noqa: BLE001
+                # Mesma corrida pro start: uma instância "REPAIRING" (mapeada
+                # pra STATE_ERROR) ou já em transição pode recusar um segundo
+                # start com 400/409 — trata como "em transição" e segue; o
+                # polling do cliente (get_instance logo abaixo) reflete a
+                # realidade.
+                from google.api_core.exceptions import BadRequest, Conflict
+
+                if not isinstance(e, (BadRequest, Conflict)):
+                    raise
+                log.warning("start do %s raced (instância em transição): %s",
+                            INSTANCE_NAME, e)
         eta = 60
     elif state == STATE_RUNNING:
         eta = 0
@@ -513,7 +628,7 @@ def ensure_up(client_ip):
         eta = 30
 
     if not DRY_RUN:
-        _gcp_tighten_firewall(client_ip)
+        _gcp_tighten_firewall(client_ip, reset=fresh_start)
 
     # Aponta o DNS assim que houver IP (pode só aparecer no PROVISIONING).
     _, ip, _ = get_instance()
@@ -558,6 +673,38 @@ def _stopped_seconds(last_stop_ts):
 
 
 # ---------------------------------------------------------------------------
+# Leases (por-cliente, em memória): reaproveita o tráfego de keepalive pra
+# impedir que o stop-after-run padrão de UM usuário derrube o compute de OUTRO
+# usuário concorrente com o mesmo token compartilhado. Seguro em memória
+# porque Cloud Run roda --max-instances=1 e o Dockerfile usa gunicorn
+# --workers 1 (só as --threads variam, daí o Lock). O backstop de custo
+# continua sendo o idle-watchdog DENTRO da VM — uma lease só ADIA um stop
+# explícito por no máximo LEASE_TTL_S de keepalives ausentes, nunca mantém a
+# VM viva por si só.
+# ---------------------------------------------------------------------------
+
+LEASE_TTL_S = 180
+
+_leases_lock = threading.Lock()
+LEASES = {}  # client_id -> expira_em (epoch)
+
+
+def _prune_leases(now=None):
+    now = now if now is not None else _now()
+    expired = [cid for cid, exp in LEASES.items() if exp <= now]
+    for cid in expired:
+        del LEASES[cid]
+
+
+def _other_client_has_lease(client_id, now=None):
+    """True se ALGUM client_id diferente do chamador ainda tem lease válida."""
+    now = now if now is not None else _now()
+    with _leases_lock:
+        _prune_leases(now)
+        return any(cid != client_id and exp > now for cid, exp in LEASES.items())
+
+
+# ---------------------------------------------------------------------------
 # Flask
 # ---------------------------------------------------------------------------
 
@@ -572,7 +719,10 @@ def _cors(resp):
     resp.headers["Access-Control-Allow-Origin"] = APP_ORIGIN
     resp.headers["Vary"] = "Origin"
     resp.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+    # X-Simu-Client: id estável por aba (crypto.randomUUID no app), usado pra
+    # arrendar a VM (ver LEASES/cloud_stop) — sem ele, um usuário terminando o
+    # run mais cedo pararia a VM debaixo de um segundo usuário concorrente.
+    resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-Simu-Client"
     resp.headers["Access-Control-Max-Age"] = "3600"
     return resp
 
@@ -584,11 +734,30 @@ def _preflight(_any=None):
 
 
 def _client_ip():
-    """IP real do navegador. No Cloud Run vem como 1º item do X-Forwarded-For."""
+    """IP real do navegador, pra apertar o firewall no /32 dele.
+
+    No Cloud Run (direto ou via domain-mapping/CNAME, como
+    orch.simujaules.pedalhidrografi.co) a PLATAFORMA anexa o IP real do
+    cliente como o ÚLTIMO item do X-Forwarded-For — tudo à ESQUERDA disso é o
+    que o próprio chamador mandou (portanto forjável por quem tem o Bearer
+    token compartilhado). Ler o 1º item, como antes, deixava qualquer chamador
+    escolher pra qual /32 a VM ficava exposta (ou trancar o usuário legítimo
+    de fora). Só aceitamos IPv4 (a regra de firewall usa /32; um /32 IPv6
+    seria um host route válido mas o formato aqui já assume v4).
+    """
     xff = request.headers.get("X-Forwarded-For", "")
-    if xff:
-        return xff.split(",")[0].strip()
-    return request.remote_addr or ""
+    ip = xff.split(",")[-1].strip() if xff else (request.remote_addr or "")
+    if not ip:
+        return ""
+    try:
+        parsed = ipaddress.ip_address(ip)
+    except ValueError:
+        log.warning("X-Forwarded-For/remote_addr não é um IP válido: %r", ip)
+        return ""
+    if parsed.version != 4:
+        log.warning("IP do cliente é IPv6 (%s) — sem suporte a /32 IPv6 aqui; ignorando.", ip)
+        return ""
+    return ip
 
 
 def _deny():
@@ -634,17 +803,38 @@ def cloud_status():
 
 @app.route("/cloud/keepalive", methods=["POST"])
 def cloud_keepalive():
-    """No-op (compat). O custo é contido pelo idle-watchdog DA VM, não por lease."""
+    """Registra a lease do client_id (header X-Simu-Client), se mandado.
+
+    O custo AINDA é contido pelo idle-watchdog DENTRO da VM, não por esta
+    lease — ela só serve pra /cloud/stop não derrubar um usuário concorrente
+    (ver LEASES acima). Sem o header, é um no-op puro (compat com clientes
+    antigos, que continuam sujeitos ao stop incondicional de sempre).
+    """
     if not _require(CLOUD_AUTH_TOKEN):
         return _deny()
+    client_id = request.headers.get("X-Simu-Client", "").strip()
+    if client_id:
+        with _leases_lock:
+            LEASES[client_id] = _now() + LEASE_TTL_S
     return jsonify({"ok": True, "leaseExpiresAt": None})
 
 
 @app.route("/cloud/stop", methods=["POST"])
 def cloud_stop():
-    """Para a instância agora. {"state":STATE}."""
+    """Para a instância agora — A MENOS que outro client_id (header
+    X-Simu-Client) ainda tenha uma lease válida (keepalive há < LEASE_TTL_S),
+    caso em que só reporta o estado atual sem parar. O in-VM idle-watchdog
+    continua sendo o backstop de custo final caso esse outro cliente suma sem
+    avisar. Requests sem o header preservam o comportamento antigo (para
+    incondicionalmente) pra compatibilidade com clientes antigos.
+
+    {"state":STATE} ou {"state":STATE,"skipped":"active-lease"}
+    """
     if not _require(CLOUD_AUTH_TOKEN):
         return _deny()
+    client_id = request.headers.get("X-Simu-Client", "").strip()
+    if client_id and _other_client_has_lease(client_id):
+        return jsonify({"state": get_instance()[0], "skipped": "active-lease"})
     return jsonify({"state": stop_instance()})
 
 
@@ -722,6 +912,8 @@ def _log_config():
     log.info("  auth token    : %s", "set" if CLOUD_AUTH_TOKEN else "UNSET (fail-closed)")
     log.info("  reap token    : %s", "set" if REAP_TOKEN else "UNSET (fail-closed)")
     log.info("  REAP_IDLE_DAYS: %d", REAP_IDLE_DAYS)
+    log.info("  MAX_UPTIME_S_META  : %ds (watchdog em-guest)", MAX_UPTIME_S_META)
+    log.info("  MAX_RUN_DURATION_S : %ds (teto enforçado pelo GCP, só SPOT)", MAX_RUN_DURATION_S)
 
 
 def main():

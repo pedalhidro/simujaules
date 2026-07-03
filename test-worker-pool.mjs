@@ -133,8 +133,27 @@ function assert(cond, label) {
   console.log("top-N routes");
   const r = run(msg({ wantTopN: true, nRoutes: 3, penalty: 2 }));
   assert(r.routes?.length === 3, "3 routes returned");
-  assert(r.routes.every((x, i) => i === 0 || x.energy >= r.routes[i - 1].energy - 1e-9),
-    "route energies non-decreasing");
+  // Reported energies are now the TRUE (un-penalised) route cost, not
+  // astar()'s penalised search cost — only route #1 (no repulsion applied
+  // yet) is guaranteed optimal; routes 2..N only guarantee >= the optimum,
+  // they are no longer monotone non-decreasing against each other.
+  assert(r.routes.every((x) => x.energy >= r.routes[0].energy - 1e-9),
+    "route energies (true, un-penalised) are all >= the optimum (route #1)");
+}
+{
+  console.log("top-N per-cell penalty < 1 is clamped to 1 (no negative A* edges)");
+  // penalty=0.5 in per-cell mode used to pass straight through
+  // (`penalty > 0 ? penalty : 1.0`), making Math.pow(0.5, used) < 1 and
+  // producing a NEGATIVE repulsion term on top of v2Edge — a non-admissible,
+  // possibly-negative A* edge. Clamped, 0.5 behaves as 1 (no repulsion):
+  // every route should still come back finite, non-negative, and >= the
+  // optimum.
+  const r = run(msg({ wantTopN: true, nRoutes: 3, penalty: 0.5, repulsionMode: "per-cell" }));
+  assert(r.routes?.length === 3, "3 routes returned (per-cell, penalty 0.5)");
+  const allFiniteNonNeg = r.routes.every((x) => Number.isFinite(x.energy) && x.energy >= 0);
+  assert(allFiniteNonNeg, "every route energy is finite and non-negative");
+  const allAboveOptimum = r.routes.every((x) => x.energy >= r.routes[0].energy - 1e-9);
+  assert(allAboveOptimum, "every route energy >= route #1 (the optimum)");
 }
 {
   console.log("A* optimality on descents (admissible heuristic)");
@@ -195,6 +214,53 @@ function assert(cond, label) {
   assert(dTo < 5e-2, `mode "to" route #1 energy = reverse-field E[dst] (|Δ| = ${dTo.toExponential(1)})`);
   const dFrom = Math.abs(from.routes[0].energy - from.pathEnergy);
   assert(dFrom < 5e-2, `mode "from" route #1 energy = field E[dst] (|Δ| = ${dFrom.toExponential(1)})`);
+}
+{
+  console.log("mode-to maximize DP scores the travel direction dst→seed (mirrors astar's `reverse`)");
+  // v49 gave astar's top-N a `reverse` flag so mode "to" routes are scored
+  // dst→seed, matching the field they overlay — but the layered-DP dispatch
+  // (maxCostPathOfLength) always scored seed→goal regardless of mode. Under
+  // the asymmetric v2 cost model that's a different path/energy. Local
+  // mirror of energy-worker.js's v2Edge (same asymmetric cost model, kept in
+  // sync by hand like the graph-engine/water-raster mirror tests) lets this
+  // test independently recompute the dst→seed energy of the DP's own path
+  // and check it against the reported pathEnergy.
+  function v2EdgeMirror(dist, dh, c) {
+    if (dh >= 0) {
+      const aero = (dh < c.climbThr * dist) ? c.aAero * dist : 0;
+      return c.aRoll * dist + aero + c.beta * dh;
+    }
+    const ndh = -dh;
+    let eps = c.abRatio * dist / ndh;
+    if (eps > 1) eps = 1;
+    eps -= c.epsOffset;
+    if (eps < 0) eps = 0;
+    const e = c.aRoll * dist + c.aAero * dist - eps * c.beta * ndh;
+    return e < 0 ? 0 : e;
+  }
+  // Chebyshev distance between seed and goal: the minimum number of
+  // 8-connected steps that can reach the goal exactly — always feasible as
+  // an L for the layered DP (mix of diagonal + cardinal moves).
+  const L = Math.max(Math.abs(base.goalR - base.seedR), Math.abs(base.goalC - base.seedC));
+  const r = run(msg({ mode: "to", maximize: true, maximizeLength: L }));
+  const gotPath = Array.isArray(r.path) && r.path.length === L + 1;
+  assert(gotPath, `DP path has exactly L+1 = ${L + 1} cells (mode "to", maximize, L=${L})`);
+  if (gotPath) {
+    let trueE = 0;
+    for (let j = 1; j < r.path.length; j++) {
+      const a = r.path[j - 1], b = r.path[j];
+      const ar = (a / W) | 0, ac = a - ar * W;
+      const br = (b / W) | 0, bc = b - br * W;
+      const d = Math.hypot((br - ar) * base.dy, (bc - ac) * base.dx);
+      // Path is stored seed→goal; travel is dst→seed (mode "to"), so the
+      // edge from a to b is scored as if descending FROM a (the dst side).
+      const dh = height[a] - height[b];
+      trueE += v2EdgeMirror(d, dh, base.cost);
+    }
+    const dE = Math.abs(r.pathEnergy - trueE);
+    assert(dE < 5e-2,
+      `DP pathEnergy = dst→seed sum of v2Edge over the path (${r.pathEnergy.toFixed(1)} vs ${trueE.toFixed(1)}, |Δ| = ${dE.toExponential(1)})`);
+  }
 }
 
 // ---- 2. pooled density partials ≡ single-run density ----

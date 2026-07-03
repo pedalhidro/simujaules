@@ -26,6 +26,8 @@ const STRINGS = {
   "lang.toggle.title":   { pt: "Idioma — clique para alternar PT/EN", en: "Language — click to switch PT/EN" },
   // (engine.* strings removed along with the engine-tag pill.)
   "locate.title":        { pt: "Centralizar na minha localização",     en: "Center on my location" },
+  "map.zoom_in":         { pt: "Aproximar",                             en: "Zoom in" },
+  "map.zoom_out":        { pt: "Afastar",                               en: "Zoom out" },
   "locate.requesting":   { pt: "Buscando localização…",                 en: "Locating…" },
   "locate.centered":     { pt: "Centralizado em {0}, {1}.",             en: "Centred at {0}, {1}." },
   "locate.denied":       { pt: "Acesso à localização negado.",          en: "Location access denied." },
@@ -48,12 +50,15 @@ const STRINGS = {
   "status.fabdem_fetching":  { pt: "Buscando {0} tile(s) FABDEM…",                     en: "Fetching {0} FABDEM tile(s)…" },
   "status.fabdem_mosaic":    { pt: "Mosaico: tile {0}/{1}…",                           en: "Mosaicking: tile {0}/{1}…" },
   "status.fabdem_all_failed":{ pt: "FABDEM: todos os tiles falharam na leitura (rede?). Tente novamente.", en: "FABDEM: all tile reads failed (network?). Try again." },
+  "status.fabdem_partial":   { pt: "Atenção: {0} de {1} tiles FABDEM falharam na leitura — o DEM tem lacunas (nodata). Recarregue para tentar de novo.", en: "Warning: {0} of {1} FABDEM tiles failed to read — the DEM has gaps (nodata). Reload to retry." },
   "status.fabdem_failed":    { pt: "Falha ao carregar FABDEM: {0}",                  en: "FABDEM load failed: {0}" },
   // DEM loading
   "status.fetching":         { pt: "Buscando {0}…",                                  en: "Fetching {0}…" },
   "status.loading_label":    { pt: "Carregando {0}…",                                en: "Loading {0}…" },
   "status.error_generic":    { pt: "Erro: {0}",                                      en: "Error: {0}" },
   "status.dem_lonlat":       { pt: "DEM em lon/lat — distâncias aproximadas pela latitude (boas a ~0,3% em extensões < ~50 km).", en: "DEM is in lon/lat — distances approximated from latitude (good to ~0.3% under ~50 km extent)." },
+  "status.dem_no_geotransform":{ pt: "O GeoTIFF não tem metadados de georreferenciamento (ModelPixelScale/tie points). Use um GeoTIFF georreferenciado.", en: "The GeoTIFF lacks geotransform metadata (ModelPixelScale/tie points). Use a properly georeferenced GeoTIFF." },
+  "status.mask_no_geotransform":{ pt: "O GeoTIFF de máscara não tem metadados de georreferenciamento (ModelPixelScale/tie points).", en: "Mask GeoTIFF lacks geotransform metadata (ModelPixelScale / tie points)." },
   "status.dem_loaded":       { pt: "{0} carregado. Clique no mapa para definir o ponto de origem.", en: "{0} loaded. Click on the map to set source point." },
   "status.dem_projected":    { pt: "{0} carregado, mas o CRS é projetado/desconhecido — o mapa é só lon/lat (EPSG:4326), então cliques e camadas não estão disponíveis. Reprojete o DEM para EPSG:4326 para interagir no mapa.", en: "{0} loaded, but its CRS is projected/unknown — the map is lon/lat (EPSG:4326) only, so click-to-pick and overlays are unavailable. Reproject the DEM to EPSG:4326 to interact on the map." },
   "status.map_not_ready":    { pt: "Mapa não está pronto.",                          en: "Map not ready." },
@@ -65,10 +70,12 @@ const STRINGS = {
   "status.net_zero_cells_src":{ pt: "{0}: rasterizado para 0 células neste DEM — não aplicado.", en: "{0}: rasterised to 0 cells on this DEM — not applied." },
   "status.net_too_large":    { pt: "Rede grande demais para renderização vetorial (máscara raster ainda ativa).", en: "Network too large for vector rendering (raster mask still active)." },
   "status.osm_no_intersect": { pt: "A vista atual do mapa não intersecta o DEM — vá até o DEM primeiro.", en: "The current map view doesn't intersect the DEM — pan to the DEM first." },
+  "status.osm_net_geographic":{ pt: "A busca OSM precisa de um DEM geográfico (EPSG:4326) — o DEM atual está projetado.", en: "The OSM pull needs a geographic DEM (EPSG:4326) — the current DEM is projected." },
   "status.osm_querying":     { pt: "Consultando OSM (Overpass) por highway=* …",     en: "Querying OSM (Overpass) for highway=* …" },
   "status.osm_parsing":      { pt: "Lendo resposta do OSM…",                         en: "Parsing OSM response…" },
   "status.osm_rasterising":  { pt: "Rasterizando {0} vias do OSM…",                  en: "Rasterising {0} OSM ways…" },
   "status.osm_failed":       { pt: "Falha ao puxar a rede do OSM: {0}",              en: "OSM network pull failed: {0}" },
+  "status.osm_no_ways":      { pt: "O Overpass não retornou vias highway=* nesta extensão.", en: "Overpass returned no highway=* ways in this extent." },
   "status.water_geographic": { pt: "Puxar água do OSM precisa de um DEM geográfico (lon/lat).", en: "OSM water pull needs a geographic (lon/lat) DEM." },
   "status.water_querying":   { pt: "Consultando OSM (Overpass) por água…",          en: "Querying OSM (Overpass) for water…" },
   "status.water_parsing":    { pt: "Lendo água do OSM…",                            en: "Parsing OSM water…" },
@@ -79,15 +86,16 @@ const STRINGS = {
   "status.overpass_http":    { pt: "Overpass HTTP {0} (ocupado? tente de novo em um minuto)", en: "Overpass HTTP {0} (busy? try again in a minute)" },
   "status.vec_reading":      { pt: "Lendo {0} ({1} MB)…",                            en: "Reading {0} ({1} MB)…" },
   "status.vec_init_sql":     { pt: "Inicializando sql.js…",                          en: "Initializing sql.js…" },
+  "status.sqljs_unavailable":{ pt: "sql.js não carregou (CDN bloqueado, ou offline antes do primeiro uso?)", en: "sql.js didn't load (CDN blocked, or offline before it was ever fetched?)" },
   "status.vec_rasterising_of":   { pt: "Rasterizando… <span class=\"v\">{0}</span>/{1} ({2} desenhadas)", en: "Rasterising… <span class=\"v\">{0}</span>/{1} ({2} drawn)" },
   "status.vec_rasterising_scan": { pt: "Rasterizando… <span class=\"v\">{0}</span> varridas, {1} desenhadas", en: "Rasterising… <span class=\"v\">{0}</span> scanned, {1} drawn" },
   "status.net_meta_drawn":   { pt: "<span class=\"v\">{0}</span> linhas desenhadas<br/><span class=\"v\">{1}</span> células de rede ({2}% da grade)", en: "<span class=\"v\">{0}</span> lines drawn<br/><span class=\"v\">{1}</span> network cells ({2}% of grid)" },
   "status.net_meta_zero":    { pt: "EPSG:{0} · varridas <span class=\"v\">{1}</span> feições, desenhadas {2} — <span style=\"color:#ff6b6b\">0 células neste DEM</span>", en: "EPSG:{0} · scanned <span class=\"v\">{1}</span> features, drew {2} — <span style=\"color:#ff6b6b\">0 cells on this DEM</span>" },
+  "status.load_superseded":  { pt: "Carregamento cancelado — o DEM mudou durante a operação.", en: "Load cancelled — the DEM changed during the operation." },
   // Point picking / snapping
   "status.click_outside":    { pt: "Clique fora do DEM, ou DEM em CRS não geográfico (este protótipo só suporta DEMs EPSG:4326 — veja as notas).", en: "Click is outside the DEM, or DEM is in a non-geographic CRS (this prototype supports EPSG:4326 DEMs only — see notes)." },
   "status.click_nodata":     { pt: "A célula clicada é nodata.",                     en: "Clicked cell is nodata." },
   "status.net_no_snap_click":{ pt: "A rede carregada não tem células úteis neste DEM (verifique CRS/geometria) — não dá para agarrar cliques. Desmarque \"Restringir cálculo à rede\" ou limpe a rede para continuar.", en: "The loaded network has no usable cells on this DEM (check its CRS/geometry) — clicks can't be snapped. Untick \"Constrain compute to network\" or clear the network to continue." },
-  "status.ref_random_mode":  { pt: "A colocação de referências está em \"aleatória\" — use \"Distribuir aleatórias\" ou mude para cliques.", en: "Ref placement is set to \"random\" — use \"Place random\" or switch placement to clicks." },
   "status.snap_failed_label":{ pt: "{0} não pode ser agarrado — a rede carregada não tem células úteis neste DEM (verifique CRS/geometria), ou desmarque \"Restringir cálculo à rede\".", en: "{0} can't be snapped — the loaded network has no usable cells on this DEM (check its CRS/geometry), or untick \"Constrain compute to network\"." },
   "status.refs_no_snap":     { pt: "Os pontos de referência não podem ser agarrados — a rede carregada não tem células úteis neste DEM, ou desmarque \"Restringir cálculo à rede\".", en: "Reference points can't be snapped — the loaded network has no usable cells on this DEM, or untick \"Constrain compute to network\"." },
   // Compute progress / backend / interp / graph
@@ -118,9 +126,11 @@ const STRINGS = {
   "status.bundle_restored":  { pt: "Bundle restaurado do cache — todas as camadas salvas re-renderizadas. Sem recálculo.", en: "Bundle restored from cache — all saved layers re-rendered. No recompute needed." },
   "status.bundle_dem_mismatch":{ pt: "Tamanho do DEM não bate — o bundle era para {0}×{1}, o DEM carregado é {2}×{3}. Parâmetros aplicados; saídas binárias ignoradas. Carregue o DEM correspondente para restaurar as camadas.", en: "DEM size mismatch — bundle was for {0}×{1}, loaded DEM is {2}×{3}. Parameters applied; binary outputs skipped. Load the matching DEM to restore overlays." },
   "status.bundle_dem_mismatch_pending":{ pt: "DEM carregado ({0}×{1}) não corresponde ao bundle pendente ({2}×{3}) — carregue o DEM correspondente para restaurá-lo.", en: "DEM loaded ({0}×{1}) doesn't match the pending bundle ({2}×{3}) — load the matching DEM to restore it." },
+  "status.bundle_dem_extent_mismatch":{ pt: "DEM tem o mesmo tamanho ({0}×{1}) do bundle, mas é de outra área — provavelmente outro recorte. Parâmetros aplicados; saídas binárias ignoradas. Carregue o DEM correto para restaurar as camadas.", en: "DEM matches the bundle's size ({0}×{1}) but covers a different area — likely a different tile. Parameters applied; binary outputs skipped. Load the correct DEM to restore overlays." },
   "status.bundle_params_loaded":{ pt: "Parâmetros do bundle carregados. Clique em Compute para reproduzir.", en: "Bundle parameters loaded. Click Compute to reproduce." },
   "status.bundle_need_dem":  { pt: "Bundle carregado. Agora carregue o DEM correspondente{0} e clique em Compute.", en: "Bundle loaded. Now load the matching DEM{0} and click Compute." },
   "status.bundle_loaded":    { pt: "Bundle carregado. Clique no mapa para definir o ponto de origem.", en: "Bundle loaded. Click on the map to set source point." },
+  "status.bundle_graph_not_restored":{ pt: "Bundle de modo grafo: o resultado (graph_edges.geojson) não é restaurável e a rede vetorial não viaja no bundle — recarregue a rede (.gpkg/OSM) antes de recalcular, senão o Compute usa o motor raster.", en: "Graph-mode bundle: the result (graph_edges.geojson) can't be restored and the vector network doesn't travel with the bundle — reload the network (.gpkg/OSM) before recomputing, or Compute will silently fall back to the raster engine." },
   "locate.unavailable":  { pt: "Localização indisponível.",             en: "Location unavailable." },
   "locate.timeout":      { pt: "Tempo esgotado ao buscar localização.", en: "Location lookup timed out." },
   "locate.error":        { pt: "Erro ao buscar localização.",           en: "Location lookup failed." },
@@ -150,6 +160,9 @@ const STRINGS = {
   "ex.tag.geral":        { pt: "~540 MB · lento",       en: "~540 MB · slow" },
   "ex.tag.fabdem":       { pt: "≤ 50 MB",                en: "≤ 50 MB" },
   "dem.no_dem":          { pt: "Nenhum DEM carregado.", en: "No DEM loaded." },
+  "dem.meta_size":       { pt: "<span class=\"v\">{0} × {1}</span> células, célula {2}", en: "<span class=\"v\">{0} × {1}</span> cells, cell {2}" },
+  "dem.meta_origin":     { pt: "origem <span class=\"v\">{0}</span>", en: "origin <span class=\"v\">{0}</span>" },
+  "dem.meta_coverage":   { pt: "{0} de cobertura", en: "{0} coverage" },
   "bundle.reload_hint":  { pt: "Restaurar bundle (.zip) ou .jsonld:", en: "Reload a saved bundle (.zip) or .jsonld:" },
 
   // ---- Group: Vector network -------------------------------------------
@@ -157,9 +170,7 @@ const STRINGS = {
   "net.line_width":      { pt: "largura da linha (células)", en: "line width (cells)" },
   "net.snap_radius":     { pt: "raio de snap (células)", en: "snap radius (cells)" },
   "net.clear":           { pt: "Limpar rede",  en: "Clear network" },
-  "net.render":          { pt: "Desenhar rede (linhas pretas)", en: "Draw network (black lines)" },
   "net.render_width":    { pt: "largura da linha (m)", en: "line width (m)" },
-  "net.render_opacity":  { pt: "opacidade da linha", en: "line opacity" },
   "net.constrain":       { pt: "Restringir cálculo à rede", en: "Constrain compute to network" },
   "net.graph_mode":      { pt: "Calcular sobre o grafo da rede (seguir os vetores)", en: "Compute on network graph (follow vectors)" },
   "net.junctions":       { pt: "junções", en: "junctions" },
@@ -167,7 +178,7 @@ const STRINGS = {
   "net.junctions_shared":    { pt: "extremos comuns", en: "shared endpoints" },
   "net.osm":             { pt: "Puxar ruas do OSM (highway=*)", en: "Pull streets from OSM (highway=*)" },
   "net.example_viario":  { pt: "Viário RMSampa", en: "RMSampa road network" },
-  "net.example_viario_tag": { pt: "~145 MB · nuvem", en: "~145 MB · cloud" },
+  "net.example_viario_tag": { pt: "~145 MB · nuvem · dados © OpenStreetMap, ODbL", en: "~145 MB · cloud · data © OpenStreetMap, ODbL" },
   "help.p.network_osm":  { pt: "Consulta o Overpass sobre a vista atual ∩ extensão do DEM. Áreas grandes podem demorar ou estourar limites do Overpass — aproxime o zoom primeiro.", en: "Queries Overpass over the current map view ∩ DEM extent. Large areas can take a while or hit Overpass limits — zoom in first." },
   "net.compare":         { pt: "Comparar com cenário sem rede", en: "Compare with unconstrained" },
   "net.graph_constrain_locked": { pt: "No modo grafo o cálculo é sempre sobre a rede — \"restringir\" fica sempre ativo. \"Comparar\" continua disponível: compara com o cenário em raster sem a rede.", en: "In graph mode the compute is always on the network — \"constrain\" stays on. \"Compare\" is still available: it compares against the raster scenario without the network." },
@@ -180,6 +191,31 @@ const STRINGS = {
   "route.delta":         { pt: "Δ rede − terreno", en: "Δ network − terrain" },
   "route.terrain_meta":  { pt: "rota no terreno E: <span class=\"v\">{0}</span>, L=<span class=\"v\">{1} km</span>", en: "terrain route E: <span class=\"v\">{0}</span>, L=<span class=\"v\">{1} km</span>" },
   "route.round_note":    { pt: "energia das rotas alternativas: apenas o trecho de ida", en: "alternative-route energies: outbound leg only" },
+  "warn.dp_skipped":     { pt: "Caminho de comprimento restrito não calculado ({0}). Mostrando o caminho da Dijkstra invertida — tente um L maior (no mínimo ~a distância de Chebyshev entre origem e destino).", en: "Length-constrained DP did not run ({0}). Showing the inverted-Dijkstra path instead — try a larger L (at minimum ~Chebyshev distance between src and dst)." },
+  "route.compare_metric_note": { pt: "Nota: a rota de terreno segue a grade 8-conectada (comprimento até ~8% acima do geométrico) e alturas por célula; a rota da rede usa o comprimento real das polilinhas — Δ pequenos ficam dentro dessa diferença metodológica.", en: "Note: the terrain route follows the 8-connected grid (length up to ~8% above the geometric path) and cell-centre heights; the network route uses true polyline lengths — small Δ values sit within that methodological difference." },
+  // ---- ColorCET colormap dropdown optgroup labels ------------------------
+  "cmap.grp.linear":       { pt: "Linear", en: "Linear" },
+  "cmap.grp.diverging":    { pt: "Divergente", en: "Diverging" },
+  "cmap.grp.rainbow":      { pt: "Arco-íris", en: "Rainbow" },
+  "cmap.grp.isoluminant":  { pt: "Isoluminante", en: "Isoluminant" },
+  "cmap.grp.cyclic":       { pt: "Cíclico", en: "Cyclic" },
+  "cmap.grp.cb_linear":    { pt: "Segura p/ daltonismo, linear", en: "Colour-blind safe linear" },
+  "cmap.grp.cb_diverging": { pt: "Segura p/ daltonismo, divergente", en: "Colour-blind safe diverging" },
+  "cmap.grp.cb_cyclic":    { pt: "Segura p/ daltonismo, cíclica", en: "Colour-blind safe cyclic" },
+  "cmap.grp.tritan_linear":    { pt: "Segura p/ tritanopia, linear", en: "Tritan-safe linear" },
+  "cmap.grp.tritan_diverging": { pt: "Segura p/ tritanopia, divergente", en: "Tritan-safe diverging" },
+  "cmap.grp.tritan_cyclic":    { pt: "Segura p/ tritanopia, cíclica", en: "Tritan-safe cyclic" },
+  // ---- Stats panel (renderResult) + route/marker tooltips ---------------
+  "stats.max_e":         { pt: "E máx: <span class=\"v\">{0}</span>", en: "max E: <span class=\"v\">{0}</span>" },
+  "stats.time":          { pt: "tempo: <span class=\"v\">{0} ms</span>", en: "time: <span class=\"v\">{0} ms</span>" },
+  "stats.max_passes":    { pt: "passes máx: <span class=\"v\">{0}</span>", en: "max passes: <span class=\"v\">{0}</span>" },
+  "stats.routes_count":  { pt: "<span class=\"v\">{0}</span> rota(s):", en: "<span class=\"v\">{0}</span> route(s):" },
+  "stats.shared":        { pt: ", compartilhada <span class=\"v\">{0}</span>", en: ", shared <span class=\"v\">{0}</span>" },
+  "stats.path_e":        { pt: "E da rota: <span class=\"v\">{0}</span>", en: "path E: <span class=\"v\">{0}</span>" },
+  "stats.length":        { pt: "distância: <span class=\"v\">{0} km</span>", en: "length: <span class=\"v\">{0} km</span>" },
+  "stats.route_tooltip": { pt: "rota {0} · E {1} · {2} km", en: "route {0} · E {1} · {2} km" },
+  "marker.src":          { pt: "Origem", en: "Source" },
+  "marker.dst":          { pt: "Destino", en: "Destination" },
   "net.interp":          { pt: "Interpolar entre células fora da rede", en: "Interpolate across non-network cells" },
   "net.max_distance":    { pt: "distância máx (células)", en: "max distance (cells)" },
   "net.smoothing":       { pt: "suavizações", en: "smoothing iters" },
@@ -189,20 +225,16 @@ const STRINGS = {
   "group.impassable":    { pt: "1C. Máscara de barreira opcional (água)", en: "1C. Optional impassable mask (water)" },
   "imp.enabled":         { pt: "Aplicar ao cálculo", en: "Apply to compute" },
   "imp.invert":          { pt: "Inverter (raster marca células passáveis)", en: "Invert (raster marks passable cells)" },
-  "imp.clear":           { pt: "Limpar máscara", en: "Clear mask" },
   "imp.osm":             { pt: "Puxar água do OSM", en: "Pull water from OSM" },
   "imp.example_water":   { pt: "Águas RMSampa", en: "RMSampa water mask" },
   "imp.example_water_tag": { pt: "~2,4 MB · nuvem", en: "~2.4 MB · cloud" },
   "imp.rivers":          { pt: "Rios (linhas) intransponíveis", en: "Rivers (lines) impassable" },
   "imp.corridor":        { pt: "Rede abre corredores passáveis sobre a máscara", en: "Network carves passable corridors across the mask" },
   "imp.offset":          { pt: "deslocamento no centro da ponte (m, −5…+15)", en: "bridge centre offset (m, −5…+15)" },
-  "imp.show":            { pt: "Mostrar máscara + corredores no mapa", en: "Show mask + corridors on map" },
-  "imp.opacity":         { pt: "opacidade da camada", en: "overlay opacity" },
   "imp.none":            { pt: "Nenhuma máscara carregada.", en: "No impassable mask loaded." },
   "imp.meta.cells":      { pt: "{0} células barradas ({1}% da grade)", en: "{0} impassable cells ({1}% of grid)" },
   "imp.meta.corridor":   { pt: "{0} células de corredor (pontes)", en: "{0} bridge-corridor cells" },
   "imp.cell_blocked":    { pt: "Célula intransponível (máscara de barreira) — escolha outra.", en: "Impassable cell (barrier mask) — pick another." },
-  "aria.opacity_impassable": { pt: "opacidade da máscara de barreira", en: "impassable mask opacity" },
   "help.h.impassable":   { pt: "Máscara de barreira", en: "Impassable mask" },
 
   // ---- Group: Bridges & tunnels ----------------------------------------
@@ -216,8 +248,6 @@ const STRINGS = {
   "draw.barrier":        { pt: "Desenhar barreira", en: "Draw barrier" },
   "draw.corridor":       { pt: "Desenhar corredor", en: "Draw corridor" },
   "draw.portal":         { pt: "Desenhar portal", en: "Draw portal" },
-  "draw.erase":          { pt: "Apagar desenhos", en: "Erase drawings" },
-  "draw.erase_imp":      { pt: "Apagar barreiras/corredores desenhados", en: "Erase drawn barriers/corridors" },
   "imp.erase_all":       { pt: "Apagar máscara e desenhos", en: "Erase mask & drawings" },
   "draw.erase_portal":   { pt: "Apagar portais desenhados", en: "Erase drawn portals" },
   "draw.need_dem":       { pt: "Carregue um DEM geográfico (lon/lat) antes de desenhar.", en: "Load a geographic (lon/lat) DEM before drawing." },
@@ -230,12 +260,9 @@ const STRINGS = {
   "draw.imp_meta":       { pt: "{0} barreira(s), {1} corredor(es) desenhado(s)", en: "{0} barrier(s), {1} corridor(s) drawn" },
   "draw.portal_meta":    { pt: "{0} portal(is) desenhado(s)", en: "{0} portal(s) drawn" },
   "draw.delete_this":    { pt: "Apagar este desenho", en: "Delete this drawing" },
-  "bridge.show":         { pt: "Mostrar tabuleiros no mapa", en: "Show decks on map" },
-  "bridge.opacity":      { pt: "opacidade do tabuleiro", en: "deck opacity" },
   "bridge.none":         { pt: "Nenhuma ponte carregada.", en: "No bridges loaded." },
   "bridge.meta.count":   { pt: "{0} tabuleiros de ponte/túnel", en: "{0} bridge/tunnel decks" },
   "bridge.meta.skipped": { pt: "{0} ignorados (fora do DEM ou apoio sem dado)", en: "{0} skipped (off-DEM or nodata abutment)" },
-  "aria.opacity_bridge": { pt: "opacidade dos tabuleiros de ponte", en: "bridge deck opacity" },
   "help.h.bridges":      { pt: "Pontes e túneis", en: "Bridges & tunnels" },
   "help.p.bridges":      { pt: "Puxa pontes (bridge=*) e, opcionalmente, túneis (tunnel=yes) do OpenStreetMap sobre a extensão do DEM, ou extrai-os da rede vetorial já carregada (1b) que tenha tags bridge/tunnel (coluna ou other_tags). Cada estrutura é modelada como um tabuleiro plano entre seus dois apoios no solo: no cálculo em raster ela vira uma \"aresta-portal\" entre as células das pontas, com o custo do tabuleiro plano, sem alterar as células por baixo — então tanto a rota POR CIMA da ponte quanto a rota POR BAIXO ficam corretas. Pressupõe um DEM de terreno nu (sem o tabuleiro). No modo \"seguir os vetores\" (grafo), as pontes/túneis da própria rede (puxada do OSM) são achatadas e os cruzamentos em níveis diferentes não se conectam.", en: "Pulls bridges (bridge=*) and, optionally, tunnels (tunnel=yes) from OpenStreetMap over the DEM extent, or extracts them from the already-loaded vector network (1b) when it carries bridge/tunnel tags (a column or other_tags). Each structure is modelled as a level deck between its two ground abutments: in the raster compute it becomes a \"portal edge\" between the end cells at the flat-deck cost, without altering the cells underneath — so both the route OVER the bridge and the route UNDER it stay correct. Assumes a bare-earth DEM (deck not in the terrain). In \"follow the vectors\" (graph) mode, the network's own bridges/tunnels (pulled from OSM) are flattened and crossings at different layers don't connect." },
   "help.p.impassable":   { pt: "Suba um GeoTIFF binário (1=intransponível, p.ex. corpos d'água). É reamostrado para a grade do DEM por maioria de área (≥50% intransponível ⇒ célula barrada); fora da extensão da máscara assume-se passável. Pode estar em extensão/resolução/CRS diferentes do DEM. Opcionalmente, a rede vetorial (1b) abre corredores passáveis (pontes) sobre a máscara, com um deslocamento suave de elevação que sobe linearmente das margens até o centro da ponte.", en: "Upload a binary GeoTIFF (1=impassable, e.g. water bodies). It is resampled onto the DEM grid by area-coverage majority (≥50% impassable ⇒ blocked cell); outside the mask extent cells are assumed passable. It may have a different extent/resolution/CRS than the DEM. Optionally the vector network (1b) carves passable corridors (bridges) across the mask, with a smooth elevation offset that ramps linearly from the shores up to the bridge centre." },
@@ -270,11 +297,10 @@ const STRINGS = {
   "param.budget_mode":   { pt: "Orçamento aplica-se a", en: "Budget applies to" },
   "budget.leg":          { pt: "por perna", en: "each leg" },
   "budget.total":        { pt: "ida e volta", en: "round trip" },
-  "help.p.budget_mode":  { pt: "Só no modo ida-e-volta. \"Cada perna\": célula visível se ida ≤ orçamento E volta ≤ orçamento (total pode chegar a 2×). \"Total\": ida + volta ≤ orçamento. A contagem de passagens conta apenas trajetos até células exibidas (dentro do orçamento); células-corredor ainda acumulam os trajetos que passam por elas.", en: 'Round-trip mode only. "Each leg": a cell is shown if out ≤ budget AND back ≤ budget (totals can reach 2×). "Total": out + back ≤ budget. The passes count only counts trajectories to displayed (within-budget) cells; corridor cells still accumulate the trajectories passing through them.' },
+  "help.p.budget_mode":  { pt: "Só no modo ida-e-volta. \"Cada perna\": célula visível se ida ≤ orçamento E volta ≤ orçamento (total pode chegar a 2×). \"Total\": ida + volta ≤ orçamento. A contagem de passagens conta apenas trajetos até células exibidas (dentro do orçamento); células-corredor ainda acumulam os trajetos que passam por elas. Perto da fronteira do orçamento as subárvores ficam truncadas e a contagem fica sistematicamente mais baixa ali; células cuja alcançabilidade é cortada pela borda do DEM sofrem o mesmo viés — compare corredores só bem dentro do orçamento e longe das bordas.", en: 'Round-trip mode only. "Each leg": a cell is shown if out ≤ budget AND back ≤ budget (totals can reach 2×). "Total": out + back ≤ budget. The passes count only counts trajectories to displayed (within-budget) cells; corridor cells still accumulate the trajectories passing through them. Near the budget frontier subtrees are truncated and the count is systematically lower there; cells whose reachability is clipped by the DEM border carry the same bias — compare corridors only well inside the budget and away from the edges.' },
   "param.want_passes":   { pt: "Calcular contagem de passagens", en: "Compute passes count (route density)" },
   "param.want_topn":     { pt: "Calcular top-N rotas", en: "Compute top-N routes" },
   "param.want_density":  { pt: "Calcular densidade multi-referência", en: "Compute multi-reference density" },
-  "param.use_backend":   { pt: "Usar backend nativo (Rust)", en: "Use native backend (Rust)" },
   "param.backend_url":   { pt: "URL do backend", en: "Backend URL" },
   // ---- Compute source (three-way: navegador / localhost / nuvem) --------
   "param.compute_source":  { pt: "Fonte de cálculo", en: "Compute source" },
@@ -283,12 +309,12 @@ const STRINGS = {
   "cs.cloud":              { pt: "Nuvem (VM orquestrada)", en: "Cloud (orchestrated VM)" },
   "param.orchestrator_url":{ pt: "URL do orquestrador", en: "Orchestrator URL" },
   "param.cloud_token":     { pt: "Senha da nuvem", en: "Cloud password" },
-  "cloud.local_only":      { pt: "A nuvem só está disponível quando o app é servido localmente (o orquestrador escuta em loopback).", en: "Cloud is only available when the app is served locally (the orchestrator listens on loopback)." },
   "cloud.idle":            { pt: "VM da nuvem parada.", en: "Cloud VM stopped." },
   "cloud.starting":        { pt: "Iniciando a VM da nuvem… (~{0})", en: "Starting cloud VM… (~{0})" },
   "cloud.ready":           { pt: "VM da nuvem pronta ({0} núcleos).", en: "Cloud VM ready ({0} cores)." },
   "cloud.stopping":        { pt: "Parando a VM da nuvem…", en: "Stopping cloud VM…" },
   "cloud.stopped_after":   { pt: "VM da nuvem parada após o cálculo.", en: "Cloud VM stopped after the run." },
+  "cloud.stop_skipped":    { pt: "VM da nuvem mantida ligada — outra sessão está usando.", en: "Cloud VM kept running — another session is using it." },
   "cloud.orch_unreachable":{ pt: "Orquestrador inacessível — usando workers do navegador…", en: "Orchestrator unreachable — using browser workers…" },
   "cloud.boot_failed":     { pt: "Falha ao iniciar a VM da nuvem — usando workers do navegador…", en: "Cloud VM failed to start — using browser workers…" },
   "cloud.preempted":       { pt: "VM da nuvem interrompida — recalculando no navegador…", en: "Cloud VM dropped — recomputing in the browser…" },
@@ -299,23 +325,18 @@ const STRINGS = {
   "cloud.creating":        { pt: "Criando a VM da nuvem… (~{0})", en: "Creating cloud VM… (~{0})" },
   "cloud.keep_warm":       { pt: "Manter VM ligada entre cálculos", en: "Keep VM warm between runs" },
   "cloud.warm":            { pt: "VM ligada — esfria após ~15 min de ócio (watchdog na VM).", en: "VM kept warm — auto-stops after ~15 min idle (in-VM watchdog)." },
-  "help.p.backend":      { pt: "Servidor local opcional (backend/ no repositório, cargo run --release). Acelera tanto a densidade multi-referência (uma Dijkstra por referência, em todos os núcleos) quanto o campo de energia de fonte única (de/para/ida-e-volta). Rotas (top-N), caminho até o destino e \"maximizar\" continuam no navegador (o backend não produz rotas). Se inacessível, o app volta silenciosamente para os workers do navegador.", en: "Optional local server (backend/ in the repo, cargo run --release). Accelerates both multi-reference density (one Dijkstra per reference, across all cores) AND the single-source energy field (from/to/round). Top-N routes, the destination path, and \"maximize\" stay in the browser (the backend produces no routes). If unreachable, the app silently falls back to the in-browser workers." },
+  "help.p.backend":      { pt: "Fonte de cálculo: três opções (2C). <em>Navegador</em> (padrão) roda em Web Workers na própria aba. <em>Localhost</em> fala com um servidor Rust opcional (backend/ no repositório, cargo run --release) na máquina do usuário. <em>Nuvem</em> aciona sob demanda uma VM no orquestrador — um serviço Cloud Run público, alcançável de qualquer origem —, protegida pela \"senha da nuvem\" compartilhada; \"Manter VM ligada entre cálculos\" evita religá-la a cada cálculo, mas ela desliga sozinha após ~15 min de ócio (watchdog dentro da própria VM), e cada cálculo com ela ligada é cobrado na conta do mantenedor. Localhost e Nuvem aceleram tanto a densidade multi-referência (uma Dijkstra por referência, em todos os núcleos) quanto o campo de energia de fonte única (de/para/ida-e-volta); rotas (top-N), caminho até o destino e o modo grafo continuam sempre no navegador (nenhum backend produz rotas). Se o servidor ou a VM ficarem inacessíveis, o app volta silenciosamente para os workers do navegador.", en: "Compute source: three options (2C). <em>Browser</em> (default) runs in in-page Web Workers. <em>Localhost</em> talks to an optional Rust server (backend/ in the repo, cargo run --release) on the user's own machine. <em>Cloud</em> boots a VM on demand via the orchestrator — a public Cloud Run service, reachable from any origin — gated by the shared \"cloud password\"; \"Keep VM warm between runs\" avoids rebooting it on every run, but it still auto-stops after ~15 min idle (a watchdog inside the VM), and every run while it's up is billed to the maintainer's account. Localhost and Cloud both accelerate multi-reference density (one Dijkstra per reference, across all cores) AND the single-source energy field (from/to/round). Top-N routes, the destination path, and graph mode always stay in the browser (no backend produces routes). If the server or VM is unreachable, the app falls back silently to the in-browser workers." },
   "param.max_workers":   { pt: "Máx. de workers de cálculo (0 = auto)", en: "Max compute workers (0 = auto)" },
   "help.p.workers":      { pt: "Avançado: paraleliza a densidade entre este número de Web Workers. 0 = auto (dimensionado pelos núcleos e memória disponível). Só aumente se sua máquina tiver mais RAM do que o navegador reporta — cada worker usa cerca de 5 GB em um DEM grande, então exceder pode travar a aba.", en: "Advanced: parallelise density across this many Web Workers. 0 = auto (sized to cores and available memory). Only raise it if your machine has more RAM than the browser reports — each worker needs roughly 5 GB on a large DEM, so over-committing can crash the tab." },
+  // dormant: no UI control since v37 (engine/backend still implement the mode) — kept for param.max_length below
   "param.maximize":      { pt: "Maximizar energia (inverter otimização)", en: "Maximize energy (reverse optimization)" },
   "param.max_length":    { pt: "Comprimento L (arestas, 0 = sem restrição)", en: "Path length L (edges, 0 = unconstrained)" },
-  "help.p.maximize":     { pt: "0: Dijkstra invertido (geometricamente curto, custo denso). L>0: DP em camadas encontra o caminho de custo máximo com exatamente L arestas entre src e dst. Limite de memória ≈ 256 MB ⇒ L·H·W precisa caber; DEMs grandes limitam L a poucas dezenas. O orçamento de energia não se aplica neste modo (os custos invertidos estão em outra unidade).", en: "0: inverted Dijkstra (geometrically short, cost-dense). L>0: layered DP finds the max-cost path of exactly L edges from src to dst. Memory cap ≈ 256 MB ⇒ L·H·W must fit; large DEMs limit L to a few dozen. The energy budget does not apply in this mode (the inverted costs are in different units)." },
   "param.n_refs":        { pt: "N referências", en: "N references" },
-  "param.ref_source":    { pt: "Origem das referências", en: "Reference source" },
-  "ref.click":           { pt: "clicar no mapa", en: "click on map" },
-  "ref.random":          { pt: "aleatórias", en: "random" },
   "help.p.ref_direction": { pt: "A direção segue o Modo acima.", en: "Direction follows the Mode above." },
   "ref.place_random":    { pt: "Distribuir aleatórias", en: "Place random" },
   "param.sampling":      { pt: "Estratégia de amostragem", en: "Sampling strategy" },
-  "sampling.random":     { pt: "pseudoaleatória", en: "pseudo-random" },
   "sampling.uniform":    { pt: "uniforme (pseudoaleatória)", en: "uniform (pseudo-random)" },
   "sampling.sobol":      { pt: "Sobol (quase-aleatória)", en: "Sobol (quasi-random)" },
-  "sampling.halton":     { pt: "Halton (quase-aleatória)", en: "Halton (quasi-random)" },
   "sampling.census":     { pt: "Censo IBGE 2022 (densidade populacional)", en: "IBGE 2022 census (population density)" },
   "help.p.sampling":     { pt: "Sequências quase-aleatórias (QMC) cobrem a área uniformemente sem aglomerados nem vazios — melhor convergência da densidade com menos referências. Cliques sucessivos continuam a sequência em vez de repeti-la. <strong>Censo IBGE 2022</strong> amostra as referências por densidade populacional (onde as pessoas moram): busca os setores censitários dentro do DEM na nuvem e sorteia pontos ponderados pela população — só funciona para DEMs no Brasil e exige internet.", en: "Quasi-random (QMC) sequences cover the area evenly, without the clumps and gaps of pseudo-random — the density converges with fewer references. Successive clicks continue the sequence rather than repeat it. <strong>IBGE 2022 census</strong> samples references by population density (where people actually live): it fetches the census sectors inside the DEM from the cloud and draws population-weighted points — Brazil-only DEMs, and it needs a network connection." },
   "census.fetching":     { pt: "Buscando setores censitários…", en: "Fetching census sectors…" },
@@ -345,10 +366,6 @@ const STRINGS = {
   "param.repulsion":     { pt: "Modo de repulsão", en: "Repulsion mode" },
   // Screen-reader names for the opacity sliders (no visible label of their
   // own — they sit beside the layer checkbox). Applied via data-i18n-aria.
-  "aria.opacity_tiles":  { pt: "Opacidade da camada de tiles", en: "Tile layer opacity" },
-  "aria.opacity_relief": { pt: "Opacidade da camada de relevo", en: "Relief layer opacity" },
-  "aria.opacity_energy": { pt: "Opacidade da camada de energia", en: "Energy layer opacity" },
-  "aria.opacity_passes": { pt: "Opacidade da camada de passagens", en: "Passes layer opacity" },
   "rep.per_cell":        { pt: "por célula (penalidade^usadas)", en: "per-cell (penalty^used)" },
   "rep.linear":          { pt: "linear 1/(d+1)", en: "linear 1/(d+1)" },
   "rep.square":          { pt: "quadrática 1/(d²+1)", en: "square 1/(d²+1)" },
@@ -371,15 +388,12 @@ const STRINGS = {
   "layer.tiles":         { pt: "rmsampa-v2 tiles", en: "rmsampa-v2 tiles" },
   "layer.bridges":       { pt: "Pontes e túneis", en: "Bridges & tunnels" },
   "help.p.tiles":        { pt: '<a href="https://telhas.pedalhidrografi.co/rmsampa-v2/" target="_blank" rel="noopener" style="color: var(--accent-2);">Tiles XYZ</a> de pedalhidrografi.co.', en: '<a href="https://telhas.pedalhidrografi.co/rmsampa-v2/" target="_blank" rel="noopener" style="color: var(--accent-2);">XYZ tiles</a> from pedalhidrografi.co.' },
-  "layer.relief":        { pt: "Relevo (DEM)", en: "Relief (DEM)" },
   "help.p.relief":       { pt: "Camada de relevo do DEM: cmocean.phase, p5–p80 · declividade 0–p80 (γ=1.2) multiplicada.", en: "DEM relief layer: cmocean.phase, p5–p80 · slope 0–p80 (γ=1.2) multiplied." },
-  "layer.energy":        { pt: "Energia", en: "Energy" },
   "vmin.label":          { pt: "min (auto = p1)", en: "min (auto = p1)" },
   "vmax.label":          { pt: "max (auto = p80)", en: "max (auto = p80)" },
   "vmin.passes":         { pt: "min (auto = p10)", en: "min (auto = p10)" },
   "vmax.passes":         { pt: "max (auto = p90)", en: "max (auto = p90)" },
-  "help.p.energy_range": { pt: "Faixa da energia: Auto = esticada por raiz quadrada; fixe qualquer limite (min/max) para escala linear com clamping.", en: "Energy range: Auto = sqrt-stretched; pin either bound (min/max) for a linear scale with clamping." },
-  "layer.passes":        { pt: "Passagens (overlay)", en: "Passes (overlay)" },
+  "help.p.energy_range": { pt: "Faixa da energia: Auto = recorte por percentil (p1–p80) mapeado linearmente para as cores. Fixar min e/ou max substitui o limite automático correspondente (clamping) — o mapeamento continua linear, só muda onde ele recorta.", en: "Energy range: Auto = percentile clip (p1–p80) mapped linearly to colour. Pinning min and/or max replaces the corresponding automatic bound (clamping) — the mapping stays linear, only the clip point changes." },
   "layer.basemap":       { pt: "Mapa base", en: "Basemap" },
   "basemap.osm":         { pt: "OSM (padrão)", en: "OSM (default)" },
   "basemap.dark":        { pt: "OSM minimalista preto", en: "OSM minimalist black" },
@@ -388,7 +402,6 @@ const STRINGS = {
   "basemap.white":       { pt: "sem mapa base (tudo branco)", en: "no basemap (all white)" },
   "basemap.gray":        { pt: "sem mapa base (tudo cinza)", en: "no basemap (all gray)" },
   "basemap.satellite":   { pt: "Satélite (Esri)", en: "Satellite (Esri)" },
-  "order.open":          { pt: "Controle de camadas…", en: "Layer control…" },
   "order.title":         { pt: "Controle de camadas", en: "Layer control" },
   "layer.ctrl_open":     { pt: "Controle de camadas", en: "Layer control" },
   "resizer.title":       { pt: "Arraste para 1–4 colunas (duplo-clique alterna)", en: "Drag to set 1–4 columns (double-click cycles)" },
@@ -441,9 +454,8 @@ const STRINGS = {
   "blend.multiply":      { pt: "multiply", en: "multiply" },
   "blend.overlay":       { pt: "overlay", en: "overlay" },
   "blend.energy":        { pt: "cor da energia (passagens = opacidade)", en: "energy color (passes = opacity)" },
+  "help.p.compare":      { pt: "<em>\"Comparar com cenário sem rede\"</em> (1B) roda o cálculo duas vezes: uma restrita à rede (ou ao grafo), outra livre no raster sem restrição — e o seletor <em>\"Cenário exibido\"</em> (painel de camadas, 3B) escolhe qual energia/passagens aparecem: <em>restrito à rede</em>, <em>sem restrição</em>, ou <em>diferença</em> (custo da rede, com as passagens dos dois cenários sobrepostas — ver abaixo). A rota/energia de terreno usa a grade 8-conectada (comprimento até ~8% acima do geométrico) — Δ pequenos na diferença ficam dentro dessa diferença metodológica, não são necessariamente um custo físico real de ficar na rede.", en: "<em>\"Compare with unconstrained\"</em> (1B) runs the compute twice: once constrained to the network (or graph), once free on the unconstrained raster — and the <em>\"Displayed scenario\"</em> picker (layer panel, 3B) chooses which energy/passes are shown: <em>network-constrained</em>, <em>unconstrained</em>, or <em>difference</em> (network cost, with both scenarios' passes overlaid — see below). The terrain route/energy comes from the 8-connected grid (length up to ~8% above the geometric path) — small Δ values in the difference view sit within that methodological gap, not necessarily a real physical cost of staying on the network." },
   "help.p.passes_dual":  { pt: "Vista de diferença: o canal AZUL (terreno, cenário sem restrição) — deixar em branco usa o mesmo valor do canal LARANJA (rede, cenário com restrição). As duas cores são complementares aditivas (somam branco), então onde os dois cenários passam juntos o brilho é máximo; cada cor sozinha fica no eixo azul–amarelo, discriminável mesmo com daltonismo vermelho-verde.", en: "Difference view: the BLUE channel (terrain, unconstrained scenario) — leave blank to use the same value as the ORANGE channel (network, constrained). The two colours are additive complements (they sum to white), so where both scenarios route together brightness is maximal; each colour alone sits on the blue–yellow axis, discriminable even with red–green colour-blindness." },
-  "passes.chan_net":     { pt: "Rede (com restrição)", en: "Network (constrained)" },
-  "passes.chan_terrain": { pt: "Terreno (livre)", en: "Terrain (unconstrained)" },
   "help.p.passes_blend": { pt: "Mistura das passagens: rampa cinza; com modo \"soma\", células de alta passagem clareiam o campo de energia abaixo. \"Cor da energia\" pinta os corredores com o colormap do campo de energia e usa as passagens como opacidade — min/max/γ moldam a rampa de alfa. Mesmo comportamento auto/pinado da Energia.", en: 'Greyscale ramp; with "add" mode high-pass cells brighten the energy field beneath. "Energy color" paints corridors with the energy field\'s colormap and uses passes for opacity — min/max/γ shape the alpha ramp. Same auto / pinned-range behaviour as Energy.' },
   "btn.range_reset":     { pt: "Reset auto", en: "Reset ranges to auto" },
   "btn.download_bundle": { pt: "Baixar bundle (.zip)", en: "Download bundle (.zip)" },
@@ -486,31 +498,33 @@ const STRINGS = {
   "help.p.density_pts":  { pt: "<strong>Densidade multi-referência:</strong> ative <em>Calcular densidade multi-referência</em>. Os cliques agora adicionam pontos numerados. Use \"Distribuir aleatórias\" ou ajuste <em>N referências</em>. Política FIFO: ao exceder N, o mais antigo é descartado.", en: '<strong>Multi-reference density:</strong> turn on <em>Compute multi-reference density</em>. Clicks now add numbered reference points. Use "Place random" or adjust <em>N references</em>. FIFO policy: above N, the oldest is dropped.' },
   "help.h.params":       { pt: "Parâmetros", en: "Parameters" },
   "help.p.params":       { pt: "Modelo de energia v2: <em>massa</em>, <em>Crr</em> (rolamento), <em>CdA</em> (arrasto), <em>ρ</em> (densidade do ar), <em>eficiência da transmissão</em> e <em>potência no plano</em> (que fixa a velocidade de plano) definem o custo por metro; o <em>limiar de subida</em> separa onde o arrasto deixa de ser cobrado. <em>Orçamento</em> poda caminhos acima de um limiar (≤0 = sem orçamento).", en: 'v2 energy model: <em>mass</em>, <em>Crr</em> (rolling), <em>CdA</em> (drag), <em>ρ</em> (air density), <em>drivetrain efficiency</em> and <em>power on the flat</em> (which sets the flat speed) define the cost per metre; the <em>climb threshold</em> marks where aero stops being charged. <em>Budget</em> prunes paths above a threshold (≤0 = no budget).' },
-  "help.h.maximize":     { pt: "Maximizar energia", en: "Maximize energy" },
   "help.h.compute":      { pt: "Calcular", en: "Compute" },
   "help.p.compute":      { pt: "Aperte <em>Calcular</em>. Habilitado quando há fonte (modo padrão) ou pelo menos uma referência (modo densidade). Estimativa de tempo aparece antes; durante a execução, a barra mostra o tempo restante.", en: 'Hit <em>Compute</em>. Enabled when a source is set (default mode) or at least one reference (density mode). A time estimate appears beforehand; during the run, the bar shows time remaining.' },
   "help.h.viz":          { pt: "Visualização", en: "Visualisation" },
   "help.p.viz":          { pt: "As camadas <em>Energia</em> e <em>Passagens</em> têm visibilidade, opacidade e blend independentes. Mudanças de colormap, range, gamma, filtro média e blend ficam pendentes até <em>Atualizar estilo</em> — evita re-renderizar a cada digitação em DEMs grandes.", en: 'The <em>Energy</em> and <em>Passes</em> layers have independent visibility, opacity, and blend. Changes to colormap, range, gamma, mean filter, and blend stay pending until you click <em>Refresh style</em> — saves re-rendering on every keystroke for large DEMs.' },
   "help.h.bundle":       { pt: "Salvar / restaurar", en: "Save / reload" },
-  "help.p.bundle":       { pt: "<em>Baixar bundle (.zip)</em> empacota um <code>metadata.jsonld</code> com todos os parâmetros, mais GeoTIFFs georeferenciados (energy.tif, passes.tif, network.tif, impassable.tif) que abrem direto no QGIS. Para reproduzir: carregue o mesmo DEM, depois leia o JSON-LD ou ZIP.", en: '<em>Download bundle (.zip)</em> packs a <code>metadata.jsonld</code> with every parameter, plus georeferenced GeoTIFFs (energy.tif, passes.tif, network.tif, impassable.tif) that open directly in QGIS. To reproduce: load the same DEM, then read the JSON-LD or ZIP back.' },
+  "help.p.bundle":       { pt: "<em>Baixar bundle (.zip)</em> empacota um <code>metadata.jsonld</code> com todos os parâmetros, mais GeoTIFFs georeferenciados (energy.tif, passes.tif, network.tif, impassable.tif) que abrem direto no QGIS. Para reproduzir: carregue o mesmo DEM, depois leia o JSON-LD ou ZIP. No modo \"até\", as rotas/caminho exportados (routes.geojson, path.geojson) têm coordenadas escritas origem→destino, mas a energia foi pontuada destino→referência — cada feição traz uma propriedade <code>direction</code> explicando isso.", en: '<em>Download bundle (.zip)</em> packs a <code>metadata.jsonld</code> with every parameter, plus georeferenced GeoTIFFs (energy.tif, passes.tif, network.tif, impassable.tif) that open directly in QGIS. To reproduce: load the same DEM, then read the JSON-LD or ZIP back. In "to" mode, the exported routes/path (routes.geojson, path.geojson) have coordinates written source→destination, but the energy was scored destination→reference — each feature carries a <code>direction</code> property spelling this out.' },
+  "help.p.io_group":     { pt: "O grupo <em>\"0. Importar / Exportar dados\"</em> guarda três coisas separadas do bundle acima: <em>Exportar/Importar config</em> troca um JSON só com os parâmetros e toggles (sem dados geográficos) — útil para replicar a configuração noutro DEM; <em>Resetar para padrões</em> descarta esses ajustes; e, por dataset, <em>exportar/importar</em> o DEM (.tif), a rede (.gpkg), a máscara de barreira (.tif) e as pontes (.gpkg) — o mesmo formato usado para carregar cada um em 1A–1D, então o que sai daqui recarrega direto ali.", en: "The <em>\"0. Import / Export data\"</em> group holds three things separate from the bundle above: <em>Export/Import config</em> swaps a JSON with just the parameters and toggles (no geographic data) — handy for replaying the same setup on a different DEM; <em>Reset to defaults</em> discards those tweaks; and, per dataset, <em>export/import</em> the DEM (.tif), network (.gpkg), impassable mask (.tif), and bridges (.gpkg) — the same format used to load each one in 1A–1D, so what comes out here reloads straight back in there." },
   "help.h.cost":         { pt: "Modelo de custo assimétrico", en: "Asymmetric cost model" },
   "help.p.cost":         { pt: "Cada movimento entre células adjacentes (4 cardeais + 4 diagonais) custa em kJ, pelo modelo v2: os parâmetros físicos (massa total <em>m</em>, <em>Crr</em>, <em>CdA</em>, <em>ρ</em>, eficiência <em>k_eff</em>, potência de cruzeiro no plano, limiar de subida, suavização) são reduzidos uma vez ao pacote <code>{a_rol, a_aero, β, limiar, α/β, ε_offset}</code> (kJ/m e kJ). Com <code>Δh = h_v − h_u</code> e <code>d</code> a distância no chão:", en: 'Each move between adjacent cells (4 cardinal + 4 diagonal) costs kJ, per the v2 model: the physical parameters (total mass <em>m</em>, <em>Crr</em>, <em>CdA</em>, <em>ρ</em>, efficiency <em>k_eff</em>, cruise power on the flat, climb threshold, smoothing) are folded once into the bundle <code>{a_roll, a_aero, β, threshold, α/β, ε_offset}</code> (kJ/m and kJ). With <code>Δh = h_v − h_u</code> and <code>d</code> the ground distance:' },
   "help.formula":        { pt: "subida (Δh ≥ 0):  a_rol·d + (a_aero·d se rampa < limiar) + β·Δh\ndescida (Δh < 0): max(0, a_rol·d + a_aero·d − ε·β·|Δh|)\nε = clamp₀₁(min(1, (α/β)·d/|Δh|) − 0.13)",
                            en: "uphill (Δh ≥ 0):   a_roll·d + (a_aero·d if grade < threshold) + β·Δh\ndownhill (Δh < 0): max(0, a_roll·d + a_aero·d − ε·β·|Δh|)\nε = clamp₀₁(min(1, (α/β)·d/|Δh|) − 0.13)" },
-  "help.p.cost_extra":   { pt: "Nos padrões (75 kg, Crr 0.008, CdA 0.45, ρ 1.1, k_eff 0.97, 80 W no plano), <code>β = m·g/k_eff ≈ 0.76 kJ/m</code> de subida; o arrasto (<code>a_aero</code>) só é cobrado abaixo do <em>limiar de subida</em> (2%) — subindo forte a velocidade cai e o arrasto some. Na descida a recuperação <code>ε</code> depende da rampa: descidas suaves devolvem quase todo o custo de resistência, descidas íngremes não devolvem nada (nunca abaixo de zero). Com <em>maximizar</em> ligado o orçamento de energia não se aplica (custos invertidos).", en: 'At the defaults (75 kg, Crr 0.008, CdA 0.45, ρ 1.1, k_eff 0.97, 80 W on the flat), <code>β = m·g/k_eff ≈ 0.76 kJ/m</code> of climb; aero (<code>a_aero</code>) is only charged below the <em>climb threshold</em> (2%) — on a steep climb speed drops and drag vanishes. Downhill the recovery <code>ε</code> depends on grade: gentle descents refund most of the resistance cost, steep ones refund nothing (never below zero). With <em>maximize</em> on, the energy budget does not apply (inverted costs).' },
+  "help.p.cost_extra":   { pt: "Nos padrões (75 kg, Crr 0.008, CdA 0.45, ρ 1.1, k_eff 0.97, 80 W no plano), <code>β = m·g/k_eff ≈ 0.76 kJ/m</code> de subida; o arrasto (<code>a_aero</code>) só é cobrado abaixo do <em>limiar de subida</em> (2%) — subindo forte a velocidade cai e o arrasto some. Na descida a recuperação <code>ε</code> depende da rampa: descidas suaves devolvem quase todo o custo de resistência, descidas íngremes não devolvem nada (nunca abaixo de zero).", en: 'At the defaults (75 kg, Crr 0.008, CdA 0.45, ρ 1.1, k_eff 0.97, 80 W on the flat), <code>β = m·g/k_eff ≈ 0.76 kJ/m</code> of climb; aero (<code>a_aero</code>) is only charged below the <em>climb threshold</em> (2%) — on a steep climb speed drops and drag vanishes. Downhill the recovery <code>ε</code> depends on grade: gentle descents refund most of the resistance cost, steep ones refund nothing (never below zero).' },
   "help.h.field":        { pt: "Campo de energia", en: "Energy field" },
   "help.p.field":        { pt: "Dijkstra sobre todas as células passáveis a partir do ponto-fonte (ou para o ponto-destino, com arestas reversas) dá o custo mínimo de chegar a cada célula. É isso que a camada <em>Energia</em> renderiza.", en: 'Dijkstra over all passable cells starting from the source (or terminating at the destination, with reversed edges) gives the minimum cost to reach each cell. That\'s what the <em>Energy</em> layer renders.' },
   "help.h.modes":        { pt: "Modos", en: "Modes" },
   "help.p.modes":        { pt: "<em>Saindo da fonte</em>: campo direto a partir de <code>src</code>. <em>Vindo até a fonte</em>: campo reverso para <code>dst</code> — útil em terreno assimétrico (subir é mais caro que descer). <em>Ida e volta</em>: soma ida + volta, custo total de \"ir e voltar\" passando por cada célula.", en: '<em>From source</em>: forward field from <code>src</code>. <em>To source point</em>: reverse field arriving at <code>dst</code> — useful on asymmetric terrain (climbing costs more than descending). <em>Round trip</em>: forward + reverse summed, the total cost of going there and back through each cell.' },
   "help.h.passes":       { pt: "Contagem de passagens", en: "Passes count" },
-  "help.p.passes":       { pt: "Para cada célula <code>c</code>, quantos caminhos ótimos passam por <code>c</code> — o tamanho da subárvore enraizada em <code>c</code> na árvore de caminhos mínimos. Destaca corredores naturais (\"autoestradas\") da paisagem energética.", en: 'For each cell <code>c</code>, how many optimal paths pass through it — the size of the subtree rooted at <code>c</code> in the shortest-path tree. Highlights the natural corridors ("highways") of the energy landscape.' },
+  "help.p.passes":       { pt: "Para cada célula <code>c</code>, quantos caminhos ótimos passam por <code>c</code> — o tamanho da subárvore enraizada em <code>c</code> na árvore de caminhos mínimos. Destaca corredores naturais (\"autoestradas\") da paisagem energética. Em empates exatos de custo, qual dos caminhos empatados é creditado é um artefato da ordem de busca — a densidade e o backend nativo desempatam de forma idêntica, mas os modos de ponto único podem escolher diferente; em terreno plano e simétrico, corredores podem mudar entre execuções/motores sem que isso signifique nada sobre a topografia.", en: 'For each cell <code>c</code>, how many optimal paths pass through it — the size of the subtree rooted at <code>c</code> in the shortest-path tree. Highlights the natural corridors ("highways") of the energy landscape. On exactly-tied optimal costs, which of the tied paths gets credited is a search-order artefact — density and the native backend break ties identically, but the single-point modes may pick differently; on flat, symmetric terrain corridors can shift between runs/engines without meaning anything about the topography.' },
   "help.h.topn":         { pt: "Top-N rotas", en: "Top-N routes" },
-  "help.p.topn":         { pt: "A* com penalização iterativa: encontra a rota ótima, multiplica o termo <code>α·dist</code> em suas células por uma penalidade, repete N vezes. Modos de repulsão: <em>por célula</em> (penaliza só células reusadas, bordas duras), <em>linear</em> (1/(d+1), suave e ampla), <em>quadrática</em> (1/(d²+1), suave e local).", en: 'A* with iterative penalisation: find the optimal route, multiply the <code>α·dist</code> term over its cells by a penalty, repeat N times. Repulsion modes: <em>per-cell</em> (only re-used cells get penalised, sharp), <em>linear</em> (1/(d+1), soft and wide), <em>square</em> (1/(d²+1), soft and local).' },
+  "help.p.topn":         { pt: "A* com penalização iterativa: encontra a rota ótima, multiplica o componente de custo por distância (<code>a_rol·d + a_aero·d</code>) das células reusadas por uma penalidade, repete N vezes. Modos de repulsão: <em>por célula</em> (penaliza só células reusadas, bordas duras), <em>linear</em> (1/(d+1), suave e ampla), <em>quadrática</em> (1/(d²+1), suave e local).", en: 'A* with iterative penalisation: find the optimal route, multiply the distance-cost component (<code>a_roll·d + a_aero·d</code>) of its cells by a penalty, repeat N times. Repulsion modes: <em>per-cell</em> (only re-used cells get penalised, sharp), <em>linear</em> (1/(d+1), soft and wide), <em>square</em> (1/(d²+1), soft and local).' },
   "help.h.density":      { pt: "Densidade multi-referência", en: "Multi-reference density" },
-  "help.p.density":      { pt: "Para K pontos de referência: para cada um, computa as passagens, normaliza por <code>H·W</code>, soma; depois divide por <code>H·W</code> de novo. O resultado destaca corredores comuns entre múltiplas origens — útil para mapear \"onde a topografia força a passagem\". A camada de energia neste modo é a média por célula sobre as referências que conseguem alcançá-la.", en: 'For K reference points: for each one, compute passes, normalise by <code>H·W</code>, sum; then divide by <code>H·W</code> again. The output highlights corridors common across multiple sources — useful for mapping "where topography forces traffic to converge". The energy layer in this mode is the per-cell mean across the references that can reach it.' },
+  "help.p.density":      { pt: "Para K pontos de referência: para cada um, computa as passagens, normaliza por <code>H·W</code>, soma; depois divide por <code>H·W</code> de novo. O resultado destaca corredores comuns entre múltiplas origens — útil para mapear \"onde a topografia força a passagem\". A camada de energia neste modo é a média por célula sobre as referências que conseguem alcançá-la. Perto da fronteira do orçamento (quando houver) ou da borda do DEM, o alcance de cada referência é cortado e as passagens ficam sistematicamente mais baixas ali; quando o orçamento (ou a borda) satura a maioria das referências, a densidade tende à uniformidade e as diferenças se achatam.", en: 'For K reference points: for each one, compute passes, normalise by <code>H·W</code>, sum; then divide by <code>H·W</code> again. The output highlights corridors common across multiple sources — useful for mapping "where topography forces traffic to converge". The energy layer in this mode is the per-cell mean across the references that can reach it. Near the budget frontier (when set) or the DEM border, each reference\'s reach is clipped and passes are systematically lower there; when the budget (or the border) saturates most references, density flattens toward uniform and differences wash out.' },
   "help.h.network":      { pt: "Restrição por rede vetorial (.gpkg)", en: "Vector network constraint (.gpkg)" },
-  "help.p.network":      { pt: "Quando um arquivo de linhas vetoriais é carregado, toda a análise fica restrita às células tocadas por essas linhas — Dijkstra ignora qualquer célula fora da rede, e cliques no mapa \"agarram\" para a célula de rede mais próxima dentro do raio de snap configurado.", en: 'When a vector-line file is loaded, the analysis is constrained to cells touched by those lines — Dijkstra ignores any cell outside the network, and map clicks "snap" to the nearest network cell within the configured snap radius.' },
+  "help.p.network":      { pt: "Quando um arquivo de linhas vetoriais é carregado, toda a análise fica restrita às células tocadas por essas linhas — Dijkstra ignora qualquer célula fora da rede, e cliques no mapa \"agarram\" para a célula de rede mais próxima dentro do raio de snap configurado. O exemplo \"Viário RMSampa\" é dado © OpenStreetMap, licença ODbL.", en: 'When a vector-line file is loaded, the analysis is constrained to cells touched by those lines — Dijkstra ignores any cell outside the network, and map clicks "snap" to the nearest network cell within the configured snap radius. The "Viário RMSampa" example is data © OpenStreetMap, ODbL licence.' },
   "help.p.network_extra":{ pt: "<strong>Largura da linha</strong> (em células) controla a espessura do carimbo durante a rasterização. <strong>Raio de snap</strong> é a distância máxima (em células) que o clique procura uma célula de rede antes de desistir. As coordenadas das linhas são reprojetadas via <code>proj4js</code> para o CRS do DEM antes da rasterização.", en: '<strong>Line width</strong> (in cells) controls the stamp thickness during rasterisation. <strong>Snap radius</strong> is the maximum distance (in cells) a click searches for a network cell before giving up. Line coordinates are reprojected via <code>proj4js</code> to the DEM CRS before rasterising.' },
+  "help.h.graph":        { pt: "Grafo da rede (seguir os vetores)", en: "Network graph (follow the vectors)" },
+  "help.p.graph":        { pt: "Com <em>\"Calcular sobre o grafo da rede\"</em> (1B) ligado, o cálculo troca de motor: em vez do raster 8-conectado, roda sobre o grafo das próprias linhas vetoriais — nós nos vértices e nas junções, arestas custadas pelo mesmo modelo assimétrico ao longo de cada segmento. \"Restringir\" fica sempre ligado e travado (o cálculo já é só sobre a rede); \"comparar com cenário sem rede\" continua disponível. <strong>Junções</strong> controla como cruzamentos viram nós: <em>nos cruzamentos</em> também conecta interseções geométricas calculadas (viadutos coplanares se conectam, cruzamentos em nível diferente não); <em>extremos comuns</em> só conecta onde as linhas já compartilham um vértice coincidente. Pontes/túneis da própria rede (puxados do OSM) são achatados a um tabuleiro reto entre seus apoios — mesmos dados do 1D, mas sem aresta-portal. O snap de clique no grafo usa um raio fixo de 15 m, independente do \"raio de snap\" (em células) do 1B, que só vale no modo raster.", en: "With <em>\"Compute on network graph\"</em> (1B) on, the compute switches engines: instead of the 8-connected raster, it runs over the graph of the vector lines themselves — nodes at vertices and junctions, edges costed by the same asymmetric model along each segment. \"Constrain\" is forced on and locked (the compute is already network-only); \"compare with unconstrained\" is still available. <strong>Junctions</strong> controls how crossings become nodes: <em>at crossings</em> also connects computed geometric intersections (co-planar overpasses connect, different-level crossings don't); <em>shared endpoints</em> only connects where lines already share a coincident vertex. The network's own bridges/tunnels (pulled from OSM) are flattened to a straight deck between their abutments — same 1D data, but no portal edge. Click-snapping on the graph uses a fixed 15 m radius, independent of 1B's \"snap radius\" (in cells), which only applies to the raster mode." },
   "help.h.interp":       { pt: "Interpolação fora da rede", en: "Off-network interpolation" },
   "help.p.interp":       { pt: "Visualização opcional: preenche células fora da rede com a média dos valores da rede em redor, usando o mesmo algoritmo do GDAL <code>fillnodata</code>. Para cada célula vazia, busca em 8 direções até achar uma célula de rede dentro de <strong>distância máx</strong> (em células); calcula a média ponderada por <code>1/d²</code> dos acertos. Em seguida, aplica <strong>suavizações</strong> passes de média 3×3 sobre o preenchimento — preservando os valores originais da rede.", en: 'Optional visualisation: fills off-network cells with a weighted mean of nearby on-network values, using the same algorithm as GDAL <code>fillnodata</code>. For each empty cell, scan 8 directions for a network cell within <strong>max distance</strong> (cells); compute a <code>1/d²</code>-weighted mean of the hits. Then apply <strong>smoothing iters</strong> 3×3 mean passes over the fill, preserving the original network values.' },
   "help.p.interp_only":  { pt: "Apenas para visualização; a análise (Dijkstra, top-N, densidade) continua estritamente sobre a rede.", en: 'For visualisation only; the analysis (Dijkstra, top-N, density) stays strictly on the network.' },
@@ -530,6 +544,17 @@ try {
   if (saved === "pt" || saved === "en") currentLang = saved;
 } catch {}
 
+// Hook the language toggle uses to rebuild the layer-order panel's rows in
+// place when it's open — the panel is a non-blocking corner panel that
+// commonly stays open (it hosts the 3B-3D styling controls) across a
+// language switch. Assigned inside the DOMContentLoaded closure (the panel's
+// renderOrderList is a closure-scoped const, not a top-level function).
+let refreshLayerOrderList = null;
+
+// Same idea for the two colormap <select>s' optgroup labels — assigned once
+// both exist (DOMContentLoaded), called from applyTranslations().
+let refreshColormapLabels = null;
+
 function t(key, ...args) {
   const entry = STRINGS[key];
   if (!entry) return key;            // unknown keys surface verbatim — easy to spot
@@ -540,10 +565,22 @@ function t(key, ...args) {
   return s;
 }
 
+// Structured worker warnings ({kind:"warning", key, args, message}) route
+// through STRINGS/t() when a key is present; `message` (plain English) is the
+// fallback for node harnesses / a cached pre-i18n worker that has no key.
+function workerWarningText(m) {
+  return m.key ? t(m.key, ...(m.args || [])) : m.message;
+}
+
 function applyTranslations() {
   document.documentElement.lang = currentLang === "pt" ? "pt-BR" : "en";
   document.querySelectorAll("[data-i18n]").forEach((el) => {
     el.textContent = t(el.dataset.i18n);
+    // #refresh-style also carries data-i18n="btn.refresh_style", so the
+    // generic textContent set above would silently erase markStyleDirty()'s
+    // " ●" pending-style cue (dataset.dirty stays "1" — only the visible
+    // marker was lost) on every language toggle.
+    if (el.id === "refresh-style" && el.dataset.dirty === "1") el.textContent += " ●";
   });
   document.querySelectorAll("[data-i18n-html]").forEach((el) => {
     el.innerHTML = t(el.dataset.i18nHtml);
@@ -562,12 +599,23 @@ function applyTranslations() {
   if (pill) pill.textContent = currentLang === "pt" ? "EN" : "PT";
   // Update <title> on the document so the OS / tab bar reflects the choice.
   document.title = t("title");
+  // Leaflet's default zoom control renders its own hardcoded English
+  // title/aria-label — retitle its buttons here so the toggle keeps them
+  // in sync too (simpler than replacing the control with a custom one).
+  const zoomIn  = document.querySelector(".leaflet-control-zoom-in");
+  const zoomOut = document.querySelector(".leaflet-control-zoom-out");
+  if (zoomIn)  { zoomIn.title  = t("map.zoom_in");  zoomIn.setAttribute("aria-label", t("map.zoom_in")); }
+  if (zoomOut) { zoomOut.title = t("map.zoom_out"); zoomOut.setAttribute("aria-label", t("map.zoom_out")); }
 }
 
 function setLang(lang) {
   if (lang !== "pt" && lang !== "en") return;
   currentLang = lang;
   try { localStorage.setItem("simu-lang", lang); } catch {}
+  // setLang is defined before `map` (const, further down the file) but only
+  // ever CALLED after the whole script — and so `map` — has finished
+  // initialising, so this is safe; the guard just documents that ordering.
+  if (typeof map !== "undefined" && map.pm) map.pm.setLang(currentLang === "pt" ? "pt_br" : "en");
   applyTranslations();
   // applyTranslations() blindly re-applies each [data-i18n] element's EMPTY-state
   // string, which clobbers any live dynamic content. Re-render the dynamic metas
@@ -581,6 +629,14 @@ function setLang(lang) {
   // The cloud transfer line is set imperatively via t() (no data-i18n), so
   // re-render it after a language switch.
   if (typeof estimateRunTime === "function") estimateRunTime();
+  // The layer-order panel builds its rows imperatively via t() only when
+  // (re)opened — if it's currently open, rebuild it now so row labels,
+  // aria-labels, and the GPX-upload tooltip follow the toggle without
+  // requiring a close/reopen.
+  if (refreshLayerOrderList && document.getElementById("layer-order-modal")?.classList.contains("active")) {
+    refreshLayerOrderList();
+  }
+  if (refreshColormapLabels) refreshColormapLabels();
 }
 
 // Re-derive the src/dst point displays from state (density mode / src / dst), in
@@ -790,6 +846,13 @@ const PERSIST_REFIRE = [
 // change on), so its restore + UI reconcile is handled inline in
 // setupParamPersistence via syncComputeSourceUI(). Persisted under this key.
 const COMPUTE_SOURCE_KEY = "compute-source";
+// Connection settings (possibly private LAN hostnames) — portable through the
+// explicit, user-initiated Group-0 config export/import, but NOT through
+// bundles: a shared bundle must not leak the exporter's backend/orchestrator
+// URLs, and importing a bundle must not silently repoint the importer's
+// session to attacker-supplied endpoints. Shared by collectConfig({forBundle})
+// and applyConfig's persist:false (bundle) path so they can't drift apart.
+const CONNECTION_PERSIST_IDS = ["backend-url", "orchestrator-url", "cloud-keep-warm"];
 
 function savePersistedParams() {
   const out = {};
@@ -858,9 +921,15 @@ function setupParamPersistence() {
 // One portable object capturing EVERY persisted control + the separately-stored
 // bits (compute source, layer order, max-workers, language). Shared by the
 // Group-0 buttons AND bundle embedding (buildMetadata/applyMetadataToUI).
-function collectConfig() {
+// opts.forBundle (default false): strip connection settings (backend/
+// orchestrator URL, cloud-keep-warm) and computeSource — bundles are shared
+// artifacts and must not carry the exporter's (possibly private) endpoints.
+// The explicit Group-0 export (forBundle unset) keeps full fidelity.
+function collectConfig(opts = {}) {
+  const forBundle = !!opts.forBundle;
   const params = {};
   for (const id of PERSIST_IDS) {
+    if (forBundle && CONNECTION_PERSIST_IDS.includes(id)) continue;
     const el = document.getElementById(id);
     if (el) params[id] = el.type === "checkbox" ? !!el.checked : el.value;
   }
@@ -870,7 +939,7 @@ function collectConfig() {
     kind: "simujoules-config",
     version: 1,
     params,
-    computeSource: computeMode(),
+    computeSource: forBundle ? undefined : computeMode(),
     layerOrder: layerOrder.slice(),
     maxWorkers,
     lang: currentLang,
@@ -895,6 +964,10 @@ function applyConfig(cfg, opts = {}) {
   const persist = opts.persist !== false;
   const params = (cfg.params && typeof cfg.params === "object") ? cfg.params : cfg;
   for (const id of PERSIST_IDS) {
+    // Bundles (persist:false) must never repoint the session's connection
+    // settings — defence in depth even against a bundle whose writer forgot
+    // to strip them (or an old/crafted bundle that still carries them).
+    if (!persist && CONNECTION_PERSIST_IDS.includes(id)) continue;
     if (!(id in params)) continue;
     const el = document.getElementById(id);
     if (!el) continue;
@@ -905,7 +978,9 @@ function applyConfig(cfg, opts = {}) {
     }
   }
   for (const id of PERSIST_REFIRE) document.getElementById(id)?.dispatchEvent(new Event("change"));
-  const cs = cfg.computeSource;
+  // Same defence for the compute-source radiogroup — a bundle must not
+  // silently select Localhost/Cloud for the importer.
+  const cs = persist ? cfg.computeSource : null;
   if (cs === "browser" || cs === "localhost" || cs === "cloud") {
     const radio = document.getElementById(
       cs === "localhost" ? "cs-localhost" : cs === "cloud" ? "cs-cloud" : "cs-browser");
@@ -1057,19 +1132,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Populate the colormap dropdown with all CET maps, grouped by class.
   const sel = document.getElementById("colormap");
   if (sel) {
-    sel.innerHTML = "";
-    for (const grp of COLORCET_GROUPS) {
-      const og = document.createElement("optgroup");
-      og.label = grp.label;
-      for (const k of grp.keys) {
-        if (!COLORMAPS[k]) continue;
-        const opt = document.createElement("option");
-        opt.value = k;
-        opt.textContent = k === "cmo_phase" ? "cmocean.phase" : k.replace("CET_", "CET-");
-        og.appendChild(opt);
-      }
-      sel.appendChild(og);
-    }
+    rebuildColormapOptions(sel);
     sel.value = activeColormap;
     // Live-update the swatch (cheap CSS) but DEFER the canvas re-render to
     // the explicit Refresh-style button — re-rendering on every keystroke
@@ -1143,25 +1206,17 @@ document.addEventListener("DOMContentLoaded", () => {
   // (without recomputing) on change.
   const routesSel = document.getElementById("routes-colormap");
   if (routesSel) {
-    routesSel.innerHTML = "";
-    for (const grp of COLORCET_GROUPS) {
-      const og = document.createElement("optgroup");
-      og.label = grp.label;
-      for (const k of grp.keys) {
-        if (!COLORMAPS[k]) continue;
-        const opt = document.createElement("option");
-        opt.value = k;
-        opt.textContent = k === "cmo_phase" ? "cmocean.phase" : k.replace("CET_", "CET-");
-        og.appendChild(opt);
-      }
-      routesSel.appendChild(og);
-    }
+    rebuildColormapOptions(routesSel);
     routesSel.value = "CET_R2"; // perceptually uniform rainbow — good for ranks
     // Recolour only the route polylines — no full raster re-render of the
     // energy/passes canvases (which the field-colormap inputs defer behind
     // the Refresh-style button anyway).
     routesSel.addEventListener("change", recolorRouteLines);
   }
+  refreshColormapLabels = () => {
+    if (sel) rebuildColormapOptions(sel);
+    if (routesSel) rebuildColormapOptions(routesSel);
+  };
   // Top-N toggle reveals N + penalty + repulsion inputs
   const topnCheck = document.getElementById("want-topn");
   // Maximise toggle reveals the L-length input. Sync once on load so the
@@ -1423,7 +1478,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("impassable-osm")?.addEventListener("click", loadOsmWater);
   document.getElementById("ex-water")?.addEventListener("click", () =>
     loadImpassableFromUrl("https://simujaules.pedalhidrografi.co/mask/water_mask.tif", t("imp.example_water")));
-  document.getElementById("imp-rivers")?.addEventListener("change", rebuildOsmWaterMask);
+  document.getElementById("imp-rivers")?.addEventListener("change", async () => { await rebuildOsmWaterMask(); });
   document.getElementById("imp-enabled")?.addEventListener("change", () => markImpassableDirty(true));
   // 1B "Aplicar ao cálculo" toggle updates its green/orange status.
   document.getElementById("vec-constrain")?.addEventListener("change", syncLoadedHighlights);
@@ -1511,7 +1566,13 @@ document.addEventListener("DOMContentLoaded", () => {
       catch (err) { console.error(err); status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(err.message)}</span>`; }
     });
   };
-  wireImport("import-dem", "io-dem-file", async (f) => { state.demSourceUrl = null; await loadDemFromArrayBuffer(await f.arrayBuffer(), f.name); });
+  wireImport("import-dem", "io-dem-file", async (f) => {
+    const gen = ++state.demLoadGen;
+    const buf = await f.arrayBuffer();
+    if (gen !== state.demLoadGen) return; // a newer DEM load started while we were reading — last click wins
+    state.demSourceUrl = null;
+    await loadDemFromArrayBuffer(buf, f.name, gen);
+  });
   wireImport("import-network", "io-network-file", (f) => loadVectorNetwork(f));
   wireImport("import-mask", "io-mask-file", (f) => loadImpassableMaskFromFile(f));
   wireImport("import-bridges", "io-bridges-file", (f) => importBridgesGpkg(f));
@@ -1657,6 +1718,9 @@ document.addEventListener("DOMContentLoaded", () => {
       labelKey: f.labelKey, reorder: null, vis: f.vis, op: f.op,
     })));
   };
+  // Expose to the module scope so setLang() can rebuild the panel in place
+  // when it's left open across a language toggle.
+  refreshLayerOrderList = renderOrderList;
   const layerCtrlBtns = ["layer-ctrl-open", "layer-ctrl-btn"]
     .map((id) => document.getElementById(id)).filter(Boolean);
   const markLayerBtns = (on) => layerCtrlBtns.forEach((b) => b.classList.toggle("active", on));
@@ -1690,6 +1754,10 @@ document.addEventListener("DOMContentLoaded", () => {
 // credits live in the help modal instead (the per-layer `attribution:` strings
 // below are kept for the record / in case the control is ever re-enabled).
 const map = L.map("map", { preferCanvas: true, attributionControl: false }).setView([-23.55, -46.63], 12);
+// Leaflet-Geoman's own draw-hint tooltips ("Click to place first vertex", …)
+// are English by default and ignore our STRINGS/t() pipeline — set its
+// locale to match ours (setLang() re-applies this on toggle).
+if (map.pm) map.pm.setLang(currentLang === "pt" ? "pt_br" : "en");
 
 // Explicit stacking for the analysis layers, between Leaflet's default
 // overlayPane (z 400) and markerPane (z 600). Without dedicated panes all
@@ -1810,15 +1878,24 @@ const state = {
   lastRun: null,
   // Cloud compute-source state machine (see computeMode()/ensureCloudVm()):
   //   mode           — last computeMode() resolved at run start ("cloud" arms it)
-  //   orchestratorUrl — base URL of the local orchestrator (loopback)
+  //   orchestratorUrl — base URL of the orchestrator (a public Cloud Run
+  //                    service, reachable from any origin, gated by the shared
+  //                    cloud password)
   //   vmState        — last STATE seen from /cloud/status (STOPPED/PROVISIONING/
   //                    RUNNING/STOPPING/ERROR)
-  //   keepaliveTimer — interval extending the VM lease while a compute runs
+  //   keepaliveTimer — interval marking "compute in flight" client-side; its
+  //                    /cloud/keepalive traffic ALSO registers a short-lived
+  //                    lease on the orchestrator (LEASES[clientId], ~180s TTL)
+  //                    so a second browser's default "stop after run" can't
+  //                    kill the VM out from under a concurrent compute here
+  //   clientId       — stable per-tab id (crypto.randomUUID(), generated once)
+  //                    sent as X-Simu-Client on /cloud/keepalive and /cloud/stop
+  //                    so the orchestrator can tell concurrent clients apart
   //   pollTimer      — interval polling /cloud/status while booting (unused as a
   //                    stored handle; the boot loop awaits inline, kept for clarity)
   //   dataUrl        — VM's HTTPS data-plane base, learned from the orchestrator
   //                    (/cloud/start|status); where /density,/single,/health go
-  cloud: { mode: "browser", orchestratorUrl: "", dataUrl: "", vmState: "STOPPED", keepaliveTimer: null, pollTimer: null },
+  cloud: { mode: "browser", orchestratorUrl: "", dataUrl: "", vmState: "STOPPED", keepaliveTimer: null, pollTimer: null, clientId: null },
   // Stacked overlays — z-order from bottom up:
   //   OSM basemap → tileOverlay (rmsampa-v2) → energyOverlay → passesOverlay
   tileOverlay: null,
@@ -1881,6 +1958,10 @@ const state = {
   corridorRamp: null,
   corridorSet: null, // Set of corridor cell indices, for O(1) click-validity lookup
   osmWaterGeom: null, // cached parsed OSM water geometry (grid coords) for re-rasterising on the #imp-rivers toggle
+  // Bumped on every rebuildOsmWaterMask() call so overlapping invocations (rapid
+  // #imp-rivers toggling) can tell which one is the LAST one started — a
+  // superseded call must not apply its (possibly out-of-order-finishing) result.
+  waterMaskGen: 0,
   impassableToken: 0,
   impassableOverlay: null,
   // Optional OSM bridges & tunnels modelled as level "decks". Each is a span
@@ -1904,6 +1985,11 @@ const state = {
   // Guards the async "census" sampler so a double-click can't fire two
   // overlapping cloud queries that both clear + re-add reference points.
   censusInFlight: false,
+  // Bumped by every DEM initiator (file input, hosted example, FABDEM
+  // viewport, Group-0 import) so a slow load that finishes after a newer one
+  // was started can detect it's stale and bail before installing (last-CLICK
+  // wins) instead of last-FINISHER silently replacing the displayed DEM.
+  demLoadGen: 0,
   // Live-ETA bookkeeping (set on Compute, cleared on done/error).
   computeStartedAt: 0,
   estimatedTotalMs: 0,
@@ -1979,6 +2065,15 @@ function cloudComputeHeaders() {
   return h;
 }
 
+// Stable per-tab id sent as X-Simu-Client to /cloud/keepalive and /cloud/stop
+// so the orchestrator's lease can tell this browser apart from a concurrent
+// one (see LEASES in orchestrator/main.py) — generated once, lazily, so a
+// session that never touches Cloud never allocates a UUID for nothing.
+function cloudClientId() {
+  if (!state.cloud.clientId) state.cloud.clientId = crypto.randomUUID();
+  return state.cloud.clientId;
+}
+
 // Terminate every in-flight compute worker and invalidate their pending
 // messages via the generation bump. Safe to call when idle. Must run before
 // anything that changes the grid a result would be rendered against (DEM
@@ -1987,8 +2082,12 @@ function cancelActiveCompute() {
   state.computeGen++;
   for (const w of state.workers) w.terminate();
   state.workers = [];
-  // A superseded cloud run must stop extending the VM lease; the orchestrator's
-  // own lease deadline (or the next run's stop) reaps the VM.
+  // A superseded cloud run must stop its keepalive traffic — /cloud/keepalive
+  // extends this tab's short-lived orchestrator lease (LEASES[clientId]),
+  // which is what protects a concurrent second browser's compute from a
+  // default "stop after run"; letting a dead run's keepalive linger would
+  // needlessly hold that lease. The in-VM idle-watchdog + uptime cap remain
+  // the real cost backstops regardless of any lease.
   stopCloudKeepalive();
   if (state.computeStartedAt) {
     state.computeStartedAt = 0;
@@ -2026,8 +2125,10 @@ window.addEventListener("error", (e) => handleWedgedCompute(e.error || e.message
 // ordinary tab switch / minimize / screen lock, and stopping then would abort
 // the in-flight remote run (the stream-proxy fetch drops → it falls back to the
 // far slower / OOM-prone browser pool, losing the whole run). keepaliveTimer is
-// the precise "a run is in flight" signal. If the tab truly dies mid-run, the
-// orchestrator lease + hard-cap + in-VM idle-watchdog are the backstops.
+// the precise "a run is in flight" signal — its /cloud/keepalive traffic also
+// extends this tab's orchestrator lease, so a hidden tab's OWN dead run can't
+// out-live it either. If the tab truly dies mid-run, the in-VM idle-watchdog
+// (~15 min) + uptime cap are the only backstops.
 function beaconStopCloudVm() {
   if (state.cloud.keepaliveTimer) return; // a compute is running — leave the VM alone
   if (state.cloud.mode === "cloud" && state.cloud.orchestratorUrl) {
@@ -2035,11 +2136,17 @@ function beaconStopCloudVm() {
   }
 }
 document.addEventListener("visibilitychange", () => {
-  // Em modo "manter VM ligada", trocar/esconder a aba NÃO desliga a VM (o lease
-  // do orquestrador + o idle-watchdog cuidam do ócio); só um unload real
+  // Em modo "manter VM ligada", trocar/esconder a aba NÃO desliga a VM (o
+  // watchdog de ócio DENTRO da VM cuida disso — /cloud/keepalive renova o
+  // lease deste cliente no orquestrador, mas não é o que decide manter a VM
+  // ligada); só um unload real
   // (pagehide) desliga. Sem keep-warm, esconder a aba desliga a VM ociosa
-  // (economia padrão).
+  // (economia padrão). state.computeStartedAt is set BEFORE the cloud dispatch
+  // (i.e. already nonzero during VM boot, before startCloudKeepalive() arms
+  // keepaliveTimer) — checking it here, not just keepaliveTimer, keeps a
+  // hidden tab from stopping the VM mid-boot and dooming the run.
   if (document.visibilityState === "hidden"
+      && !state.computeStartedAt
       && !document.getElementById("cloud-keep-warm")?.checked) {
     beaconStopCloudVm();
   }
@@ -2085,11 +2192,13 @@ state.tileOverlay = L.tileLayer(RMSAMPA_URL, {
 demFile.addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
+  const gen = ++state.demLoadGen;
   status.textContent = t("status.loading_dem");
   try {
     const buf = await file.arrayBuffer();
+    if (gen !== state.demLoadGen) return; // a newer DEM load started while we were reading — last click wins
     state.demSourceUrl = null;
-    await loadDemFromArrayBuffer(buf, file.name);
+    await loadDemFromArrayBuffer(buf, file.name, gen);
   } catch (err) {
     console.error(err);
     status.innerHTML = `<span style="color:#ff6b6b">${t("status.error_generic", escapeHtml(err.message))}</span>`;
@@ -2107,13 +2216,15 @@ const DEM_EXAMPLES = [
 ];
 
 async function loadDemFromUrl(url, label) {
+  const gen = ++state.demLoadGen;
   status.textContent = t("status.fetching", label);
   try {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${url}`);
     const buf = await resp.arrayBuffer();
+    if (gen !== state.demLoadGen) return; // a newer DEM load started while we were fetching — last click wins
     state.demSourceUrl = url;
-    await loadDemFromArrayBuffer(buf, label);
+    await loadDemFromArrayBuffer(buf, label, gen);
   } catch (err) {
     console.error(err);
     status.innerHTML = `<span style="color:#ff6b6b">${t("status.error_generic", escapeHtml(err.message))}</span>`;
@@ -2218,6 +2329,7 @@ function centerOnUserLocation() {
 }
 
 async function loadFabdemForView() {
+  const gen = ++state.demLoadGen;
   if (!map) {
     status.innerHTML = `<span style="color:#ff6b6b">${t("status.map_not_ready")}</span>`;
     return;
@@ -2271,6 +2383,8 @@ async function loadFabdemForView() {
   }
 
   status.textContent = t("status.fabdem_fetching", tileSpecs.length);
+  const fabBtn = document.getElementById("ex-fabdem-view");
+  if (fabBtn) fabBtn.disabled = true;
   progress.classList.add("active");
   progressBar.style.width = "0%";
 
@@ -2326,8 +2440,11 @@ async function loadFabdemForView() {
       // skip just that tile instead of letting the whole mosaic abort.
       try {
       // Per-tile nodata sentinel — FABDEM uses GDAL_NODATA, varies by tile.
+      // Math.fround rounds the sentinel through float32 to match the f32
+      // widening the raster values below go through (same rationale as
+      // loadDemFromArrayBuffer's mask build).
       const nodataRaw = tile.image.fileDirectory.getValue("GDAL_NODATA");
-      const nodata = nodataRaw ? parseFloat(nodataRaw) : null;
+      const nodata = nodataRaw ? Math.fround(parseFloat(nodataRaw)) : null;
 
       // Convert the geographic intersection to a pixel window. NB:
       // image.readRasters({bbox}) does NOT exist on GeoTIFFImage — only
@@ -2347,6 +2464,7 @@ async function loadFabdemForView() {
       ];
       const raster = await tile.image.readRasters({
         window: wnd,
+        samples: [0], // FABDEM tiles are single-band — explicit for consistency with loadDemFromArrayBuffer
         interleave: true,
       });
       const rW = wnd[2] - wnd[0];
@@ -2380,6 +2498,11 @@ async function loadFabdemForView() {
       status.innerHTML = `<span style="color:#ff6b6b">${t("status.fabdem_all_failed")}</span>`;
       return;
     }
+    // Some (but not all) tiles failed to read — the mosaic still loads, but
+    // with NaN gaps where those tiles should be. Surface that beyond the
+    // console.warn above so the user doesn't mistake the gap for FABDEM
+    // coverage.
+    const failed = opened.length - placed;
 
     // Wrap the mosaic as a GeoTIFF in memory so loadDemFromArrayBuffer
     // can ingest it like any other DEM. Same writer we use for bundle
@@ -2393,20 +2516,27 @@ async function loadFabdemForView() {
       ModelPixelScale:  [FABDEM_ARCSEC, FABDEM_ARCSEC, 0],
       ModelTiepoint:    [0, 0, 0, outWest, outNorth, 0],
       GeographicTypeGeoKey: 4326,
+      GTModelTypeGeoKey: 2,
+      GTRasterTypeGeoKey: 1,
     };
     const buf = GeoTIFF.writeArrayBuffer(mosaic, tiffMd);
 
-    state.demSourceUrl = `FABDEM viewport ${outWest.toFixed(2)},${outSouth.toFixed(2)} → ${outEast.toFixed(2)},${outNorth.toFixed(2)} (${opened.length} tile${opened.length === 1 ? "" : "s"})`;
-    await loadDemFromArrayBuffer(buf, `FABDEM ${outW}×${outH} (${opened.length} tile${opened.length === 1 ? "" : "s"})`);
+    if (gen !== state.demLoadGen) return; // a newer DEM load started while we were fetching/mosaicking — last click wins
+    state.demSourceUrl = `FABDEM viewport ${outWest.toFixed(2)},${outSouth.toFixed(2)} → ${outEast.toFixed(2)},${outNorth.toFixed(2)} (${placed} tile${placed === 1 ? "" : "s"})`;
+    await loadDemFromArrayBuffer(buf, `FABDEM ${outW}×${outH} (${placed} tile${placed === 1 ? "" : "s"})`, gen);
+    if (failed > 0) {
+      status.innerHTML = `<span style="color:#ff9d3d">${t("status.fabdem_partial", failed, opened.length)}</span>`;
+    }
   } catch (err) {
     console.error(err);
     status.innerHTML = `<span style="color:#ff6b6b">${t("status.fabdem_failed", escapeHtml(err.message))}</span>`;
   } finally {
     progress.classList.remove("active");
+    if (fabBtn) fabBtn.disabled = false;
   }
 }
 
-async function loadDemFromArrayBuffer(buf, label) {
+async function loadDemFromArrayBuffer(buf, label, gen) {
   // A compute still running against the previous DEM would render arrays
   // sized to the old H×W onto the new grid — kill it before anything else.
   cancelActiveCompute();
@@ -2421,20 +2551,29 @@ async function loadDemFromArrayBuffer(buf, label) {
   const fileDirectory = image.fileDirectory;
   const pixelScale = fileDirectory.getValue("ModelPixelScale");
   if (!pixelScale || !tiePoints?.length) {
-    throw new Error("DEM lacks geotransform metadata. Use a properly georeferenced GeoTIFF.");
+    throw new Error(t("status.dem_no_geotransform"));
   }
   const dx = pixelScale[0];
   const dy = pixelScale[1];
   const originX = tiePoints[0].x;
   const originY = tiePoints[0].y;
 
-  // Read elevation as Float32Array
-  const raster = await image.readRasters({ interleave: true });
+  // Read elevation as Float32Array. samples: [0] selects band 0 explicitly —
+  // without it, geotiff.js's interleave:true on a multi-band GeoTIFF (RGB
+  // terrain render, elevation+mask stack, …) returns ALL bands pixel-
+  // interleaved and this loader would silently read 1/k of the image's
+  // bands smeared across the whole grid as "elevation".
+  const raster = await image.readRasters({ samples: [0], interleave: true });
   const height = raster instanceof Float32Array ? raster : Float32Array.from(raster);
 
-  // Build mask: anything finite and != nodata
+  // Build mask: anything finite and != nodata. Math.fround rounds the
+  // sentinel through float32 BEFORE comparing — height[] is always the f64
+  // widening of an f32 value, so an unrounded f64 parse of GDAL_NODATA can
+  // silently fail to match the stored sentinel (e.g. a Float64 source whose
+  // nodata isn't f32-representable, or a truncated-precision GDAL_NODATA
+  // string), letting nodata cells slip through as "valid" elevations.
   const nodataRaw = fileDirectory.getValue("GDAL_NODATA");
-  const nodata = nodataRaw ? parseFloat(nodataRaw) : null;
+  const nodata = nodataRaw ? Math.fround(parseFloat(nodataRaw)) : null;
   const mask = new Uint8Array(H * W);
   for (let i = 0; i < H * W; i++) {
     const v = height[i];
@@ -2474,6 +2613,19 @@ async function loadDemFromArrayBuffer(buf, label) {
   // GeoTIFFs we export later — energy.tif / passes.tif / network.tif — so
   // projected DEMs round-trip with their real CRS, not a bare 4326.)
 
+  // Re-check the caller's generation token HERE, right before the
+  // point-of-no-return: every caller only checks ONCE, right after its own
+  // fetch/read completes and before calling this function — but GeoTIFF
+  // parsing above (fromArrayBuffer/getImage/getTiePoints/readRasters) is
+  // itself async, so a SECOND, newer load can start and finish (bumping
+  // state.demLoadGen) while an OLDER call is still in here. Without this,
+  // whichever parse finishes last installs its DEM — last-FINISHER, not
+  // last-CLICK — silently overwriting a newer, already-displayed DEM.
+  if (gen !== undefined && gen !== state.demLoadGen) {
+    status.textContent = t("status.load_superseded");
+    return;
+  }
+
   // A new DEM invalidates the cached network graph (elevations changed).
   state.networkGraph = null; state.networkGraphToken = null;
   state.dem = {
@@ -2485,6 +2637,7 @@ async function loadDemFromArrayBuffer(buf, label) {
     bbox: { xmin: originX, ymin: originY - H * dy, xmax: originX + W * dx, ymax: originY },
     isGeographic: isProbablyGeographic,
     geoKeys,                 // for GeoTIFF round-trip on export
+    nodata,                  // source GDAL_NODATA sentinel (f32-rounded), or null — re-emitted by exportDemTif so the round trip doesn't turn nodata cells into valid terrain
   };
   state.demLabel = label;
 
@@ -2576,8 +2729,8 @@ async function loadDemFromArrayBuffer(buf, label) {
     ? `${originX.toFixed(4)}°, ${originY.toFixed(4)}°`
     : `${originX.toFixed(1)}, ${originY.toFixed(1)}`;
   demMeta.innerHTML = `
-    <span class="v">${W} × ${H}</span> cells, cell ${cellLabel}<br/>
-    origin <span class="v">${originLabel}</span><br/>
+    ${t("dem.meta_size", W, H, cellLabel)}<br/>
+    ${t("dem.meta_origin", originLabel)}<br/>
     ${coverLabel}
   `;
   demMeta.removeAttribute("data-i18n"); // live content — don't let a lang toggle wipe it
@@ -2652,8 +2805,10 @@ async function loadDemFromArrayBuffer(buf, label) {
   if (state.pendingBundle) {
     const pb = state.pendingBundle;
     const bH = pb.md.dem?.H, bW = pb.md.dem?.W;
-    const dimsKnown = Number.isFinite(bH) && Number.isFinite(bW);
-    if (!dimsKnown || (H === bH && W === bW)) {
+    // bundleDemMatch also checks the geotransform (not just H×W) — a
+    // same-size DEM from a different tile must NOT replay the pending
+    // bundle's binaries onto it (see the function's own comment).
+    if (bundleDemMatch(pb.md.dem, state.dem) !== false) {
       state.pendingBundle = null; // applyMetadataToUI re-stashes only on mismatch
       applyMetadataToUI(pb.md, pb.bin);
     } else {
@@ -2673,7 +2828,7 @@ let _sqlPromise = null;
 function getSQL() {
   if (!_sqlPromise) {
     if (typeof initSqlJs !== "function") {
-      return Promise.reject(new Error("sql.js didn't load (CDN blocked, or offline before it was ever fetched?)"));
+      return Promise.reject(new Error(t("status.sqljs_unavailable")));
     }
     // sql.js fetches sql-wasm.wasm from this CDN ON FIRST GeoPackage open. Like
     // the other CDN libs it is runtime-cached (sw.js), NOT precached — so
@@ -2773,7 +2928,11 @@ async function buildGeoPackage(features, { tableName, attrCols = [] }) {
 function exportDemTif() {
   if (!state.dem) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("io.no_dem"))}</span>`; return; }
   try {
-    ioDownload(new Uint8Array(writeRasterAsGeoTIFF(state.dem.height, state.dem, "float32")), "dem.tif", "image/tiff");
+    // Re-emit the source GDAL_NODATA tag so a re-imported dem.tif reconstructs
+    // the same mask — without it, nodata cells (still holding the raw
+    // sentinel in state.dem.height) round-trip as "valid" terrain.
+    const extraMd = state.dem.nodata != null ? { GDAL_NODATA: String(state.dem.nodata) } : undefined;
+    ioDownload(new Uint8Array(writeRasterAsGeoTIFF(state.dem.height, state.dem, "float32", extraMd)), "dem.tif", "image/tiff");
     status.textContent = t("io.exported", "dem.tif");
   } catch (e) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(e.message)}</span>`; }
 }
@@ -2996,6 +3155,11 @@ async function loadVectorNetwork(file) {
     status.innerHTML = `<span style="color:#ff6b6b">${t("status.load_dem_first")}</span>`;
     return;
   }
+  // state.dem is replaced wholesale on every DEM load, so object identity is
+  // a correct epoch token: if it changes during this multi-second rasterise
+  // (await points below), the mask we're building is sized to a DEM that no
+  // longer exists — bail instead of installing it onto the new one.
+  const demRef = state.dem;
 
   // In-progress status lives in the network section's own meta line — it's
   // contextual to where the user clicked, and the global `status` stays
@@ -3007,20 +3171,36 @@ async function loadVectorNetwork(file) {
   // init 40–50 %, rasterise 50–100 %.
   progress.classList.add("active");
   progressBar.style.width = "0%";
-  setVecStatus(t("status.vec_reading", escapeHtml(file.name), (file.size / 1024 / 1024).toFixed(0)));
-  const buf = await readFileWithProgress(file, (frac) => {
-    progressBar.style.width = `${(frac * 40).toFixed(1)}%`;
-  });
-  progressBar.style.width = "40%";
-
-  setVecStatus(t("status.vec_init_sql"));
-  const SQL = await getSQL();
-  const db = new SQL.Database(new Uint8Array(buf));
-  progressBar.style.width = "50%";
-
+  // db is declared outside the try so the finally below can close it, but
+  // only ever gets assigned INSIDE the try — so a failure in the file-read/
+  // sql.js-init awaits (which run before it exists) still reaches the
+  // finally and clears the progress bar instead of leaving it stuck active.
+  let db = null;
   try {
-    const cont = db.exec("SELECT table_name, column_name, srs_id FROM gpkg_geometry_columns LIMIT 1");
-    if (!cont.length) throw new Error("No gpkg_geometry_columns entry — not a valid .gpkg?");
+    setVecStatus(t("status.vec_reading", escapeHtml(file.name), (file.size / 1024 / 1024).toFixed(0)));
+    const buf = await readFileWithProgress(file, (frac) => {
+      progressBar.style.width = `${(frac * 40).toFixed(1)}%`;
+    });
+    progressBar.style.width = "40%";
+
+    setVecStatus(t("status.vec_init_sql"));
+    const SQL = await getSQL();
+    db = new SQL.Database(new Uint8Array(buf));
+    progressBar.style.width = "50%";
+
+    // Prefer a line-geometry layer — a multi-layer .gpkg (OSM extract with
+    // landuse polygons + roads lines, a QGIS project export, …) whose FIRST
+    // registered layer isn't lines would otherwise parse every geometry blob
+    // to null (parseGpkgGeom only accepts (Multi)LineString) and fail with a
+    // misleading "0 cells" error even though a usable layer exists. Fall
+    // back to the unfiltered query for generic 'GEOMETRY'-typed or
+    // single-layer files.
+    let cont = db.exec(
+      "SELECT table_name, column_name, srs_id FROM gpkg_geometry_columns " +
+      "WHERE upper(geometry_type_name) IN ('LINESTRING','MULTILINESTRING','MULTICURVE','CURVE') LIMIT 1",
+    );
+    if (!cont.length) cont = db.exec("SELECT table_name, column_name, srs_id FROM gpkg_geometry_columns LIMIT 1");
+    if (!cont.length) throw new Error(t("io.gpkg_invalid"));
     const tableName = cont[0].values[0][0];
     // Geometry column name from the metadata — QGIS/ogr2ogr default to
     // "geom", but "geometry"/"shape" exist in the wild; hardcoding "geom"
@@ -3191,6 +3371,10 @@ async function loadVectorNetwork(file) {
           ? t("status.vec_rasterising_of", scanned, totalFeatures, rasterised)
           : t("status.vec_rasterising_scan", scanned, rasterised));
         await new Promise((r) => setTimeout(r, 0));
+        if (state.dem !== demRef) {
+          status.textContent = t("status.load_superseded");
+          return;
+        }
       }
     }
     stmt.free();
@@ -3198,6 +3382,11 @@ async function loadVectorNetwork(file) {
 
     let networkCells = 0;
     for (let i = 0; i < networkMask.length; i++) if (networkMask[i]) networkCells++;
+
+    if (state.dem !== demRef) {
+      status.textContent = t("status.load_superseded");
+      return;
+    }
 
     if (networkCells === 0) {
       // Rasterised to nothing — almost always a CRS or geometry-type
@@ -3228,7 +3417,7 @@ async function loadVectorNetwork(file) {
     setGroupOpen("impassable-group", true); // network loaded → next input step
     onNetworkCorridorsChanged(); // a new network may carve corridors over the mask
   } finally {
-    db.close();
+    if (db) db.close();
     progress.classList.remove("active");
   }
 }
@@ -3306,6 +3495,16 @@ async function loadOsmNetwork() {
     status.innerHTML = `<span style="color:#ff6b6b">${t("status.load_dem_first")}</span>`;
     return;
   }
+  // OSM coords are lon/lat; the bbox intersection below only holds for a
+  // geographic (EPSG:4326) DEM (mirrors the bridges/water OSM-pull guards).
+  if (!state.dem.isGeographic) {
+    status.innerHTML = `<span style="color:#ff6b6b">${t("status.osm_net_geographic")}</span>`;
+    return;
+  }
+  // Epoch token: state.dem is replaced wholesale on every DEM load, so
+  // identity is a correct guard against installing this pull onto a DEM
+  // that changed while the Overpass fetch/parse was in flight.
+  const demRef = state.dem;
   const { originX, originY, H, W, dx, dy } = state.dem;
   const b = map.getBounds();
   const south = Math.max(b.getSouth(), originY - H * dy);
@@ -3330,10 +3529,15 @@ async function loadOsmNetwork() {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: "data=" + encodeURIComponent(query),
     });
-    if (!resp.ok) throw new Error(`Overpass HTTP ${resp.status} (busy? try again in a minute)`);
+    if (!resp.ok) throw new Error(t("status.overpass_http", resp.status));
     progressBar.style.width = "60%";
     status.textContent = t("status.osm_parsing");
     const json = await resp.json();
+    // A timed-out/OOM'd query still answers HTTP 200 with a `remark` field and
+    // empty or PARTIAL elements — surface it as a failure BEFORE parsing any
+    // elements, or a partial network pull installs an incomplete graph that
+    // silently misses streets cut off by the timeout.
+    if (json.remark) throw new Error(json.remark);
     const lines = [];
     const meta = []; // parallel { deck, layer } for graph-mode bridge handling
     const bridgeCandidates = []; // bridge/tunnel ways for the 1d "from network" feature
@@ -3351,7 +3555,11 @@ async function loadOsmNetwork() {
         if (deck) bridgeCandidates.push({ latlngs, kind: tg.tunnel === "yes" ? "tunnel" : "bridge", layer, name: tg["bridge:name"] || tg.name || null });
       }
     }
-    if (!lines.length) throw new Error("Overpass returned no highway=* ways in this extent.");
+    if (!lines.length) throw new Error(t("status.osm_no_ways"));
+    if (state.dem !== demRef) {
+      status.textContent = t("status.load_superseded");
+      return;
+    }
     state.networkBridgeCandidates = bridgeCandidates.length ? bridgeCandidates : null;
     progressBar.style.width = "80%";
     status.textContent = t("status.osm_rasterising", lines.length.toLocaleString());
@@ -3389,6 +3597,9 @@ async function loadOsmBridges() {
     status.innerHTML = `<span style="color:#ff6b6b">${t("bridges.osm_need_geographic")}</span>`;
     return;
   }
+  // Epoch token: guards the async install tail below against a DEM swap
+  // that happens while the Overpass fetch/parse is in flight.
+  const demRef = state.dem;
   const { originX, originY, H, W, dx, dy } = state.dem;
   const b = map.getBounds();
   const south = Math.max(b.getSouth(), originY - H * dy);
@@ -3453,6 +3664,10 @@ async function loadOsmBridges() {
       });
     }
     if (!ways.length) throw new Error(t("bridges.none_overpass"));
+    if (state.dem !== demRef) {
+      status.textContent = t("status.load_superseded");
+      return;
+    }
     installBridgesFromWays(ways, "OSM");
   } catch (err) {
     console.error("[osm-bridges]", err);
@@ -4071,6 +4286,112 @@ function fillSeaFromCoastlines(coastlines, data, W, H) {
   return filled;
 }
 
+// Async, chunked re-implementations of fillRingsEvenOdd/fillSeaFromCoastlines
+// for the main-thread caller (rebuildOsmWaterMask): SAME per-row/per-sweep math
+// as the pure functions above, just batched with a TIME-based yield so a
+// single huge body (a reservoir ring with tens of thousands of vertices) or
+// the coastline sweep doesn't block the tab end-to-end. The pure functions
+// themselves are left untouched — they're hand-mirrored in
+// test-water-raster.mjs (same rule as the Rust backend port) and still used
+// directly by rasterizeRingsToMask (drawn-shape masks, small and synchronous)
+// and the rivers loop below. A fixed item count (e.g. "every 25 bodies") would
+// miss the actual cost concentration — a 10-vertex pond and a 30,000-vertex
+// reservoir ring differ by orders of magnitude — so the yield cadence here is
+// wall-clock based instead.
+const WATER_MASK_YIELD_MS = 50;
+
+async function fillRingsEvenOddChunked(rings, out, W, H) {
+  let yMin = Infinity, yMax = -Infinity;
+  for (const r of rings) for (const p of r) { if (p[1] < yMin) yMin = p[1]; if (p[1] > yMax) yMax = p[1]; }
+  if (!Number.isFinite(yMin)) return;
+  const r0 = Math.max(0, Math.floor(yMin)), r1 = Math.min(H - 1, Math.floor(yMax));
+  const xs = [];
+  let lastYield = performance.now();
+  for (let ry = r0; ry <= r1; ry++) {
+    const yc = ry + 0.5;
+    xs.length = 0;
+    for (const ring of rings) {
+      const n = ring.length;
+      if (n < 3) continue;
+      for (let i = 0, j = n - 1; i < n; j = i++) {
+        const yi = ring[i][1], yj = ring[j][1];
+        if ((yi > yc) !== (yj > yc)) xs.push(ring[i][0] + (yc - yi) / (yj - yi) * (ring[j][0] - ring[i][0]));
+      }
+    }
+    if (xs.length >= 2) {
+      xs.sort((a, b) => a - b);
+      const base = ry * W;
+      for (let k = 0; k + 1 < xs.length; k += 2) {
+        const cA = Math.max(0, Math.ceil(xs[k] - 0.5));
+        const cB = Math.min(W - 1, Math.floor(xs[k + 1] - 0.5));
+        for (let c = cA; c <= cB; c++) out[base + c] = 1;
+      }
+    }
+    if (performance.now() - lastYield > WATER_MASK_YIELD_MS) {
+      await new Promise((res) => setTimeout(res, 0));
+      lastYield = performance.now();
+    }
+  }
+}
+
+async function fillSeaFromCoastlinesChunked(coastlines, data, W, H) {
+  if (!coastlines || !coastlines.length) return 0;
+  let lastYield = performance.now();
+  const maybeYield = async () => {
+    if (performance.now() - lastYield > WATER_MASK_YIELD_MS) {
+      await new Promise((res) => setTimeout(res, 0));
+      lastYield = performance.now();
+    }
+  };
+  for (const line of coastlines) { rasterPolylineSupercover(line, data, W, H); await maybeYield(); } // shore = impassable edge
+  const xs = []; // crossings of the current scan: { p = position along scan, sea = state past it }
+  // Horizontal sweep: per ROW, a crossing sets the state to its EAST
+  // (north-going coast, grid y decreasing → sea to the east).
+  for (let ry = 0; ry < H; ry++) {
+    const yc = ry + 0.5;
+    xs.length = 0;
+    for (const line of coastlines) for (let i = 0; i + 1 < line.length; i++) {
+      const y0 = line[i][1], y1 = line[i + 1][1];
+      if ((y0 > yc) !== (y1 > yc)) { const x0 = line[i][0], x1 = line[i + 1][0];
+        xs.push({ p: x0 + (yc - y0) / (y1 - y0) * (x1 - x0), sea: y1 < y0 }); }
+    }
+    if (xs.length) {
+      xs.sort((a, b) => a.p - b.p);
+      const base = ry * W;
+      let k = -1;
+      for (let c = 0; c < W; c++) {
+        const cx = c + 0.5;
+        while (k + 1 < xs.length && xs[k + 1].p <= cx) k++;
+        if (k >= 0 ? xs[k].sea : !xs[0].sea) data[base + c] = 1;
+      }
+    }
+    await maybeYield();
+  }
+  // Vertical sweep: per COLUMN, a crossing sets the state to its SOUTH
+  // (east-going coast, x increasing → sea to the south).
+  for (let cx = 0; cx < W; cx++) {
+    const xc = cx + 0.5;
+    xs.length = 0;
+    for (const line of coastlines) for (let i = 0; i + 1 < line.length; i++) {
+      const x0 = line[i][0], x1 = line[i + 1][0];
+      if ((x0 > xc) !== (x1 > xc)) { const y0 = line[i][1], y1 = line[i + 1][1];
+        xs.push({ p: y0 + (xc - x0) / (x1 - x0) * (y1 - y0), sea: x1 > x0 }); }
+    }
+    if (xs.length) {
+      xs.sort((a, b) => a.p - b.p);
+      let k = -1;
+      for (let r = 0; r < H; r++) {
+        const cy = r + 0.5;
+        while (k + 1 < xs.length && xs[k + 1].p <= cy) k++;
+        if (k >= 0 ? xs[k].sea : !xs[0].sea) data[r * W + cx] = 1;
+      }
+    }
+    await maybeYield();
+  }
+  let filled = 0; for (let i = 0, N = W * H; i < N; i++) if (data[i]) filled++;
+  return filled;
+}
+
 // Whether river LINES count as impassable (the #imp-rivers toggle). Water areas
 // and the coastline-derived sea are ALWAYS impassable; only the river-line layer
 // is optional. Default true.
@@ -4079,15 +4400,48 @@ function riversImpassable() { return document.getElementById("imp-rivers")?.chec
 // (Re)rasterise the cached OSM water geometry onto the DEM grid and feed it to
 // the uploaded-mask pipeline. Re-callable so the #imp-rivers toggle re-applies
 // without re-querying Overpass. Areas (even-odd fill) + sea (coastline flood)
-// always; river lines (supercover) only when the toggle is on.
-function rebuildOsmWaterMask() {
+// always; river lines (supercover) only when the toggle is on. Async and
+// chunked (see fillRingsEvenOddChunked/fillSeaFromCoastlinesChunked above) so a
+// large water pull doesn't freeze the tab. Double-guarded like every other OSM
+// loader: `demRef` (state.dem IDENTITY, not state.calibrationGen — that counter
+// also bumps on unrelated markBridgesDirty(true)/markImpassableDirty(true)
+// toggles, which must NOT abort an in-flight water rebuild) catches a DEM swap
+// mid-rebuild, and state.waterMaskGen catches a SECOND rebuildOsmWaterMask call
+// starting before this one finishes (rapid #imp-rivers toggling) — only the
+// LAST-started call may apply its result.
+async function rebuildOsmWaterMask() {
+  const demRef = state.dem;
   const g = state.osmWaterGeom;
   if (!g || !state.dem || !state.dem.isGeographic) return;
+  const myGen = ++state.waterMaskGen;
+  const stale = () => state.dem !== demRef || myGen !== state.waterMaskGen;
   const { originX, originY, H, W, dx, dy } = state.dem;
   const data = new Uint8Array(W * H);
-  for (const b of g.bodies) fillRingsEvenOdd(b.rings, data, W, H);
-  if (riversImpassable()) for (const rv of g.rivers) rasterPolylineSupercover(rv, data, W, H);
-  fillSeaFromCoastlines(g.coastlines, data, W, H);
+  const total = g.bodies.length + g.rivers.length + g.coastlines.length;
+  progress.classList.add("active");
+  progressBar.style.width = "0%";
+  status.textContent = t("status.water_rasterising", total.toLocaleString());
+  for (let bi = 0; bi < g.bodies.length; bi++) {
+    await fillRingsEvenOddChunked(g.bodies[bi].rings, data, W, H);
+    if (stale()) { progress.classList.remove("active"); status.textContent = t("status.load_superseded"); return; }
+    progressBar.style.width = `${(((bi + 1) / Math.max(1, g.bodies.length)) * 50).toFixed(1)}%`;
+  }
+  if (riversImpassable()) {
+    let lastYield = performance.now();
+    for (let ri = 0; ri < g.rivers.length; ri++) {
+      rasterPolylineSupercover(g.rivers[ri], data, W, H);
+      if (performance.now() - lastYield > WATER_MASK_YIELD_MS) {
+        await new Promise((r) => setTimeout(r, 0));
+        lastYield = performance.now();
+        if (stale()) { progress.classList.remove("active"); status.textContent = t("status.load_superseded"); return; }
+        progressBar.style.width = `${(50 + ((ri + 1) / Math.max(1, g.rivers.length)) * 25).toFixed(1)}%`;
+      }
+    }
+  }
+  progressBar.style.width = "75%";
+  await fillSeaFromCoastlinesChunked(g.coastlines, data, W, H);
+  if (stale()) { progress.classList.remove("active"); status.textContent = t("status.load_superseded"); return; }
+  progressBar.style.width = "100%";
   let cells = 0; for (let i = 0; i < data.length; i++) if (data[i]) cells++;
   // OSM water has a fixed polarity (water = impassable), so clear a stale Invert
   // from a prior uploaded raster before applying the canonical mask.
@@ -4097,11 +4451,15 @@ function rebuildOsmWaterMask() {
   // unchanged (resample is identity; Invert/corridors/overlay/bundle reused).
   applyImpassableRaster({ width: W, height: H, data, dx, dy, originX, originY, epsg: 4326 }, "OSM water");
   status.textContent = cells ? t("status.water_done", cells.toLocaleString()) : t("status.water_none");
+  progress.classList.remove("active");
 }
 
 async function loadOsmWater() {
   if (!state.dem) { status.innerHTML = `<span style="color:#ff6b6b">${t("status.load_dem_first")}</span>`; return; }
   if (!state.dem.isGeographic) { status.innerHTML = `<span style="color:#ff6b6b">${t("status.water_geographic")}</span>`; return; }
+  // Epoch token: guards the async install tail below against a DEM swap
+  // that happens while the Overpass fetch/parse is in flight.
+  const demRef = state.dem;
   const { originX, originY, H, W, dx, dy } = state.dem;
   // Full DEM extent — a mask should cover the whole grid, not just the view.
   const south = originY - H * dy, north = originY, west = originX, east = originX + W * dx;
@@ -4128,6 +4486,11 @@ async function loadOsmWater() {
     progressBar.style.width = "55%";
     status.textContent = t("status.water_parsing");
     const json = await resp.json();
+    // A timed-out/OOM'd query still answers HTTP 200 with a `remark` field and
+    // empty or PARTIAL elements — surface it as a failure BEFORE parsing any
+    // elements, or a partial water pull installs an incomplete impassable mask
+    // that silently lets routes cross rivers/lakes cut off by the timeout.
+    if (json.remark) throw new Error(json.remark);
     const toGrid = (g) => llToGridFrac(g.lat, g.lon);
     const bodies = [];     // area bodies: { rings: [[[gx,gy],…], …] }
     const rivers = [];     // non-tunnelled river polylines: [[[gx,gy],…], …]
@@ -4150,10 +4513,13 @@ async function loadOsmWater() {
     }
     progressBar.style.width = "75%";
     status.textContent = t("status.water_rasterising", (bodies.length + rivers.length + coastlines.length).toLocaleString());
-    await new Promise((r) => setTimeout(r, 0)); // let the status paint before the synchronous rasterise
+    await new Promise((r) => setTimeout(r, 0)); // let the status paint before the (now chunked, async) rasterise below
+    if (state.dem !== demRef) {
+      status.textContent = t("status.load_superseded");
+      return;
+    }
     state.osmWaterGeom = { bodies, rivers, coastlines }; // cache so the #imp-rivers toggle re-applies without re-querying
-    rebuildOsmWaterMask();
-    progressBar.style.width = "100%";
+    await rebuildOsmWaterMask();
   } catch (err) {
     console.error("[osm-water]", err);
     status.innerHTML = `<span style="color:#ff6b6b">${t("status.water_failed", escapeHtml(err.message))}</span>`;
@@ -4170,6 +4536,10 @@ async function loadImpassableMaskFromFile(file) {
     if (meta) meta.textContent = `Reading ${file.name}…`;
     const buf = await readFileWithProgress(file, () => {});
     const raster = await readMaskGeoTIFF(buf);
+    // A file upload supersedes any cached OSM water pull as the mask source —
+    // otherwise a later #imp-rivers toggle would silently re-rasterise the
+    // stale OSM geometry over this upload (mirrors clearImpassableMask).
+    state.osmWaterGeom = null;
     applyImpassableRaster(raster, file.name);
   } catch (err) {
     console.error("[impassable]", err);
@@ -4299,25 +4669,31 @@ function applyNetworkLinesOverlay() {
   const renderer = L.canvas({ padding: 0.3, pane: "networkPane" });
   const weight = networkLineWeightPx();
   const opacity = networkLineOpacity();
-  const group = L.layerGroup();
-  for (const line of state.networkLines) {
-    group.addLayer(L.polyline(line, {
-      color: "#000",
-      weight,
-      opacity,
-      interactive: false,
-      renderer,
-    }));
-  }
-  group.addTo(map);
-  state.networkLinesLayer = group;
+  // A SINGLE Leaflet MultiPolyline (nested latlngs, one per line) instead of
+  // one L.Polyline PER line — a city-scale network is 50k-200k lines, and one
+  // layer object per line means seconds of main-thread build time plus
+  // Leaflet re-iterating every one of them on every pan/zoom redraw. All
+  // lines share the same style, so a single layer renders the identical
+  // image.
+  state.networkLinesLayer = L.polyline(state.networkLines, {
+    color: "#000",
+    weight,
+    opacity,
+    interactive: false,
+    renderer,
+    pane: "networkPane",
+  }).addTo(map);
 }
 
 function updateNetworkLineStyle() {
   if (!state.networkLinesLayer) return;
   const weight = networkLineWeightPx();
   const opacity = networkLineOpacity();
-  state.networkLinesLayer.eachLayer((l) => l.setStyle({ weight, opacity }));
+  // state.networkLinesLayer is a single L.Polyline since applyNetworkLinesOverlay
+  // was switched to the MultiPolyline form; the eachLayer branch is kept only
+  // in case a layerGroup ever occurs again here.
+  if (typeof state.networkLinesLayer.setStyle === "function") state.networkLinesLayer.setStyle({ weight, opacity });
+  else state.networkLinesLayer.eachLayer((l) => l.setStyle({ weight, opacity }));
 }
 
 map.on("zoomend", updateNetworkLineStyle);
@@ -4493,7 +4869,11 @@ function syncGraphModeUI() {
     const row = con.closest("label");
     if (row) {
       row.style.opacity = graph ? "0.6" : "";
-      row.title = graph ? t("net.graph_constrain_locked") : "";
+      // dataset.i18nTitle (same convention as #e-max, app.js ~1241) so
+      // applyTranslations() keeps this tooltip current on a language
+      // toggle instead of it going stale until graph mode is retoggled.
+      if (graph) { row.dataset.i18nTitle = "net.graph_constrain_locked"; row.title = t("net.graph_constrain_locked"); }
+      else { delete row.dataset.i18nTitle; row.title = ""; }
     }
   }
   // Compare: stays available — graph mode does run the comparison now.
@@ -4554,6 +4934,9 @@ function compareRoutesContent(netE, netL, terrE, terrL, focus) {
     html += `<br/>${escapeHtml(t("route.delta"))}: <span class="v">${d >= 0 ? "+" : ""}${d.toExponential(2)}</span>` +
       (pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(0)}%)` : "");
   }
+  // Disclosure, not recomputation: the two routes are cross-metric (8-connected
+  // grid vs true polylines) — see the finding this note documents.
+  html += `<br/><span style="opacity:.65;font-size:10px">${escapeHtml(t("route.compare_metric_note"))}</span>`;
   return html;
 }
 
@@ -4693,26 +5076,41 @@ function buildGraphFieldLayer(graph, field, { pane, greyscale, tint, minId, maxI
   const gamma = Math.max(0.05, parseFloat(document.getElementById("passes-gamma")?.value) || 1);
   const weight = Math.max(1.5, networkLineWeightPx());
   const renderer = L.canvas({ padding: 0.3, pane });
-  const group = L.layerGroup();
+  // Quantise per-edge intensity into a fixed number of colour/opacity BINS and
+  // emit one MultiPolyline (nested latlngs) PER NON-EMPTY BIN, instead of one
+  // L.Polyline per edge — a city-scale network is 10^5-10^6 drawable edges
+  // after junction splitting, and that many individual layer objects freezes
+  // the main thread on build and makes Leaflet's canvas renderer re-iterate
+  // all of them on every pan/zoom. Colour/opacity is evaluated at the BIN
+  // CENTRE, so quantisation error is at most ±1/(2·GRAPH_FIELD_BINS) of the
+  // intensity range — imperceptible.
+  const GRAPH_FIELD_BINS = 32;
+  const binLatLngs = new Array(GRAPH_FIELD_BINS);
   for (let e = 0; e < graph.nEdges; e++) {
     const v = field[e];
     if (!Number.isFinite(v)) continue;
     if (skipZero && v <= 0) continue;
     let t = (v - lo) / span; t = t < 0 ? 0 : (t > 1 ? 1 : t);
     t = Math.pow(t, gamma);
+    const bin = Math.min(GRAPH_FIELD_BINS - 1, Math.floor(t * GRAPH_FIELD_BINS));
+    const a = graph.edgeA[e], b = graph.edgeB[e];
+    const pair = [cellFracToLatLng(graph.nodeR[a], graph.nodeC[a]), cellFracToLatLng(graph.nodeR[b], graph.nodeC[b])];
+    (binLatLngs[bin] || (binLatLngs[bin] = [])).push(pair);
+  }
+  const group = L.layerGroup();
+  for (let bin = 0; bin < GRAPH_FIELD_BINS; bin++) {
+    const pairs = binLatLngs[bin];
+    if (!pairs || !pairs.length) continue;
+    const tc = (bin + 0.5) / GRAPH_FIELD_BINS; // bin-centre, already gamma-mapped
     let col, op = 1;
     // Tint (difference view): keep the HUE constant (a true orange / azure) and
     // encode intensity as OPACITY. Multiplying the tint RGB by t (the old way)
     // darkened mid-values into a muddy yellow-brown that didn't read as the
     // channel colour, and made min/max edits look unresponsive (dark→dark).
-    if (tint) { const [tr, tg, tb] = tint; col = `rgb(${tr},${tg},${tb})`; op = 0.3 + 0.7 * t; }
-    else if (greyscale) { const g = Math.round(t * 255); col = `rgb(${g},${g},${g})`; }
-    else { const [cr, cg, cb] = colormap(t); col = `rgb(${cr},${cg},${cb})`; }
-    const a = graph.edgeA[e], b = graph.edgeB[e];
-    group.addLayer(L.polyline(
-      [cellFracToLatLng(graph.nodeR[a], graph.nodeC[a]), cellFracToLatLng(graph.nodeR[b], graph.nodeC[b])],
-      { color: col, weight, opacity: op, interactive: false, renderer },
-    ));
+    if (tint) { const [tr, tg, tb] = tint; col = `rgb(${tr},${tg},${tb})`; op = 0.3 + 0.7 * tc; }
+    else if (greyscale) { const g = Math.round(tc * 255); col = `rgb(${g},${g},${g})`; }
+    else { const [cr, cg, cb] = colormap(tc); col = `rgb(${cr},${cg},${cb})`; }
+    group.addLayer(L.polyline(pairs, { color: col, weight, opacity: op, interactive: false, renderer }));
   }
   group._range = [lo, hi];
   return group;
@@ -4848,7 +5246,8 @@ function renderGraphOverlay() {
       usePercentileBounds: true, percentiles: [10, 90], maxAboveMin: true,
       userMin: uMin, userMax: uMax,
       gamma, meanWindow: win > 1 ? win : 1,
-      useGreyscale: !diffView, tint: diffView ? TERR_BLUE : null, treatZeroAsTransparent: true, densityNormalize: true,
+      useGreyscale: !diffView, tint: diffView ? TERR_BLUE : null, tintOpacityRamp: diffView,
+      treatZeroAsTransparent: true, densityNormalize: true,
     });
     state.passesDataUrl = out.url;
     if (!showNet) { state.lastPassesAutoMin = out.lo; state.lastPassesAutoMax = out.hi; }
@@ -4974,26 +5373,22 @@ map.on("click", (e) => {
     status.innerHTML = `<span style="color:#ff6b6b">${t("status.net_no_snap_click")}</span>`;
     return;
   }
-  // Density mode: clicks add reference points ("click" placement) or do
-  // nothing ("random" placement). They must never fall through to the
-  // src/dst branch below — density runs ignore src/dst, so a silently-set
-  // source marker would contradict the "— density —" displays and leak a
-  // stale seed into the compute message.
+  // Density mode: clicks always add a reference point, regardless of the
+  // #ref-sampling mode (random/sobol/halton/census) — that select only picks
+  // how "Distribuir aleatórias" seeds points, not what a map click does. They
+  // must never fall through to the src/dst branch below — density runs
+  // ignore src/dst, so a silently-set source marker would contradict the
+  // "— density —" displays and leak a stale seed into the compute message.
   const densityOn = !!document.getElementById("want-density")?.checked;
   if (densityOn) {
-    const densityClick = (document.getElementById("ref-source")?.value || "click") === "click";
-    if (densityClick) {
-      addRefPoint([r, c]);
-    } else {
-      status.textContent = t("status.ref_random_mode");
-    }
+    addRefPoint([r, c]);
     return;
   }
   if (!state.src) {
     state.src = px;
     if (state.srcMarker) state.srcMarker.remove();
     state.srcMarker = L.marker(e.latlng, { icon: makeSrcDstIcon("src") })
-      .addTo(map).bindTooltip("Source");
+      .addTo(map).bindTooltip(t("marker.src"));
     document.getElementById("src-display").textContent = `r=${r}, c=${c}`;
     document.getElementById("src-display").classList.add("set");
     status.textContent = t("status.src_set");
@@ -5002,7 +5397,7 @@ map.on("click", (e) => {
     state.dst = px;
     if (state.dstMarker) state.dstMarker.remove();
     state.dstMarker = L.marker(e.latlng, { icon: makeSrcDstIcon("dst") })
-      .addTo(map).bindTooltip("Destination");
+      .addTo(map).bindTooltip(t("marker.dst"));
     document.getElementById("dst-display").textContent = `r=${r}, c=${c}`;
     document.getElementById("dst-display").classList.add("set");
     status.textContent = t("status.both_set");
@@ -5014,7 +5409,7 @@ map.on("click", (e) => {
     if (state.srcMarker) state.srcMarker.remove();
     if (state.dstMarker) state.dstMarker.remove();
     state.srcMarker = L.marker(e.latlng, { icon: makeSrcDstIcon("src") })
-      .addTo(map).bindTooltip("Source");
+      .addTo(map).bindTooltip(t("marker.src"));
     state.dstMarker = null;
     document.getElementById("src-display").textContent = `r=${r}, c=${c}`;
     document.getElementById("dst-display").textContent = t("pts.click_again");
@@ -5597,12 +5992,12 @@ runBtn.addEventListener("click", async () => {
     // through `if (newSrc === null) return;` — silently aborting every
     // density compute whenever a constraining network was loaded.
     if (state.src) {
-      const newSrc = reSnapAndUpdate(state.src, state.srcMarker, "src-display", "Source");
+      const newSrc = reSnapAndUpdate(state.src, state.srcMarker, "src-display", t("marker.src"));
       if (newSrc === null) return;
       state.src = newSrc;
     }
     if (state.dst) {
-      const newDst = reSnapAndUpdate(state.dst, state.dstMarker, "dst-display", "Destination");
+      const newDst = reSnapAndUpdate(state.dst, state.dstMarker, "dst-display", t("marker.dst"));
       if (newDst === null) return;
       state.dst = newDst;
     }
@@ -5664,8 +6059,9 @@ runBtn.addEventListener("click", async () => {
     if (gen !== state.computeGen) return;
     cancelActiveCompute();
     // Falha de cálculo na nuvem: para a VM agora em vez de deixá-la ligada até o
-    // lease expirar (cancelActiveCompute só corta o keepalive). computeDone faz o
-    // mesmo no sucesso; stopCloudVm é idempotente.
+    // watchdog de ócio da VM desligar sozinho (cancelActiveCompute só corta o
+    // keepalive local — que é só uma flag, não há lease no orquestrador).
+    // computeDone faz o mesmo no sucesso; stopCloudVm é idempotente.
     if (state.cloud.mode === "cloud" && state.cloud.orchestratorUrl) {
       stopCloudVm(state.cloud.orchestratorUrl);
     }
@@ -5682,6 +6078,10 @@ runBtn.addEventListener("click", async () => {
     updateRunButtonState();
     state.computeStartedAt = 0;
     stampBridgeDeckPasses(m.passes); // deck cells carry the bridge flow (portals skip them)
+    // Snapshot the run's OWN mode — the #mode select isn't disabled mid-run,
+    // so reading it live in renderResult would mislabel a result if the user
+    // changed it while this compute was in flight (see the round_note gate).
+    m.runMode = mode;
     renderResult(m);
     status.textContent = t("status.done_ms", m.elapsedMs.toFixed(0));
     scheduleStatusClear(status.textContent);
@@ -5699,11 +6099,11 @@ runBtn.addEventListener("click", async () => {
     // The calibration probe is skipped while a compute runs — if this DEM
     // still has no calibration, run it now that the cores are free.
     if (!state.calibration) startCalibrationProbe();
-    // Cloud: stop the VM after each run (default-ON), releasing the lease so it
-    // doesn't bill idle. With "keep warm" ticked, leave the VM up to reuse on the
-    // next run — just drop the keepalive so the orchestrator lease + in-VM
-    // idle-watchdog reap it after ~15 min idle (the keepalive is also cleared
-    // inside stopCloudVm).
+    // Cloud: stop the VM after each run (default-ON) so it doesn't bill idle.
+    // With "keep warm" ticked, leave the VM up to reuse on the next run — just
+    // drop the keepalive (a client-side in-flight flag; /cloud/keepalive is a
+    // no-op on the orchestrator) so the in-VM idle-watchdog reaps it after ~15
+    // min idle (the keepalive is also cleared inside stopCloudVm).
     if (state.cloud.mode === "cloud" && state.cloud.orchestratorUrl) {
       if (document.getElementById("cloud-keep-warm")?.checked) {
         stopCloudKeepalive();
@@ -5945,6 +6345,15 @@ runBtn.addEventListener("click", async () => {
             for (let i = 0; i < N; i++) energyCount[i] += m.energyCount[i];
             workerFrac[slot] = 1;
             poolProgress();
+            // This slice's worker is done — terminate it now rather than
+            // leaving it resident until the next cancelActiveCompute()/
+            // computeDone() (same rationale as computeDone's terminate loop):
+            // a finished pool worker still pins its DEM copy + Dijkstra
+            // buffers, which stacks on top of the NEXT pool (compare's
+            // scenario B, or the post-merge interp pool) otherwise.
+            w.terminate();
+            const ix = state.workers.indexOf(w);
+            if (ix >= 0) state.workers.splice(ix, 1);
             if (--remaining === 0) {
               // Second density normalisation (per-ref /N happened worker-side).
               for (let i = 0; i < N; i++) density[i] /= N;
@@ -5990,7 +6399,7 @@ runBtn.addEventListener("click", async () => {
         // a `done` message. Yellow-tint the status; the next progress
         // tick will overwrite it.
         console.warn("[worker]", m.message);
-        status.innerHTML = `<span style="color:#ffb86b">${escapeHtml(m.message)}</span>`;
+        status.innerHTML = `<span style="color:#ffb86b">${escapeHtml(workerWarningText(m))}</span>`;
       }
     });
     const { height, mask, networkMask, transfer } = demPayload();
@@ -6054,13 +6463,13 @@ runBtn.addEventListener("click", async () => {
           throw new Error(`backend response ${buf.byteLength} B, expected ${expect} B`);
         }
         let off = 4 + jlen;
-        // Current backends pad the meta JSON so the payload is 8-byte
-        // aligned — the density view sits straight on the response buffer,
-        // zero copies. Unaligned (older backend): slice-copy to realign.
-        const aligned = off % 8 === 0;
-        const density = aligned
-          ? new Float64Array(buf, off, N)
-          : new Float64Array(buf.slice(off, off + 8 * N));
+        // Always slice-copy: a zero-copy VIEW over the response buffer would
+        // keep the WHOLE response (header + JSON + density + energy) reachable
+        // for the lifetime of the result (state.lastResult.passes), doubling
+        // up the 4·N energy bytes (once here, once inside `buf`) — ~540 MB of
+        // dead weight on the 135 M-cell target. The transient +8·N copy cost
+        // is worth not retaining the 12·N response buffer.
+        const density = new Float64Array(buf.slice(off, off + 8 * N));
         off += 8 * N;
         // Energy is always copied out: downstream steps (interp) transfer
         // it to workers, and a view would drag the whole response buffer —
@@ -6121,18 +6530,32 @@ runBtn.addEventListener("click", async () => {
       try {
         const dv = new DataView(buf);
         const jlen = dv.getUint32(0, true);
-        const expect = 4 + jlen + 4 * N + (wantPasses ? 8 * N : 0);
-        if (buf.byteLength !== expect) {
-          throw new Error(`backend response ${buf.byteLength} B, expected ${expect} B`);
+        // v49 shipped /single passes as f64 (subtree_passes_f64, counts exceed
+        // 2^24 on big DEMs). A pre-v49 backend binary (stale self-hosted build,
+        // or the cloud VM's boot-disk-cached binary — see vm/startup-script.sh)
+        // still answers with f32 passes. Accept both layouts, mirroring the
+        // /density decoder's old-backend tolerance, rather than hard-failing.
+        const expectF64 = 4 + jlen + 4 * N + (wantPasses ? 8 * N : 0);
+        const expectF32 = 4 + jlen + 4 * N + (wantPasses ? 4 * N : 0);
+        let passesAreF32 = false;
+        if (buf.byteLength === expectF64) {
+          // current layout
+        } else if (wantPasses && buf.byteLength === expectF32) {
+          passesAreF32 = true;
+          console.warn("[backend] pre-v49 backend detected: /single passes received as f32 — rebuild the backend (cargo build --release) for exact counts above 2^24");
+        } else {
+          throw new Error(`backend response ${buf.byteLength} B, expected ${expectF64} B`);
         }
         let off = 4 + jlen;
         // Slice-copy (a single search, so the copy is cheap and the views need
-        // no alignment): f32 energy first, then f64 passes when present — the
-        // backend ships /single passes as f64, matching the JS worker's
-        // Float64Array (counts exceed 2^24 on big DEMs).
+        // no alignment): f32 energy first, then passes when present.
         const energy = new Float32Array(buf.slice(off, off + 4 * N));
         off += 4 * N;
-        const passes = wantPasses ? new Float64Array(buf.slice(off, off + 8 * N)) : null;
+        const passes = wantPasses
+          ? (passesAreF32
+              ? Float64Array.from(new Float32Array(buf.slice(off, off + 4 * N)))
+              : new Float64Array(buf.slice(off, off + 8 * N)))
+          : null;
         progressBar.style.width = "100%";
         return { energy, passes };
       } catch (err) {
@@ -6169,15 +6592,24 @@ runBtn.addEventListener("click", async () => {
   };
 
   // ---- Constrained vs unconstrained comparison ------------------------------
-  // Two workers in parallel: the primary run exactly as configured (network
-  // mask, passes, top-N, path, interp), plus a secondary run WITHOUT the
-  // network (energy + passes when enabled). The energy difference
-  // (constrained − unconstrained, clamped at 0 — a constraint can never
-  // reduce cost) quantifies what the network costs in energy; it's defined
-  // on network cells only (off-network constrained values are interp
+  // Two full-grid single-source workers: the primary run exactly as
+  // configured (network mask, passes, top-N, path, interp), plus a secondary
+  // run WITHOUT the network (energy + passes when enabled). The energy
+  // difference (constrained − unconstrained, clamped at 0 — a constraint can
+  // never reduce cost) quantifies what the network costs in energy; it's
+  // defined on network cells only (off-network constrained values are interp
   // visualisation, not analysis). Passes difference is signed: positive
   // where the network concentrates traffic, negative where unconstrained
-  // corridors ran. Progress reports come from the primary.
+  // corridors ran.
+  //
+  // Each worker's resident set (height+mask+E+settled+parents+order+passes,
+  // ~26-40 B/cell) is comparable to a density-pool worker's, but nothing
+  // budgeted the pair — run BOTH in parallel only when that fits the SAME
+  // conservative budget the density/interp pools use (38/55 B/cell are
+  // densityPoolSize's constants; slightly conservative here, which is fine).
+  // Otherwise run wB only after wA's buffers are actually released
+  // (terminated), so the two full-grid workers are never resident together —
+  // peak memory halves at the cost of serialized wall time.
   const startComparePair = () => {
     let primary = null, secondary = null;
     const maybeFinish = async () => {
@@ -6210,24 +6642,21 @@ runBtn.addEventListener("click", async () => {
       }
       computeDone(primary);
     };
-    const wA = spawnWorker((m) => {
-      if (m.kind === "progress") reportProgress(m.progress);
-      else if (m.kind === "done") { primary = m; maybeFinish(); }
-      else if (m.kind === "error") computeFailed(m.message);
-      else if (m.kind === "warning") {
-        console.warn("[worker]", m.message);
-        status.innerHTML = `<span style="color:#ffb86b">${escapeHtml(m.message)}</span>`;
-      }
-    });
-    {
-      const { height, mask, networkMask, transfer } = demPayload();
-      wA.postMessage({ ...baseMsg, height, mask, networkMask }, transfer);
-    }
-    const wB = spawnWorker((m) => {
-      if (m.kind === "done") { secondary = m; maybeFinish(); }
-      else if (m.kind === "error") computeFailed(m.message);
-    });
-    {
+    const perWorker = (mode === "round" ? 55 : 38) * N;
+    const parallelOk = 2 * perWorker <= memBudgetBytes();
+    // Progress: in the parallel case only the primary reports (unchanged
+    // behaviour). In the sequential case wA and wB each cover half the bar —
+    // without this, wB's run (roughly as long as wA's, on exactly the huge
+    // DEMs this fix targets) would leave the bar sitting at ~100% with zero
+    // feedback for the whole second pass.
+    const startSecondary = (opts = {}) => {
+      const { progressBase = 0, progressScale = 1 } = opts;
+      const wB = spawnWorker((m) => {
+        if (m.kind === "progress") {
+          if (progressBase || progressScale !== 1) reportProgress(progressBase + progressScale * m.progress);
+        } else if (m.kind === "done") { secondary = m; maybeFinish(); }
+        else if (m.kind === "error") computeFailed(m.message);
+      });
       // No network — same mode/cost/budget; passes mirror the primary so the
       // overlay is comparable across scenarios. Bridges are terrain, so the
       // composed grid applies here too (only the networkMask constraint slot
@@ -6246,7 +6675,34 @@ runBtn.addEventListener("click", async () => {
         },
         transfer,
       );
+    };
+    const wA = spawnWorker((m) => {
+      if (m.kind === "progress") reportProgress(parallelOk ? m.progress : m.progress * 0.5);
+      else if (m.kind === "done") {
+        primary = m;
+        if (!parallelOk) {
+          // Release wA's full-grid buffers before wB allocates its own —
+          // otherwise the two ~3.5 GB workers are resident together anyway
+          // and the memory-halving below doesn't hold (computeDone's later
+          // terminate loop is a no-op on an already-removed worker, so this
+          // is safe to do here).
+          wA.terminate();
+          state.workers = state.workers.filter((w) => w !== wA);
+          startSecondary({ progressBase: 0.5, progressScale: 0.5 });
+        }
+        maybeFinish();
+      }
+      else if (m.kind === "error") computeFailed(m.message);
+      else if (m.kind === "warning") {
+        console.warn("[worker]", m.message);
+        status.innerHTML = `<span style="color:#ffb86b">${escapeHtml(workerWarningText(m))}</span>`;
+      }
+    });
+    {
+      const { height, mask, networkMask, transfer } = demPayload();
+      wA.postMessage({ ...baseMsg, height, mask, networkMask }, transfer);
     }
+    if (parallelOk) startSecondary();
   };
 
   const compareOn = constrainNet && !!document.getElementById("vec-compare")?.checked;
@@ -6341,10 +6797,19 @@ runBtn.addEventListener("click", async () => {
       for (let i = 0; i < field.length; i++) seedMask[i] = Number.isFinite(field[i]) ? 1 : 0;
       const mask = buildComputeGrid({ maskOnly: true }).mask; // don't fill across water
       const w = spawnWorker((m) => {
-        if (m.kind === "interp-done") { if (gen !== state.computeGen) return; resolve(m.energy); }
+        // Terminate here rather than waiting for the next compute — this
+        // worker's job is done either way, and leaving it resident pins its
+        // full-grid buffers (~15 B/cell) until the next cancelActiveCompute()/
+        // DEM change (same rationale as computeDone's terminate loop).
+        const done = () => {
+          w.terminate();
+          const ix = state.workers.indexOf(w);
+          if (ix >= 0) state.workers.splice(ix, 1);
+        };
+        if (m.kind === "interp-done") { done(); if (gen !== state.computeGen) return; resolve(m.energy); }
         // On error, `field` is already DETACHED (transferred to the worker), so it
         // can't be returned — resolve null and let the caller keep the prior field.
-        else if (m.kind === "error") { console.warn("[graph interp]", m.message); resolve(null); }
+        else if (m.kind === "error") { done(); console.warn("[graph interp]", m.message); resolve(null); }
       });
       w.postMessage(
         { kind: "interp", energy: field, networkMask: seedMask, mask, H: state.dem.H, W: state.dem.W, dx: state.dem.dxM, dy: state.dem.dyM, interpMaxDistance, interpSmoothing },
@@ -6401,6 +6866,12 @@ runBtn.addEventListener("click", async () => {
       // correction on compare runs — their elapsed includes the partner scenario.
       if (state.networkGraph) { state.networkGraph.nNodes = graph.nNodes; state.networkGraph.nEdges = graph.nEdges; }
       if (!energyAlt) { updateEstimateCorrection(result.elapsedMs, 0); estimateRunTime(); }
+      // Same retry as the grid computeDone: the calibration probe is skipped
+      // while a compute runs — if this DEM still has no calibration (e.g. the
+      // probe errored at DEM load), run it now that the cores are free. Graph
+      // users never hit the grid completion path, so without this the
+      // pre-flight estimate would stay blank for the rest of the session.
+      if (!state.calibration) startCalibrationProbe();
       const routeNote = result.routes ? t("status.graph_route_note", result.routes.length) : "";
       const doneMsg = t("status.graph_done", result.elapsedMs.toFixed(0), graph.nNodes, graph.nEdges, routeNote);
       // Energy field: rasterise the graph energy onto the grid, then (when the
@@ -6541,8 +7012,9 @@ runBtn.addEventListener("click", async () => {
   };
 
   // The browser/localhost paths dispatch straight away. Cloud first boots the
-  // VM through the local orchestrator (idempotent), keeps the lease alive while
-  // the compute runs, and stops the VM in computeDone. On a missing
+  // VM through the orchestrator (idempotent), runs the client-side keepalive
+  // (in-flight flag only — no orchestrator-side lease) while the compute runs,
+  // and stops the VM in computeDone. On a missing
   // orchestrator URL, or an orchestrator/boot failure, it falls back to the
   // in-browser pool for this run (densityField()/single's own try/catch then
   // re-tags lastRun.backend=false; here we force useBackend=false up front).
@@ -6597,7 +7069,7 @@ runBtn.addEventListener("click", async () => {
 });
 
 // ------- Render -------
-function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs, energyAlt, passesAlt, pathAlt, pathAltEnergy, pathAltLengthM }) {
+function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs, energyAlt, passesAlt, pathAlt, pathAltEnergy, pathAltLengthM, runMode }) {
   // A grid result supersedes any graph-mode overlay.
   removeGraphLayers();
   state.lastGraphResult = null;
@@ -6643,34 +7115,38 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
   // exposed the unhandled exception.
   const eHi = state.lastAutoMax;
   if (Number.isFinite(eHi)) {
-    meta.push(`max E: <span class="v">${eHi.toExponential(2)}</span>`);
+    meta.push(t("stats.max_e", eHi.toExponential(2)));
   }
-  meta.push(`time: <span class="v">${elapsedMs.toFixed(0)} ms</span>`);
+  meta.push(t("stats.time", elapsedMs.toFixed(0)));
   if (passes) {
     const pHi = state.lastPassesAutoMax;
     if (Number.isFinite(pHi)) {
-      meta.push(`max passes: <span class="v">${pHi.toExponential(2)}</span>`);
+      meta.push(t("stats.max_passes", pHi.toExponential(2)));
     }
   }
   if (routes && routes.length) {
-    meta.push(`<span class="v">${routes.length}</span> route${routes.length === 1 ? "" : "s"}:`);
+    meta.push(t("stats.routes_count", routes.length));
     for (let i = 0; i < routes.length; i++) {
       const r = routes[i];
       meta.push(
         `  ${i + 1}. E=<span class="v">${r.energy.toExponential(2)}</span>, ` +
         `L=<span class="v">${(r.length / 1000).toFixed(2)} km</span>` +
-        (r.shared > 0 ? `, shared <span class="v">${r.shared}</span>` : "")
+        (r.shared > 0 ? t("stats.shared", r.shared) : "")
       );
     }
     // Round mode: the round FIELD is fwd+bwd, but the A* alternatives are
     // still scored seed→goal only (by design) — say so, or the route
-    // energies look inconsistent with the field.
-    if ((document.getElementById("mode")?.value || "from") === "round") {
+    // energies look inconsistent with the field. Prefer the run's OWN mode
+    // (snapshotted by the caller) over the live #mode select, which the user
+    // may have changed while this compute was still in flight — the DOM
+    // fallback only matters for the bundle-restore path (applyMetadataToUI
+    // sets the select from the bundle's params before rendering).
+    if (((runMode ?? document.getElementById("mode")?.value) || "from") === "round") {
       meta.push(t("route.round_note"));
     }
   } else if (pathEnergy != null) {
-    meta.push(`path E: <span class="v">${pathEnergy.toExponential(3)}</span>`);
-    meta.push(`length: <span class="v">${(pathLengthM / 1000).toFixed(2)} km</span>`);
+    meta.push(t("stats.path_e", pathEnergy.toExponential(3)));
+    meta.push(t("stats.length", (pathLengthM / 1000).toFixed(2)));
   }
   // Compare run: the unconstrained best terrain route, alongside the network one.
   if (pathAlt && pathAlt.length && pathAltEnergy != null) {
@@ -6851,7 +7327,7 @@ function rerenderCachedResult() {
       const opacity = Math.max(0.55, 0.95 - i * 0.05);
       const ln = L.polyline(pathToLatLngs(r.path), {
         color: colour, weight, opacity, pane: "routesPane",
-      }).bindTooltip(`route ${i + 1} · E ${r.energy.toExponential(2)} · ${(r.length / 1000).toFixed(2)} km`).addTo(map);
+      }).bindTooltip(t("stats.route_tooltip", i + 1, r.energy.toExponential(2), (r.length / 1000).toFixed(2))).addTo(map);
       state.routeLines.push(ln);
     }
   } else if (path && path.length > 0 && isGeographic) {
@@ -6877,7 +7353,12 @@ function boxBlur2D(field, W, H, win) {
   const N = W * H;
   if (win <= 1) return field;
   const half = (win - 1) >> 1;
-  const tmp = new Float64Array(N);
+  // tmp/out are render-only temporaries (Float32, not Float64): the canvas
+  // quantises to 8-bit anyway, so a single f32 rounding per cell is
+  // invisible, and it halves this function's transient memory on huge DEMs.
+  // The sliding-window accumulators (sum/count) stay scalar f64 — only the
+  // per-cell STORE rounds. Never touch state.lastResult.passes itself.
+  const tmp = new Float32Array(N);
   // Horizontal pass: sliding-window mean over each row.
   for (let r = 0; r < H; r++) {
     const rowOff = r * W;
@@ -6896,7 +7377,7 @@ function boxBlur2D(field, W, H, win) {
     }
   }
   // Vertical pass over tmp.
-  const out = new Float64Array(N);
+  const out = new Float32Array(N);
   for (let c = 0; c < W; c++) {
     let sum = 0, count = 0;
     for (let r = 0; r <= half && r < H; r++) {
@@ -6941,7 +7422,11 @@ function passesAsDensity(field, W, H) {
   for (let i = 0; i < field.length; i++) { if (field[i] > max) max = field[i]; }
   if (max < 1) return field; // already a density (or empty) — counts are integers ≥ 1
   const k = 1 / (W * H * W * H);
-  const out = new Float64Array(field.length);
+  // Render-only temporary: Float32 halves transient memory on huge DEMs
+  // (density values ~1e-17·counts are far above the f32 denormal floor, and
+  // the canvas quantises to 8-bit anyway). Never touch the cached
+  // state.lastResult.passes/passesAlt arrays themselves.
+  const out = new Float32Array(field.length);
   for (let i = 0; i < field.length; i++) out[i] = field[i] * k;
   return out;
 }
@@ -7068,6 +7553,16 @@ function renderFieldToDataURL(field, W, H, opts) {
         else if (tc > 1) tc = 1;
         [r2, g2, b2] = colormap(tc);
         a2 = Math.round(t * 255);
+      } else if (opts.tint && opts.tintOpacityRamp) {
+        // Graph-mode difference view only: match buildGraphFieldLayer's vector
+        // channel exactly — constant hue, opacity 0.3+0.7*t (NOT rgb*t) — so
+        // the raster terrain channel and the orange network vectors read at
+        // the same visual intensity for equal traffic. The plain rgb*t ramp
+        // below is what raster-mode's difference view (renderDualPassesToDataURL)
+        // still relies on and must stay untouched.
+        const [tr, tg, tb] = opts.tint;
+        r2 = tr; g2 = tg; b2 = tb;
+        a2 = Math.round((0.3 + 0.7 * t) * 255);
       } else if (opts.tint) {
         // Solid colour scaled by intensity (the orange/azure difference channels);
         // alpha = intensity so dark cells are transparent and additive blends sum.
@@ -7395,7 +7890,13 @@ function applyDemReliefOverlay() {
   }
   if (!state.dem || !state.dem.isGeographic || !state.demReliefDataUrl) return;
   const { H, W, originX, originY, dx, dy } = state.dem;
-  const bounds = [[originY - H * dy, originX], [originY, originX + W * dx]];
+  // Bounds must match the SAMPLED extent (outW×outH cells at `stride`), not
+  // the full DEM: at stride>1 the rendered canvas only covers up to
+  // stride-1 fewer rows/cols, so stretching it across the full DEM rectangle
+  // shears corridors near the eastern/southern edge. Identical to today
+  // when stride=1 or W,H divide evenly.
+  const { stride, outW, outH } = overlayCanvasDims(W, H);
+  const bounds = [[originY - outH * stride * dy, originX], [originY, originX + outW * stride * dx]];
   state.demReliefOverlay = L.imageOverlay(
     state.demReliefDataUrl,
     bounds,
@@ -7424,7 +7925,17 @@ function renderImpassableDataURL() {
   const ctx = canvas.getContext("2d");
   const img = ctx.createImageData(outW, outH);
   const d = img.data;
-  const outIdx = (i) => { const r = (i / W) | 0, c = i - r * W; return (((r / stride) | 0) * outW + ((c / stride) | 0)) << 2; };
+  // Clamp both axes: when W/H isn't a multiple of stride, the last
+  // W%stride columns (or H%stride rows) would otherwise compute an out-of-
+  // range output column/row — WRAPPING to the next row's pixel 0 for the
+  // column case (a right-edge blocked cell painting on the left edge one
+  // row down) rather than just landing on the last valid pixel.
+  const outIdx = (i) => {
+    const r = (i / W) | 0, c = i - r * W;
+    const or = Math.min(outH - 1, (r / stride) | 0);
+    const oc = Math.min(outW - 1, (c / stride) | 0);
+    return (or * outW + oc) << 2;
+  };
   for (let i = 0; i < imp.length; i++) {
     if (imp[i]) { const o = outIdx(i); d[o] = 220; d[o + 1] = 48; d[o + 2] = 48; d[o + 3] = 255; } // blocked
   }
@@ -7445,7 +7956,10 @@ function applyImpassableOverlay() {
   const url = renderImpassableDataURL();
   if (!url) return;
   const { H, W, originX, originY, dx, dy } = state.dem;
-  const bounds = [[originY - H * dy, originX], [originY, originX + W * dx]];
+  // Bounds must match the SAMPLED extent (see applyDemReliefOverlay) —
+  // identical to today when stride=1 or W,H divide evenly.
+  const { stride, outW, outH } = overlayCanvasDims(W, H);
+  const bounds = [[originY - outH * stride * dy, originX], [originY, originX + outW * stride * dx]];
   state.impassableOverlay = L.imageOverlay(url, bounds, {
     opacity: impassableOverlayOpacity(), pane: "impassablePane",
   }).addTo(map);
@@ -7469,7 +7983,10 @@ function applyEnergyOverlay() {
   if (state.energyOverlay) { state.energyOverlay.remove(); state.energyOverlay = null; }
   if (!state.dem || !state.dem.isGeographic || !state.energyDataUrl) return;
   const { H, W, originX, originY, dx, dy } = state.dem;
-  const bounds = [[originY - H * dy, originX], [originY, originX + W * dx]];
+  // Bounds must match the SAMPLED extent (see applyDemReliefOverlay) —
+  // identical to today when stride=1 or W,H divide evenly.
+  const { stride, outW, outH } = overlayCanvasDims(W, H);
+  const bounds = [[originY - outH * stride * dy, originX], [originY, originX + outW * stride * dx]];
   state.energyOverlay = L.imageOverlay(state.energyDataUrl, bounds, { opacity: 0.85, pane: "energyPane" }).addTo(map);
 }
 
@@ -7480,7 +7997,10 @@ function applyPassesOverlay() {
   if (state.passesOverlay) { state.passesOverlay.remove(); state.passesOverlay = null; }
   if (!state.dem || !state.dem.isGeographic || !state.passesDataUrl) return;
   const { H, W, originX, originY, dx, dy } = state.dem;
-  const bounds = [[originY - H * dy, originX], [originY, originX + W * dx]];
+  // Bounds must match the SAMPLED extent (see applyDemReliefOverlay) —
+  // identical to today when stride=1 or W,H divide evenly.
+  const { stride, outW, outH } = overlayCanvasDims(W, H);
+  const bounds = [[originY - outH * stride * dy, originX], [originY, originX + outW * stride * dx]];
   state.passesOverlay = L.imageOverlay(state.passesDataUrl, bounds, { opacity: 0.7, pane: "passesPane" }).addTo(map);
 }
 
@@ -7519,7 +8039,14 @@ function applyLayerControls() {
     const visible = document.getElementById("passes-visible")?.checked ?? true;
     const opacity = parseFloat(document.getElementById("passes-opacity")?.value);
     const op = Number.isFinite(opacity) ? opacity : 0.7;
-    state.passesOverlay.setOpacity(visible ? op : 0);
+    // Graph-mode difference view: state.graphPassesLayer (network vectors) and
+    // state.passesOverlay (terrain raster) share passesPane. The graphPassesLayer
+    // block below already drives the PANE opacity from this same slider, so
+    // ALSO setting the imageOverlay element's own opacity here would apply the
+    // slider twice (op × op), making the raster channel read dimmer than the
+    // vector channel at the same value. Pin the element to fully opaque and
+    // let the pane be the single control in that case.
+    state.passesOverlay.setOpacity(state.graphPassesLayer ? 1 : (visible ? op : 0));
     const blend = document.getElementById("passes-blend")?.value || "normal";
     const el = state.passesOverlay.getElement();
     // "energy" is a render mode (colour baked into the canvas), not a CSS
@@ -7754,22 +8281,29 @@ function syncRangePlaceholders() {
   if (pHi && state.lastPassesAutoMax != null) pHi.placeholder = formatSci(state.lastPassesAutoMax);
 }
 
+// Shared conservative memory budget (bytes) for browser worker pools, derived
+// from navigator.deviceMemory (GB; the spec CAPS it at 8 — a floor on true
+// RAM, never the full amount) with a conservative fraction. densityPoolSize,
+// interpPoolSize AND startComparePair's parallelism gate all size against
+// this SAME number so they can't drift into three independently-tuned
+// budgets.
+function memBudgetBytes() {
+  const devMemGB = navigator.deviceMemory || 4;
+  return Math.max(1.5e9, devMemGB * 1e9 * 0.45);
+}
+
 // Density worker-pool size, shared by the runner and the time estimator so
 // they can never drift. Each worker's resident set ≈ DEM copy (height f32 4 +
 // mask u8 1 = 5 B/cell) + densityField scratch (E4 + settled1 + parents4 +
 // order4 + passes-f32 4 = 17) + outputs (density-f32 4 + energySum-f64 8 +
 // energyCount 4 = 16) ≈ 38 B/cell, ~55 in round mode (a second search
-// resident). Budgeted against navigator.deviceMemory (GB; the spec CAPS it at
-// 8 — a floor on true RAM, never the full amount) with a conservative
-// fraction. The optional #max-workers input lets a user on a big-RAM machine
+// resident). The optional #max-workers input lets a user on a big-RAM machine
 // (which deviceMemory can't see) force more, still clamped by K.
 function densityPoolSize({ N, K, round }) {
   if (!K) return 1;
   const cores = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
   const bytesPerWorker = (round ? 55 : 38) * N;
-  const devMemGB = navigator.deviceMemory || 4;
-  const memBudget = Math.max(1.5e9, devMemGB * 1e9 * 0.45);
-  const memCap = Math.max(1, Math.floor(memBudget / bytesPerWorker));
+  const memCap = Math.max(1, Math.floor(memBudgetBytes() / bytesPerWorker));
   const userMax = parseInt(document.getElementById("max-workers")?.value, 10);
   const overrideN = Number.isFinite(userMax) && userMax > 0 ? userMax : 0;
   return overrideN
@@ -7779,17 +8313,17 @@ function densityPoolSize({ N, K, round }) {
 
 // Interp worker-pool size, shared by runInterp AND the time estimate
 // (predictInterpMs) so they can never drift — same rule as densityPoolSize.
-// Each band worker holds the FULL grid (~6·N bytes: energy f32 + mask +
-// networkMask) since rays read past band edges; budgeted against
+// Each band worker holds the FULL grid PLUS its idwFill scratch (~15 B/cell:
+// inputs 6 [energy f32 4 + mask 1 + networkMask 1] + idwFill's out Float32
+// 4 + seedMask u8 1 + chamfer Int32 dist 4; the returned band slice is
+// ≤4·N/P, excluded) since rays read past band edges; budgeted against
 // deviceMemory (spec-capped at 8 GB) with the #max-workers override
 // (clamped by the band cap). The interp runs AFTER the Dijkstra workers are
 // freed (and in Cloud mode the browser never ran them), so this RAM is
 // genuinely available.
 function interpPoolSize(N, H) {
   const cores = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
-  const devMemGB = navigator.deviceMemory || 4;
-  const memBudget = Math.max(1.5e9, devMemGB * 1e9 * 0.45);
-  const memCap = Math.max(1, Math.floor(memBudget / (6 * N)));
+  const memCap = Math.max(1, Math.floor(memBudgetBytes() / (15 * N)));
   const userMax = parseInt(document.getElementById("max-workers")?.value, 10);
   const overrideN = Number.isFinite(userMax) && userMax > 0 ? userMax : 0;
   const bandCap = Math.ceil(H / 64);
@@ -7803,13 +8337,9 @@ function interpPoolSize(N, H) {
 // backend toggle/URL changes (not per estimate). Cleared/ignored when the
 // backend is off; falls back to BACKEND_PAR_CAP if unreachable.
 async function refreshBackendCores() {
-  // Both Localhost and Cloud probe /health; the orchestrator proxies the VM's
-  // /health (same fields: cores, mem_budget_bytes) when the VM is up, and
-  // returns {ok:false,vmState:…} when it isn't — Number.isFinite gates below
-  // tolerate the missing cores, so a stopped VM just leaves the estimate on its
-  // fallback parallelism cap until the run boots it.
   // Only Localhost probes /health on idle. Browser has no backend; Cloud's VM is
-  // off between runs (and the orchestrator has no /health) — ensureCloudVm fills
+  // off between runs (and the orchestrator itself has no /health — it doesn't
+  // serve density/single, just start/stop/status) — ensureCloudVm fills
   // state.backendCores at run time instead.
   if (computeMode() !== "localhost") { state.backendCores = null; estimateRunTime(); return; }
   const url = effectiveBackendUrl();
@@ -7833,9 +8363,10 @@ async function refreshBackendCores() {
 }
 
 // Reconcile the compute-source sub-panels (Localhost URL / Cloud orchestrator)
-// to the selected radio, and gate Cloud to local origins. Called on every
-// selector change AND on load (the radiogroup is in PERSIST_REFIRE). Mirrors
-// the old syncBackend's show/hide, extended to three states.
+// to the selected radio (Cloud has no origin gating — see the body comment
+// below). Called on every selector change AND on load (the radiogroup is in
+// PERSIST_REFIRE). Mirrors the old syncBackend's show/hide, extended to three
+// states.
 function syncComputeSourceUI() {
   const mode = computeMode();
   const lh = document.getElementById("localhost-extra");
@@ -7854,14 +8385,17 @@ function syncComputeSourceUI() {
 }
 
 // ---- Cloud VM state machine ---------------------------------------------
-// Drives the LOCAL orchestrator that fronts a pre-baked compute VM. The RUN
-// path calls ensureCloudVm() before dispatching the (unchanged) backend
-// density/single fetch against the orchestrator URL. Lease keepalive runs
-// while a compute is in flight; the VM is stopped after each run and on tab
-// hide (a "stop VM after each run" default-ON behaviour). All status text goes
-// through t(); the hint line lives in #cloud-vm-status.
+// Drives the orchestrator (a public Cloud Run service) that fronts a
+// pre-baked compute VM. The RUN path calls ensureCloudVm() before dispatching
+// the (unchanged) backend density/single fetch against the orchestrator URL.
+// The client-side keepalive marks "compute in flight" while a compute runs
+// (its /cloud/keepalive traffic is a no-op on the orchestrator — the real
+// cost backstop is the in-VM idle-watchdog + uptime cap); the VM is stopped
+// after each run and on tab hide (a "stop VM after each run" default-ON
+// behaviour). All status text goes through t(); the hint line lives in
+// #cloud-vm-status.
 const CLOUD_POLL_MS = 3000;       // /cloud/status poll cadence while booting
-const CLOUD_KEEPALIVE_MS = 60000; // lease-extension cadence while computing
+const CLOUD_KEEPALIVE_MS = 60000; // client-side keepalive cadence while computing
 const CLOUD_BOOT_TIMEOUT_MS = 300000; // give the VM up to 5 min to go healthy
 
 function setCloudHint(key, ...args) {
@@ -7911,7 +8445,11 @@ async function ensureCloudVm(orchUrl, isStale) {
   const hint = etaS >= 180 ? "cloud.creating" : "cloud.starting";
   setCloudHint(hint, formatDuration(etaS * 1000));
   status.textContent = t(hint, formatDuration(etaS * 1000));
-  const deadline = performance.now() + Math.max(CLOUD_BOOT_TIMEOUT_MS, etaS * 2 * 1000);
+  // A from-scratch CREATE can fall back to compiling the Rust backend from
+  // source (~10 min) when the operator hasn't published BACKEND_BINARY_URL —
+  // widen the multiplier for that long-boot case so the client doesn't give
+  // up mid-build (the same etaS>=180 threshold that picks the "creating" hint).
+  const deadline = performance.now() + Math.max(CLOUD_BOOT_TIMEOUT_MS, etaS * (etaS >= 180 ? 5 : 2) * 1000);
 
   // Poll the DATA-plane /health directly: the orchestrator opened the firewall
   // to our IP and pointed DNS at the VM, so once it answers 200+ok the VM is
@@ -7945,8 +8483,25 @@ async function ensureCloudVm(orchUrl, isStale) {
       const st = await cloudFetchJson(`${orchUrl}/cloud/status`, { method: "GET", timeoutMs: 8000 });
       state.cloud.vmState = st.state || state.cloud.vmState;
       if (st.state === "ERROR") throw Object.assign(new Error("boot_failed"), { reason: "boot_failed" });
+      // The instance can land STOPPED (or ABSENT) while we're polling: the
+      // default "stop VM after each run" behaviour means a run started right
+      // after the previous one's STOPPING window completes lands exactly
+      // here, and nobody would otherwise re-issue /cloud/start — the VM would
+      // sit stopped until this loop's boot_failed deadline. /cloud/start is
+      // documented idempotent (creates if absent, starts if stopped, no-op if
+      // running), so re-kicking it is safe.
+      if (st.state === "STOPPED" || st.state === "ABSENT") {
+        try {
+          await cloudFetchJson(`${orchUrl}/cloud/start`, { method: "POST", timeoutMs: 15000 });
+        } catch (startErr) {
+          if (startErr.status === 401) {
+            throw Object.assign(new Error("auth_failed"), { reason: "auth_failed", cause: startErr });
+          }
+          /* transient — the next poll iteration will retry */
+        }
+      }
     } catch (err) {
-      if (err.reason === "boot_failed") throw err;
+      if (err.reason === "boot_failed" || err.reason === "auth_failed") throw err;
       if (err.status === 401) throw Object.assign(new Error("auth_failed"), { reason: "auth_failed", cause: err });
       /* transient orchestrator hiccup — keep waiting */
     }
@@ -7955,15 +8510,22 @@ async function ensureCloudVm(orchUrl, isStale) {
   }
 }
 
-// Lease keepalive: while a cloud compute is in flight, extend the VM lease so
-// the orchestrator doesn't reap it mid-run. Cleared by stopCloudKeepalive().
+// Client-side keepalive: marks "a cloud compute is in flight" for the
+// duration of the run (it's beaconStopCloudVm's in-flight signal). Its
+// /cloud/keepalive traffic ALSO registers/renews this tab's short-lived
+// orchestrator lease (X-Simu-Client → LEASES[clientId], ~180s TTL) so a
+// concurrent second browser's default "stop after run" can't kill the VM
+// out from under this run. The in-VM idle-watchdog (~15 min) + uptime cap
+// remain the real cost backstops regardless of any lease. Cleared by
+// stopCloudKeepalive().
 function startCloudKeepalive(orchUrl) {
   stopCloudKeepalive();
   const tok = cloudToken();
-  const headers = tok ? { "Authorization": `Bearer ${tok}` } : {};
+  const headers = { "X-Simu-Client": cloudClientId() };
+  if (tok) headers["Authorization"] = `Bearer ${tok}`;
   state.cloud.keepaliveTimer = setInterval(() => {
     fetch(`${orchUrl}/cloud/keepalive`, { method: "POST", headers, signal: AbortSignal.timeout(8000) })
-      .catch(() => { /* best-effort — keepalive is a no-op; the in-VM watchdog reaps */ });
+      .catch(() => { /* best-effort — the in-VM watchdog reaps regardless */ });
   }, CLOUD_KEEPALIVE_MS);
 }
 function stopCloudKeepalive() {
@@ -7972,16 +8534,19 @@ function stopCloudKeepalive() {
 
 // Stop the VM now (default-ON "stop after each run"). Best-effort: a POST with
 // a short timeout from the in-page path, or a sendBeacon from a page-hide
-// handler (which can't await). Always clears the keepalive first.
+// handler (which can't await). Always clears the keepalive first. Carries
+// X-Simu-Client so the orchestrator can skip the stop if another client's
+// lease (from ITS keepalive) is still active — see LEASES in orchestrator/main.py.
 function stopCloudVm(orchUrl, { beacon = false } = {}) {
   stopCloudKeepalive();
   if (!orchUrl) return;
   const tok = cloudToken();
-  const headers = tok ? { "Authorization": `Bearer ${tok}` } : {};
+  const headers = { "X-Simu-Client": cloudClientId() };
+  if (tok) headers["Authorization"] = `Bearer ${tok}`;
   if (beacon) {
     // On page-hide we can't await; fetch({keepalive:true}) survives the unload
-    // AND carries the Authorization header (sendBeacon CAN'T set headers, so the
-    // orchestrator would 401 it). Best-effort.
+    // AND carries the Authorization/X-Simu-Client headers (sendBeacon CAN'T set
+    // headers, so the orchestrator would 401 it or lose the lease check). Best-effort.
     try { fetch(`${orchUrl}/cloud/stop`, { method: "POST", headers, keepalive: true }); }
     catch { /* best-effort */ }
     state.cloud.vmState = "STOPPING";
@@ -7990,7 +8555,19 @@ function stopCloudVm(orchUrl, { beacon = false } = {}) {
   setCloudHint("cloud.stopping");
   state.cloud.vmState = "STOPPING";
   fetch(`${orchUrl}/cloud/stop`, { method: "POST", headers, signal: AbortSignal.timeout(8000) })
-    .then(() => { state.cloud.vmState = "STOPPED"; setCloudHint("cloud.stopped_after"); })
+    .then((resp) => resp.json().catch(() => ({})))
+    .then((body) => {
+      // A concurrent client's active lease makes the orchestrator SKIP the
+      // stop and report the VM's real (still-running) state — reflect that
+      // instead of claiming STOPPED, or this tab's UI would lie.
+      if (body && body.skipped) {
+        state.cloud.vmState = body.state || "RUNNING";
+        setCloudHint("cloud.stop_skipped");
+      } else {
+        state.cloud.vmState = "STOPPED";
+        setCloudHint("cloud.stopped_after");
+      }
+    })
     .catch(() => { /* best-effort — the in-VM watchdog reaps it anyway */ });
 }
 
@@ -8423,7 +9000,7 @@ function formatCoverage(W, H, dx, dy, originY, isGeographic) {
     xKm = (W * dx) / 1000;
     yKm = (H * dy) / 1000;
   }
-  return `<span class="v">${xKm.toFixed(2)} × ${yKm.toFixed(2)} km</span> coverage`;
+  return t("dem.meta_coverage", `<span class="v">${xKm.toFixed(2)} × ${yKm.toFixed(2)} km</span>`);
 }
 
 // ------- ColorCET colormaps -------
@@ -8505,20 +9082,44 @@ const COLORMAPS = {
 };
 
 // Class metadata for the dropdown <optgroup>s.
+// `label` is a literal (cmocean — a proper noun, not translated); every other
+// group carries a labelKey routed through STRINGS/t() (see rebuildColormapOptions).
 const COLORCET_GROUPS = [
   { label: "cmocean", keys: ["cmo_phase"] },
-  { label: "Linear", keys: ["CET_L1","CET_L2","CET_L3","CET_L4","CET_L5","CET_L6","CET_L7","CET_L8","CET_L9","CET_L10","CET_L11","CET_L12","CET_L13","CET_L14","CET_L15","CET_L16","CET_L17","CET_L18","CET_L19","CET_L20"] },
-  { label: "Diverging", keys: ["CET_D1","CET_D1A","CET_D2","CET_D3","CET_D4","CET_D6","CET_D7","CET_D8","CET_D9","CET_D10","CET_D11","CET_D12","CET_D13"] },
-  { label: "Rainbow", keys: ["CET_R1","CET_R2","CET_R3","CET_R4"] },
-  { label: "Isoluminant", keys: ["CET_I1","CET_I2","CET_I3"] },
-  { label: "Cyclic", keys: ["CET_C1","CET_C2","CET_C3","CET_C4","CET_C5","CET_C6","CET_C7","CET_C8","CET_C9","CET_C10","CET_C11"] },
-  { label: "Colour-blind safe linear", keys: ["CET_CBL1","CET_CBL2","CET_CBL3","CET_CBL4"] },
-  { label: "Colour-blind safe diverging", keys: ["CET_CBD1","CET_CBD2"] },
-  { label: "Colour-blind safe cyclic", keys: ["CET_CBC1","CET_CBC2"] },
-  { label: "Tritan-safe linear", keys: ["CET_CBTL1","CET_CBTL2","CET_CBTL3","CET_CBTL4"] },
-  { label: "Tritan-safe diverging", keys: ["CET_CBTD1"] },
-  { label: "Tritan-safe cyclic", keys: ["CET_CBTC1","CET_CBTC2"] },
+  { labelKey: "cmap.grp.linear", keys: ["CET_L1","CET_L2","CET_L3","CET_L4","CET_L5","CET_L6","CET_L7","CET_L8","CET_L9","CET_L10","CET_L11","CET_L12","CET_L13","CET_L14","CET_L15","CET_L16","CET_L17","CET_L18","CET_L19","CET_L20"] },
+  { labelKey: "cmap.grp.diverging", keys: ["CET_D1","CET_D1A","CET_D2","CET_D3","CET_D4","CET_D6","CET_D7","CET_D8","CET_D9","CET_D10","CET_D11","CET_D12","CET_D13"] },
+  { labelKey: "cmap.grp.rainbow", keys: ["CET_R1","CET_R2","CET_R3","CET_R4"] },
+  { labelKey: "cmap.grp.isoluminant", keys: ["CET_I1","CET_I2","CET_I3"] },
+  { labelKey: "cmap.grp.cyclic", keys: ["CET_C1","CET_C2","CET_C3","CET_C4","CET_C5","CET_C6","CET_C7","CET_C8","CET_C9","CET_C10","CET_C11"] },
+  { labelKey: "cmap.grp.cb_linear", keys: ["CET_CBL1","CET_CBL2","CET_CBL3","CET_CBL4"] },
+  { labelKey: "cmap.grp.cb_diverging", keys: ["CET_CBD1","CET_CBD2"] },
+  { labelKey: "cmap.grp.cb_cyclic", keys: ["CET_CBC1","CET_CBC2"] },
+  { labelKey: "cmap.grp.tritan_linear", keys: ["CET_CBTL1","CET_CBTL2","CET_CBTL3","CET_CBTL4"] },
+  { labelKey: "cmap.grp.tritan_diverging", keys: ["CET_CBTD1"] },
+  { labelKey: "cmap.grp.tritan_cyclic", keys: ["CET_CBTC1","CET_CBTC2"] },
 ];
+
+// Rebuild a colormap <select>'s <optgroup>s in place, preserving the current
+// selection — shared by the two dropdown populators below AND by a language
+// toggle (see refreshColormapLabels), since optgroup labels are DOM properties
+// set at build time, not data-i18n attributes applyTranslations can reach.
+function rebuildColormapOptions(sel) {
+  const prevValue = sel.value;
+  sel.innerHTML = "";
+  for (const grp of COLORCET_GROUPS) {
+    const og = document.createElement("optgroup");
+    og.label = grp.labelKey ? t(grp.labelKey) : grp.label;
+    for (const k of grp.keys) {
+      if (!COLORMAPS[k]) continue;
+      const opt = document.createElement("option");
+      opt.value = k;
+      opt.textContent = k === "cmo_phase" ? "cmocean.phase" : k.replace("CET_", "CET-");
+      og.appendChild(opt);
+    }
+    sel.appendChild(og);
+  }
+  if (prevValue) sel.value = prevValue;
+}
 
 let activeColormap = "cmo_phase"; // cmocean.phase — cyclic, perceptually uniform
 
@@ -8553,7 +9154,7 @@ function recolorRouteLines() {
 }
 
 function colormap(t) {
-  const anchors = COLORMAPS[activeColormap] || COLORMAPS.viridis;
+  const anchors = COLORMAPS[activeColormap] || COLORMAPS.cmo_phase;
   t = Math.max(0, Math.min(1, t));
   const n = anchors.length - 1;
   const f = t * n;
@@ -8625,20 +9226,43 @@ function tiffMetadataForDem(dem, sampleKind) {
   } else if (isGeographic) {
     md.GeographicTypeGeoKey = 4326;
   }
+  // Backfill the mandatory GTModelTypeGeoKey/GTRasterTypeGeoKey when the
+  // source (or the branch above) didn't provide them — GDAL/QGIS otherwise
+  // read the GeoKeyDirectory as an unknown engineering CRS instead of the
+  // intended geographic/projected one. Never override a source-provided key.
+  if (md.ProjectedCSTypeGeoKey && md.GTModelTypeGeoKey == null) {
+    md.GTModelTypeGeoKey = 1;
+  } else if (md.GeographicTypeGeoKey && md.GTModelTypeGeoKey == null) {
+    md.GTModelTypeGeoKey = 2;
+  }
+  if (md.GTModelTypeGeoKey != null && md.GTRasterTypeGeoKey == null) {
+    md.GTRasterTypeGeoKey = 1;
+  }
   return md;
 }
 
-function writeRasterAsGeoTIFF(values, dem, sampleKind) {
+function writeRasterAsGeoTIFF(values, dem, sampleKind, extraMd) {
   if (typeof GeoTIFF?.writeArrayBuffer !== "function") {
     throw new Error("GeoTIFF writer unavailable — load the full geotiff.js bundle.");
   }
-  return GeoTIFF.writeArrayBuffer(values, tiffMetadataForDem(dem, sampleKind));
+  const md = tiffMetadataForDem(dem, sampleKind);
+  // extraMd is opt-in per call (e.g. exportDemTif's GDAL_NODATA) — never
+  // folded into tiffMetadataForDem itself, so energy/passes/network/
+  // impassable exports don't inherit the source DEM's elevation sentinel.
+  if (extraMd) Object.assign(md, extraMd);
+  return GeoTIFF.writeArrayBuffer(values, md);
 }
 
 // Read a GeoTIFF blob from a bundle and return the underlying typed array
 // in the requested element kind. We do a strict size check against the
 // loaded DEM dims so a v3 bundle restored against a wrong DEM fails loudly
 // (the buffer length mismatch surfaces the same way the .bin path does).
+// NOTE: loadBundleFile's zip-entry size cap only bounds the ZIP-layer
+// decompressed size — a small-but-valid GeoTIFF using its own internal
+// compression (LZW/Deflate strips) could still expand to a large in-memory
+// raster inside readRasters() below, past that cap. Not guarded here; a
+// tighter check would compare image.getWidth()*getHeight()*bytesPerSample
+// against the same cap right after tiff.getImage(), before readRasters().
 async function readRasterFromGeoTIFF(arrayBuffer, expectedKind) {
   const tiff = await GeoTIFF.fromArrayBuffer(arrayBuffer);
   const image = await tiff.getImage();
@@ -8703,9 +9327,12 @@ async function readMaskGeoTIFF(arrayBuffer) {
   const tiePoints = await image.getTiePoints();
   const scale = image.fileDirectory.getValue("ModelPixelScale");
   if (!scale || !tiePoints?.length) {
-    throw new Error("Mask GeoTIFF lacks geotransform metadata (ModelPixelScale / tie points).");
+    throw new Error(t("status.mask_no_geotransform"));
   }
-  const data = await image.readRasters({ interleave: true });
+  // samples: [0] selects band 0 explicitly — without it, a multi-band mask
+  // GeoTIFF would be read pixel-interleaved and misread the same way a
+  // multi-band DEM would (see loadDemFromArrayBuffer).
+  const data = await image.readRasters({ samples: [0], interleave: true });
   let geoKeys = null;
   try { geoKeys = image.getGeoKeys ? image.getGeoKeys() : null; } catch {}
   return {
@@ -9075,13 +9702,41 @@ function pixelToLonLat(idx, dem) {
 
 // Exact inverse of pixelToLonLat — recover the cell index from a [lon,lat]
 // pair. Only safe when the DEM matches the one the coords were written
-// against (callers gate on demDimsMatch === true). Used to rebuild the
-// route/path index arrays from a bundle's GeoJSON on reload, so restored
-// lines render and recolor identically to a fresh compute.
+// against (callers gate on bundleDemMatch(...) === true, below — dims AND
+// georeferencing, not just H×W). Used to rebuild the route/path index
+// arrays from a bundle's GeoJSON on reload, so restored lines render and
+// recolor identically to a fresh compute.
 function lonLatToPixel(lon, lat, dem) {
   const c = Math.round((lon - dem.originX) / dem.dx - 0.5);
   const r = Math.round((dem.originY - lat) / dem.dy - 0.5);
   return r * dem.W + c;
+}
+
+// Combined dims+georeferencing check for bundle binary replay (rasters,
+// routes/path conversion via lonLatToPixel above, src/dst/ref markers,
+// network/impassable masks, bridges). Same H×W is NOT enough to prove a
+// bundle's DEM is the loaded DEM — many DEM products (e.g. all 1° SRTM/
+// FABDEM tiles) share pixel dimensions while covering a different area, so
+// a dims-only gate would silently stretch tile-A rasters over tile-B's
+// extent. Returns true (safe to replay), false (mismatch — dims OR
+// georeferencing differ), or null (unknown: no DEM loaded yet, or mdDem
+// lacks dims — old-bundle behaviour is preserved as "unknown", not "false").
+function bundleDemMatch(mdDem, dem) {
+  if (!dem || !mdDem) return null;
+  const { H, W } = mdDem;
+  if (!Number.isFinite(H) || !Number.isFinite(W)) return null;
+  if (dem.H !== H || dem.W !== W) return false;
+  // Dims match — also compare the geotransform when the bundle recorded one
+  // (older bundles predate dem.originX/originY/dx/dy — treat as unknown
+  // extent there, i.e. dims-only, same as before this check existed).
+  const { originX, originY, dx, dy } = mdDem;
+  if (![originX, originY, dx, dy].every(Number.isFinite)) return true;
+  return (
+    Math.abs(originX - dem.originX) <= 0.5 * dem.dx &&
+    Math.abs(originY - dem.originY) <= 0.5 * dem.dy &&
+    Math.abs(dx - dem.dx) <= 1e-6 * dem.dx &&
+    Math.abs(dy - dem.dy) <= 1e-6 * dem.dy
+  );
 }
 
 // Rebuild a top-N `routes` list ({path, energy, length, shared}) from the
@@ -9111,19 +9766,33 @@ function pathFromFC(fc, dem) {
   return feat.geometry.coordinates.map(([lon, lat]) => lonLatToPixel(lon, lat, dem));
 }
 
-function pathFCFromIndices(path, dem, props = {}) {
+// direction documents the relationship between the LineString's coordinate
+// order (always written reference/source → destination, in A*-search order)
+// and the direction the energy was actually scored in. Mode "to" scores
+// destination→reference (energy-worker.js's reverse:true branch), so its
+// routes/paths are the one case where coordinate order and travel direction
+// disagree — external consumers (QGIS, scripts) reading the geometry in
+// coordinate order would otherwise silently attribute the energy to the
+// wrong direction.
+function routeDirectionLabel(mode) {
+  return mode === "to"
+    ? "destination→source (energy direction; coordinates written source→destination)"
+    : "source→destination";
+}
+
+function pathFCFromIndices(path, dem, props = {}, mode) {
   const coords = path.map((i) => pixelToLonLat(i, dem));
   return {
     type: "FeatureCollection",
     features: [{
       type: "Feature",
       geometry: { type: "LineString", coordinates: coords },
-      properties: props,
+      properties: { ...props, direction: routeDirectionLabel(mode) },
     }],
   };
 }
 
-function routesFCFromList(routes, dem) {
+function routesFCFromList(routes, dem, mode) {
   return {
     type: "FeatureCollection",
     features: routes.map((r, i) => ({
@@ -9137,6 +9806,7 @@ function routesFCFromList(routes, dem) {
         energy: r.energy,
         length_m: r.length,
         shared_cells: r.shared,
+        direction: routeDirectionLabel(mode),
       },
     })),
   };
@@ -9193,7 +9863,7 @@ function buildMetadata(result, withOutputs = true) {
     repulsionMode: document.getElementById("repulsion-mode")?.value || "per-cell",
     wantDensity:   !!document.getElementById("want-density")?.checked,
     nRefs:         parseInt(document.getElementById("n-refs")?.value, 10) || 10,
-    refSource:     document.getElementById("ref-source")?.value || "click",
+    refSource:     document.getElementById("ref-sampling")?.value || "random",
     maximize:      !!document.getElementById("maximize")?.checked,
     maximizeLength: parseInt(document.getElementById("maximize-length")?.value, 10) || 0,
     // refPoints carries the actual placed points so reload can re-stamp
@@ -9288,7 +9958,10 @@ function buildMetadata(result, withOutputs = true) {
     // Full control state (every persisted toggle/value + layer order, compute
     // source, max-workers, language) so a bundle round-trips the WHOLE UI, not
     // just the params/viz subset below. applyMetadataToUI applies it first.
-    config:               collectConfig(),
+    // forBundle:true strips connection settings (backend/orchestrator URL,
+    // cloud-keep-warm) and computeSource — a shared bundle must not leak the
+    // exporter's endpoints or repoint the importer's compute source.
+    config:               collectConfig({ forBundle: true }),
     elapsedMs:            result?.elapsedMs ?? null,
     dem: {
       label:        state.demLabel || null,
@@ -9318,39 +9991,16 @@ function buildMetadata(result, withOutputs = true) {
     },
   };
 
-  if (withOutputs && result) {
+  if (withOutputs) {
     // Each raster output is a GeoTIFF — same CRS / extent / pixel grid as
     // the source DEM, so QGIS can stack them on top without reprojection.
     // The "type" hint encodes the pixel datatype so the loader knows which
     // typed array to read into; "format" disambiguates from older v2 .bin.
+    // network/impassable/bridges reflect state (not the grid `result`) and
+    // are unconditionally present here — a graph-mode bundle's zip carries
+    // them too (downloadBundle), so they must not be gated on `result` or a
+    // null-result (graph) call would wrongly drop their descriptors.
     md.outputs = {
-      energy: result.energy ? {
-        format: "GeoTIFF",
-        type:   "Float32",
-        shape:  [dem.H, dem.W],
-        file:   "energy.tif",
-      } : null,
-      passes: result.passes ? {
-        format: "GeoTIFF",
-        type:   "Float64",
-        shape:  [dem.H, dem.W],
-        file:   "passes.tif",
-      } : null,
-      // Alternate ("compare with the unconstrained / no-network") scenario: the
-      // unconstrained energy + passes and the precomputed (network-masked, interp-
-      // filled) difference field — what the difference/unconstrained views render.
-      // Only the GRID compare path writes these (graph-mode alt lives on
-      // state.lastGraphResult, not exported yet) — gate the descriptors so the
-      // metadata never claims a file the zip omits.
-      energyUnconstrained: (!state.lastGraphResult && result.energyAlt?.unconstrained) ? {
-        format: "GeoTIFF", type: "Float32", shape: [dem.H, dem.W], file: "energy_unconstrained.tif",
-      } : null,
-      energyDifference: (!state.lastGraphResult && result.energyAlt?.difference) ? {
-        format: "GeoTIFF", type: "Float32", shape: [dem.H, dem.W], file: "energy_difference.tif",
-      } : null,
-      passesUnconstrained: (!state.lastGraphResult && result.passesAlt?.unconstrained) ? {
-        format: "GeoTIFF", type: "Float64", shape: [dem.H, dem.W], file: "passes_unconstrained.tif",
-      } : null,
       network: state.networkMask ? {
         format: "GeoTIFF",
         type:   "Uint8",
@@ -9367,19 +10017,52 @@ function buildMetadata(result, withOutputs = true) {
         format: "GeoJSON",
         file:   "bridges.geojson",
       } : null,
-      routes: result.routes && result.routes.length ? {
+    };
+    // The rest describe grid-compute outputs — gate the whole set on
+    // `result` so the metadata never claims a file the zip omits (a caller
+    // passing result:null, e.g. downloadBundle in graph mode, gets none of
+    // these; the zip writers there are gated on !graphMode too).
+    if (result) {
+      md.outputs.energy = result.energy ? {
+        format: "GeoTIFF",
+        type:   "Float32",
+        shape:  [dem.H, dem.W],
+        file:   "energy.tif",
+      } : null;
+      md.outputs.passes = result.passes ? {
+        format: "GeoTIFF",
+        type:   "Float64",
+        shape:  [dem.H, dem.W],
+        file:   "passes.tif",
+      } : null;
+      // Alternate ("compare with the unconstrained / no-network") scenario: the
+      // unconstrained energy + passes and the precomputed (network-masked, interp-
+      // filled) difference field — what the difference/unconstrained views render.
+      // Only the GRID compare path writes these (graph-mode alt lives on
+      // state.lastGraphResult, not exported yet) — kept as a redundant guard,
+      // harmless now that the caller already passes result:null for graph mode.
+      md.outputs.energyUnconstrained = (!state.lastGraphResult && result.energyAlt?.unconstrained) ? {
+        format: "GeoTIFF", type: "Float32", shape: [dem.H, dem.W], file: "energy_unconstrained.tif",
+      } : null;
+      md.outputs.energyDifference = (!state.lastGraphResult && result.energyAlt?.difference) ? {
+        format: "GeoTIFF", type: "Float32", shape: [dem.H, dem.W], file: "energy_difference.tif",
+      } : null;
+      md.outputs.passesUnconstrained = (!state.lastGraphResult && result.passesAlt?.unconstrained) ? {
+        format: "GeoTIFF", type: "Float64", shape: [dem.H, dem.W], file: "passes_unconstrained.tif",
+      } : null;
+      md.outputs.routes = result.routes && result.routes.length ? {
         format: "GeoJSON",
         file:   "routes.geojson",
-      } : null,
-      path: result.path && result.path.length ? {
+      } : null;
+      md.outputs.path = result.path && result.path.length ? {
         format: "GeoJSON",
         file:   "path.geojson",
-      } : null,
-      pathAlt: result.pathAlt && result.pathAlt.length ? {
+      } : null;
+      md.outputs.pathAlt = result.pathAlt && result.pathAlt.length ? {
         format: "GeoJSON",
         file:   "path_alt.geojson",
-      } : null,
-    };
+      } : null;
+    }
   }
   return md;
 }
@@ -9401,7 +10084,7 @@ const WGS84_WKT =
 
 async function exportRenderedImages() {
   try {
-    if (!state.dem || !state.lastResult) {
+    if (!state.dem || (!state.lastResult && !state.lastGraphResult)) {
       status.textContent = t("status.nothing_rendered");
       return;
     }
@@ -9416,8 +10099,15 @@ async function exportRenderedImages() {
 
     const { dx, dy, originX, originY, isGeographic } = state.dem;
     // World file: pixel size, rotation terms, centre of the top-left pixel.
+    // The dataURLs come from renderFieldToDataURL/renderDualPassesToDataURL,
+    // which stride-downsample the canvas via overlayCanvasDims above
+    // RELIEF_MAX_CANVAS_PX cells — the world file must use the same strided
+    // pixel size or the exported PNG is mis-georeferenced on huge DEMs.
+    const { stride } = overlayCanvasDims(state.dem.W, state.dem.H);
+    const sdx = dx * stride;
+    const sdy = dy * stride;
     const worldFile =
-      `${dx}\n0\n0\n${-dy}\n${originX + dx / 2}\n${originY - dy / 2}\n`;
+      `${sdx}\n0\n0\n${-sdy}\n${originX + sdx / 2}\n${originY - sdy / 2}\n`;
 
     const zip = new JSZip();
     for (const [name, url] of items) {
@@ -9467,10 +10157,19 @@ async function downloadBundle() {
     const graphMode = !!state.lastGraphResult;
     const r = state.lastResult || {}; // graph-only bundles carry no grid result
     const dem = state.dem;
-    const md = buildMetadata(state.lastResult, true);
+    // A graph run does NOT clear state.lastResult, so a session that ran a
+    // grid compute before a graph compute would otherwise have buildMetadata
+    // describe (stats/elapsedMs/outputs) the STALE grid result while the zip
+    // below (all gated on !graphMode) omits those files entirely. Passing
+    // null in graph mode makes buildMetadata skip the result-dependent
+    // descriptors/stats altogether (network/impassable/bridges still show).
+    const md = buildMetadata(graphMode ? null : state.lastResult, true);
     if (graphMode) {
       md.outputs = md.outputs || {};
       md.outputs.graphEdges = { format: "GeoJSON", file: "graph_edges.geojson", junctionMode: graphJunctionMode() };
+      // Graph runs carry their own timing separately from md.elapsedMs (which
+      // is null now that result is null) — restore it from the graph result.
+      md.elapsedMs = state.lastGraphResult.result?.elapsedMs ?? null;
     }
 
     const zip = new JSZip();
@@ -9478,8 +10177,16 @@ async function downloadBundle() {
     // Output rasters as GeoTIFFs — the unzipped bundle drops straight into
     // QGIS / any GIS, no .bin-plus-metadata gymnastics. CRS and pixel grid
     // are inherited from the source DEM via tiffMetadataForDem.
+    // Unreachable cells store +Infinity in the energy fields (worker init);
+    // tag GDAL_NODATA so GDAL/QGIS report finite min/max/mean instead of
+    // inf/nan and don't render a washed-out default stretch. geotiff.js
+    // writes it as an ASCII tag and GDAL accepts the literal "inf". Passes
+    // rasters are untouched — 0 there is a legitimate "no passes" value, not
+    // nodata. Pixel values themselves stay Infinity (bundle reload keeps
+    // reconstructing them as-is).
+    const ENERGY_NODATA_MD = { GDAL_NODATA: "inf" };
     if (r.energy && !graphMode) {
-      zip.file("energy.tif",  new Uint8Array(writeRasterAsGeoTIFF(r.energy, dem, "float32")));
+      zip.file("energy.tif",  new Uint8Array(writeRasterAsGeoTIFF(r.energy, dem, "float32", ENERGY_NODATA_MD)));
     }
     if (r.passes && !graphMode) {
       zip.file("passes.tif",  new Uint8Array(writeRasterAsGeoTIFF(r.passes, dem, "float64")));
@@ -9488,10 +10195,10 @@ async function downloadBundle() {
     // the unconstrained energy/passes and the saved difference field, so the
     // difference / unconstrained views survive a reload (not just the toggle).
     if (r.energyAlt?.unconstrained && !graphMode) {
-      zip.file("energy_unconstrained.tif", new Uint8Array(writeRasterAsGeoTIFF(r.energyAlt.unconstrained, dem, "float32")));
+      zip.file("energy_unconstrained.tif", new Uint8Array(writeRasterAsGeoTIFF(r.energyAlt.unconstrained, dem, "float32", ENERGY_NODATA_MD)));
     }
     if (r.energyAlt?.difference && !graphMode) {
-      zip.file("energy_difference.tif", new Uint8Array(writeRasterAsGeoTIFF(r.energyAlt.difference, dem, "float32")));
+      zip.file("energy_difference.tif", new Uint8Array(writeRasterAsGeoTIFF(r.energyAlt.difference, dem, "float32", ENERGY_NODATA_MD)));
     }
     if (r.passesAlt?.unconstrained && !graphMode) {
       zip.file("passes_unconstrained.tif", new Uint8Array(writeRasterAsGeoTIFF(r.passesAlt.unconstrained, dem, "float64")));
@@ -9515,13 +10222,13 @@ async function downloadBundle() {
       zip.file("bridges.geojson", JSON.stringify(bridgesToFC(exportBridges), null, 2));
     }
     if (r.routes && r.routes.length && !graphMode) {
-      zip.file("routes.geojson", JSON.stringify(routesFCFromList(r.routes, dem), null, 2));
+      zip.file("routes.geojson", JSON.stringify(routesFCFromList(r.routes, dem, md.params.mode), null, 2));
     }
     if (r.path && r.path.length && !graphMode) {
       zip.file("path.geojson", JSON.stringify(pathFCFromIndices(r.path, dem, {
         energy: r.pathEnergy,
         length_m: r.pathLengthM,
-      }), null, 2));
+      }, md.params.mode), null, 2));
     }
     // Compare run: the unconstrained best TERRAIN route, so the scenario picker's
     // route comparison comes back on import without a recompute (mirrors energyAlt).
@@ -9530,7 +10237,7 @@ async function downloadBundle() {
         scenario: "terrain",
         energy: r.pathAltEnergy,
         length_m: r.pathAltLengthM,
-      }), null, 2));
+      }, md.params.mode), null, 2));
     }
     // "Follow the vectors" result → per-edge GeoJSON (passes/energy/length).
     if (state.lastGraphResult) {
@@ -9538,6 +10245,21 @@ async function downloadBundle() {
         graphEdgesFC(state.lastGraphResult.graph, state.lastGraphResult.result, dem), null, 2));
     }
 
+    // KNOWN LIMITATION (documented, not fixed here): for a huge compare run
+    // (e.g. 135M cells with passes) the GeoTIFF copies above (~4 GB: energy
+    // f32 + passes f64 + the three *_unconstrained/*_difference variants)
+    // are all held in `zip` at once, and generateAsync({type:"blob"}) then
+    // accumulates the whole archive into a second in-memory buffer on top of
+    // that — plus state.lastResult's own ~3.8 GB. `streamFiles: true` does
+    // NOT fix this (it only changes how each entry's data descriptor is
+    // written, not whether generateAsync's accumulate() buffers the output
+    // blob) — don't add it here as if it were a mitigation. A real fix needs
+    // to never materialise the full zip as one JS buffer at all, e.g.
+    // zip.generateInternalStream(...) piped chunk-by-chunk into a
+    // showSaveFilePicker() FileSystemWritableFileStream (with a fallback to
+    // this Blob path where the File System Access API is unavailable) — out
+    // of scope for this pass; revisit if 100M+-cell compare exports become
+    // a routine workflow.
     const blob = await zip.generateAsync({ type: "blob" });
     const url = URL.createObjectURL(blob);
     const ts = new Date().toISOString().replace(/[:.]/g, "-").replace(/-Z?$/, "");
@@ -9568,17 +10290,47 @@ async function loadBundleFile(file) {
       const zip = await JSZip.loadAsync(await file.arrayBuffer());
       const mdEntry = zip.file("metadata.jsonld") || zip.file("metadata.json");
       if (!mdEntry) throw new Error("No metadata.jsonld inside the archive.");
+      // Zip-bomb guard: JSZip's central-directory parse is cheap, but each
+      // .async() call below fully decompresses that entry into memory — zip
+      // compresses ~1000:1, so a crafted few-hundred-KB bundle could declare
+      // multi-GB members and OOM the tab before any H×W/length check further
+      // down ever runs. `_data.uncompressedSize` is JSZip-internal — guard
+      // with optional chaining so a JSZip upgrade degrades to no-cap rather
+      // than breaking legitimate imports.
+      const entrySize = (e) => e?._data?.uncompressedSize ?? 0;
+      const capEntry = (e, label, cap) => {
+        if (e && entrySize(e) > cap) {
+          throw new Error(`${label}: decompressed size exceeds the safety cap — refusing to load (corrupt or hostile bundle?).`);
+        }
+      };
+      const TEXT_CAP = 64 * 1024 * 1024; // 64 MiB — metadata.jsonld / each .geojson is plain text, never legitimately this big
+      capEntry(mdEntry, "metadata.jsonld", TEXT_CAP);
       md = JSON.parse(await mdEntry.async("string"));
+      // Raster cap: derive the expected cell count from the bundle's OWN
+      // declared dims (parsed above, before any raster .async() call) rather
+      // than whatever DEM happens to be loaded in this tab — a hostile
+      // bundle could otherwise just lie about md.dem.H/W to dodge a
+      // DEM-derived cap. A hard absolute ceiling bounds it even if it lies
+      // about its own dims too. The flagship DEM is ~135M cells (passes.tif
+      // ≈1.08 GB float64) — size generously above that, not from a small
+      // constant, or a legit huge bundle would get rejected.
+      const HARD_CELL_CEILING = 200e6; // generous headroom over the ~135M-cell flagship DEM
+      const bundleCells =
+        Number.isFinite(md?.dem?.H) && Number.isFinite(md?.dem?.W) ? md.dem.H * md.dem.W : null;
+      const cellCap = Math.min(bundleCells ?? (state.dem ? state.dem.H * state.dem.W : 50e6), HARD_CELL_CEILING);
+      const RASTER_CAP = cellCap * 8 + 65536; // float64/passes worst case + TIFF header overhead
       // v3 bundles use GeoTIFFs for the rasters; v2 used raw little-endian
       // .bin dumps. Try .tif first, fall back to .bin so old bundles still
       // load after this change.
       const eTif = zip.file("energy.tif"),  eBin = zip.file("energy.bin");
+      capEntry(eTif, "energy.tif", RASTER_CAP); capEntry(eBin, "energy.bin", RASTER_CAP);
       if (eTif) {
         bin.energy = await readRasterFromGeoTIFF(await eTif.async("arraybuffer"), "float32");
       } else if (eBin) {
         bin.energy = new Float32Array(await eBin.async("arraybuffer"));
       }
       const pTif = zip.file("passes.tif"),  pBin = zip.file("passes.bin");
+      capEntry(pTif, "passes.tif", RASTER_CAP); capEntry(pBin, "passes.bin", RASTER_CAP);
       if (pTif) {
         bin.passes = await readRasterFromGeoTIFF(await pTif.async("arraybuffer"), "float64");
       } else if (pBin) {
@@ -9588,30 +10340,39 @@ async function loadBundleFile(file) {
       // the saved difference field. Held on `bin` so the pending-DEM replay picks
       // them up too; reconstructed onto state.lastResult.energyAlt/passesAlt below.
       const euTif = zip.file("energy_unconstrained.tif");
+      capEntry(euTif, "energy_unconstrained.tif", RASTER_CAP);
       if (euTif) bin.energyUnconstrained = await readRasterFromGeoTIFF(await euTif.async("arraybuffer"), "float32");
       const edTif = zip.file("energy_difference.tif");
+      capEntry(edTif, "energy_difference.tif", RASTER_CAP);
       if (edTif) bin.energyDifference = await readRasterFromGeoTIFF(await edTif.async("arraybuffer"), "float32");
       const puTif = zip.file("passes_unconstrained.tif");
+      capEntry(puTif, "passes_unconstrained.tif", RASTER_CAP);
       if (puTif) bin.passesUnconstrained = await readRasterFromGeoTIFF(await puTif.async("arraybuffer"), "float64");
       const nTif = zip.file("network.tif"), nBin = zip.file("network.bin");
+      capEntry(nTif, "network.tif", RASTER_CAP); capEntry(nBin, "network.bin", RASTER_CAP);
       if (nTif) {
         bin.network = await readRasterFromGeoTIFF(await nTif.async("arraybuffer"), "uint8");
       } else if (nBin) {
         bin.network = new Uint8Array(await nBin.async("arraybuffer"));
       }
       const iTif = zip.file("impassable.tif");
+      capEntry(iTif, "impassable.tif", RASTER_CAP);
       if (iTif) bin.impassable = await readRasterFromGeoTIFF(await iTif.async("arraybuffer"), "uint8");
       const brGeo = zip.file("bridges.geojson");
+      capEntry(brGeo, "bridges.geojson", TEXT_CAP);
       if (brGeo) { try { bin.bridgesFC = JSON.parse(await brGeo.async("string")); } catch {} }
       // Route/path vector geometry. These ride alongside the rasters and get
       // re-rendered (converted back to cell indices) once a matching DEM is
       // present — no recompute needed. Held in `bin` so the pending-bundle
       // replay (loadDemFromArrayBuffer) picks them up too.
       const rGeo = zip.file("routes.geojson");
+      capEntry(rGeo, "routes.geojson", TEXT_CAP);
       if (rGeo) { try { bin.routesFC = JSON.parse(await rGeo.async("string")); } catch {} }
       const pGeo = zip.file("path.geojson");
+      capEntry(pGeo, "path.geojson", TEXT_CAP);
       if (pGeo) { try { bin.pathFC = JSON.parse(await pGeo.async("string")); } catch {} }
       const paGeo = zip.file("path_alt.geojson");
+      capEntry(paGeo, "path_alt.geojson", TEXT_CAP);
       if (paGeo) { try { bin.pathAltFC = JSON.parse(await paGeo.async("string")); } catch {} }
     } else if (/\.jsonld?$|\.json$/i.test(file.name)) {
       md = JSON.parse(await file.text());
@@ -9642,27 +10403,51 @@ function applyMetadataToUI(md, bin = {}) {
   // user's saved language / params / layer order / max-workers on disk.
   if (md.config) { try { applyConfig(md.config, { persist: false }); } catch (e) { console.warn("[bundle] applyConfig failed", e); } }
 
-  // ---- DEM dimension check -----------------------------------------------
+  // Graph-mode bundles (network.graphMode / outputs.graphEdges) can't restore
+  // their result — graph_edges.geojson needs the full graph object, not just
+  // edge geometry (see CHANGELOG) — and the vector network LINES themselves
+  // don't travel in the bundle either (only the rasterised network.tif
+  // mask does). Detected here so the final status cascade below can warn
+  // instead of silently letting the next Compute click fall back to the
+  // raster engine (dispatchCompute only takes the graph path when
+  // state.networkLines is populated).
+  const graphBundle = !!(md.outputs?.graphEdges || md.network?.graphMode);
+
+  // ---- DEM dimension + georeferencing check ------------------------------
   // Binary outputs (energy/passes/network) are sized to the bundle's DEM.
   // Replaying them onto a different DEM would corrupt the visualisation,
-  // so we gate the binary path on a strict H×W match. Parameters/UI still
-  // get applied — the user is told to re-Compute.
+  // so we gate the binary path on a strict match. Parameters/UI still get
+  // applied — the user is told to re-Compute.
   const bundleH = md.dem?.H, bundleW = md.dem?.W;
   const demDimsMatch =
     state.dem && Number.isFinite(bundleH) && Number.isFinite(bundleW)
       ? state.dem.H === bundleH && state.dem.W === bundleW
       : null; // null = unknown (no DEM loaded yet, or bundle didn't record dims)
+  // demMatch additionally checks the geotransform (bundleDemMatch) — same
+  // H×W is not proof of the same DEM: many DEM products (all 1° SRTM/FABDEM
+  // tiles, say) share pixel dimensions while covering a different area, and
+  // replaying tile-A rasters/routes over tile-B's extent renders silently
+  // wrong (lonLatToPixel's own comment flags this same invariant).
+  const demMatch = bundleDemMatch(md.dem, state.dem);
+  // True only when dims matched but the geotransform didn't — used below to
+  // pick the right status message (a dims mismatch already has its own).
+  const demExtentMismatch = !!state.dem && demDimsMatch === true && demMatch === false;
   if (state.dem && demDimsMatch === false) {
     console.warn(
       `[bundle] DEM dimension mismatch: bundle ${bundleW}×${bundleH}, ` +
       `loaded ${state.dem.W}×${state.dem.H}. Skipping binary replay.`
     );
+  } else if (demExtentMismatch) {
+    console.warn(
+      `[bundle] DEM extent mismatch despite matching ${bundleW}×${bundleH} dims ` +
+      `— likely a different tile at the same size. Skipping binary replay.`
+    );
   }
 
-  // No DEM yet (or the wrong one): hold the full bundle — rasters included —
-  // so loadDemFromArrayBuffer can re-apply it when a matching DEM lands.
-  // A successful full application clears the slot.
-  state.pendingBundle = (!state.dem || demDimsMatch === false) ? { md, bin } : null;
+  // No DEM yet (or the wrong one, dims OR georeferencing): hold the full
+  // bundle — rasters included — so loadDemFromArrayBuffer can re-apply it
+  // when a matching DEM lands. A successful full application clears the slot.
+  state.pendingBundle = (!state.dem || demMatch === false) ? { md, bin } : null;
 
   set("mode", p.mode);
   // v2 physics inputs (older bundles carried α/β/η, which no longer map cleanly —
@@ -9687,7 +10472,12 @@ function applyMetadataToUI(md, bin = {}) {
   check("maximize", p.maximize);
   set("maximize-length", p.maximizeLength);
   set("n-refs", p.nRefs);
-  set("ref-source", p.refSource);
+  // Legacy bundles may carry the pre-rename "click" value (or any other
+  // stale string) — only accept values the current #ref-sampling select
+  // actually has, so we never write garbage into the UI.
+  if (["random", "sobol", "halton", "census"].includes(p.refSource)) {
+    set("ref-sampling", p.refSource);
+  }
 
   const v = md.viz || {};
   if (v.fieldColormap && COLORMAPS[v.fieldColormap]) {
@@ -9775,6 +10565,14 @@ function applyMetadataToUI(md, bin = {}) {
   // energy-budget field — resync those too.
   const maximizeCheck = document.getElementById("maximize");
   if (maximizeCheck) maximizeCheck.dispatchEvent(new Event("change"));
+  // #mode toggles the "Budget applies to" (e-max-mode) row's visibility —
+  // v3 app-exported bundles get this for free via applyConfig's
+  // PERSIST_REFIRE, but bundles with no md.config (census/CLI bundles,
+  // pre-v40-era bundles) restore set("mode", ...) above with no change
+  // event, leaving the row's visibility stale. Idempotent to re-fire even
+  // when applyConfig already did (just toggles a style, no recompute).
+  const modeSel = document.getElementById("mode");
+  if (modeSel) modeSel.dispatchEvent(new Event("change"));
 
   // Restore src/dst pixel positions. If a DEM is loaded that matches the
   // bundle's DEM dimensions, place markers right away; otherwise hold the
@@ -9794,13 +10592,13 @@ function applyMetadataToUI(md, bin = {}) {
   // Also skip in density mode — the "Pick points" UI is hidden / disabled
   // there and stale src/dst markers would just clutter the map.
   const densityOnNow = !!document.getElementById("want-density")?.checked;
-  if (state.dem && state.src && demDimsMatch !== false && !densityOnNow) {
+  if (state.dem && state.src && demMatch !== false && !densityOnNow) {
     if (state.srcMarker) state.srcMarker.remove();
     state.srcMarker = placeMarker(state.src, "Source");
     document.getElementById("src-display").textContent = `r=${state.src[0]}, c=${state.src[1]}`;
     document.getElementById("src-display").classList.add("set");
   }
-  if (state.dem && state.dst && demDimsMatch !== false && !densityOnNow) {
+  if (state.dem && state.dst && demMatch !== false && !densityOnNow) {
     if (state.dstMarker) state.dstMarker.remove();
     state.dstMarker = placeMarker(state.dst, "Destination");
     document.getElementById("dst-display").textContent = `r=${state.dst[0]}, c=${state.dst[1]}`;
@@ -9811,7 +10609,7 @@ function applyMetadataToUI(md, bin = {}) {
   // Re-stamp the FIFO ring exactly as it was. addRefPoint pushes + numbers
   // the markers and respects enforceRefCap, so the cap field set above
   // governs how many actually survive.
-  if (Array.isArray(p.refPoints) && state.dem && demDimsMatch !== false) {
+  if (Array.isArray(p.refPoints) && state.dem && demMatch !== false) {
     // Clear whatever is on the map from a previous bundle / run.
     if (state.refMarkers) for (const m of state.refMarkers) m.remove();
     state.refMarkers = [];
@@ -9826,7 +10624,7 @@ function applyMetadataToUI(md, bin = {}) {
   // Only when we have a DEM, dims match, and the byte length matches H*W.
   // Otherwise leave the slot empty — better to recompute than to load a
   // mask that points at the wrong cells.
-  if (bin.network && state.dem && demDimsMatch === true) {
+  if (bin.network && state.dem && demMatch === true) {
     const N = state.dem.H * state.dem.W;
     if (bin.network.length === N) {
       state.networkMask = bin.network;
@@ -9851,7 +10649,7 @@ function applyMetadataToUI(md, bin = {}) {
   // After the network mask (corridors depend on it) and under the same dim
   // check. We only have the DEM-aligned resampled mask here, not the source
   // raster, so the Invert toggle won't re-resample (already baked in).
-  if (bin.impassable && state.dem && demDimsMatch === true) {
+  if (bin.impassable && state.dem && demMatch === true) {
     const N = state.dem.H * state.dem.W;
     if (bin.impassable.length === N) {
       let cells = 0;
@@ -9874,7 +10672,7 @@ function applyMetadataToUI(md, bin = {}) {
   // Re-derive decks from the saved GeoJSON (endA/endB depend on the grid, so
   // only under a dimension match). installBridgesFromWays handles overlay +
   // invalidation, mirroring a fresh OSM pull.
-  if (bin.bridgesFC && state.dem && demDimsMatch === true) {
+  if (bin.bridgesFC && state.dem && demMatch === true) {
     const ways = (bin.bridgesFC.features || [])
       .filter((f) => f.geometry?.type === "LineString" && Array.isArray(f.geometry.coordinates))
       .map((f) => ({
@@ -9898,7 +10696,7 @@ function applyMetadataToUI(md, bin = {}) {
   // subset is fine — a maximize bundle has a path but no top-N routes, a
   // density bundle has neither.
   let restored = false;
-  if (state.dem && demDimsMatch === true) {
+  if (state.dem && demMatch === true) {
     const N = state.dem.H * state.dem.W;
     const energyOk = bin.energy && bin.energy.length === N;
     const passesOk = bin.passes && bin.passes.length === N;
@@ -9943,6 +10741,14 @@ function applyMetadataToUI(md, bin = {}) {
   } else if (state.dem && demDimsMatch === false) {
     status.innerHTML =
       `<span style="color:#ff9d3d">${t("status.bundle_dem_mismatch", bundleW, bundleH, state.dem.W, state.dem.H)}</span>`;
+  } else if (demExtentMismatch) {
+    status.innerHTML =
+      `<span style="color:#ff9d3d">${t("status.bundle_dem_extent_mismatch", bundleW, bundleH)}</span>`;
+  } else if (graphBundle && !(state.networkLines && state.networkLines.length)) {
+    // Graph-mode bundle, no vector network loaded: warn instead of letting
+    // the user believe Compute will reproduce the graph result — it won't,
+    // it'll silently run the raster engine (see graphBundle's definition).
+    status.innerHTML = `<span style="color:#ff9d3d">${t("status.bundle_graph_not_restored")}</span>`;
   } else if (state.dem && (state.src || (p.wantDensity && state.refPoints?.length))) {
     status.textContent = t("status.bundle_params_loaded");
   } else if (!state.dem) {

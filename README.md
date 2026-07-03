@@ -41,8 +41,13 @@ first load).
 - **Multi-reference density** — passes counts summed over K reference points
   (clicked, or sampled pseudo-/quasi-randomly via Sobol or Halton sequences),
   normalised to a density field; magnitudes grow ~linearly with K, so compare
-  runs only at matching K. Runs on a multi-core **worker pool** (sized by
-  cores + memory); an optional native Rust backend accelerates large runs.
+  runs only at matching K. Under an energy budget, cells outside it never
+  settle and the field truncates at the frontier (a saturation/border bias,
+  sharper on small DEMs or tight budgets); on an exact cost tie between two
+  candidate paths, which one accrues the pass is a search-order artifact of
+  the heap, not a physical preference. Runs on a multi-core **worker pool**
+  (sized by cores + memory); an optional native Rust backend accelerates
+  large runs.
 - **Energy budgets** — prune the search at a maximum energy; in round-trip mode,
   cap each leg or the out-plus-back total.
 - **Maximize mode** — invert the optimisation to find the most *expensive*

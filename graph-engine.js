@@ -154,7 +154,7 @@
   // per-line { h0, h1, total } shape (h0/h1 become the chain line evaluated at
   // the member's own ends, orientation-corrected), so the flattening in
   // buildGraph's emit loop needs no change. Single-way decks are untouched.
-  function chainDeckFlattening(lines, lineMeta, deckOf, snapTol, height, mask, H, W) {
+  function chainDeckFlattening(lines, lineMeta, deckOf, snapTol) {
     // Endpoint identity: the same quantisation nodeOf uses, PLUS the layer so
     // decks at different levels never chain through a shared (x, y).
     const keyOf = (li, p) => (lineMeta[li].layer || 0) + "|" + Math.round(p[0] / snapTol) + "|" + Math.round(p[1] / snapTol);
@@ -211,13 +211,18 @@
         cur = keyOf(next.li, ln[next.end === 0 ? ln.length - 1 : 0]);
       }
       if (walk.length !== compLines.length) continue; // defensive: keep per-way
-      // Ground elevations at the chain's two OUTER endpoints (actual vertex
-      // coords of the terminal lines, not the quantised keys).
+      // Elevations at the chain's two OUTER endpoints. Reuse the terminal
+      // members' OWN (pre-chain) deckOf.h0/h1 rather than re-sampling the
+      // DEM: those already prefer a mapped OSM `ele` tag over sampleHeight
+      // (see the deckOf construction above), so a chain whose outer ways
+      // carry surveyed elevations stays consistent with that preference
+      // instead of silently reverting to the DEM. h0 corresponds to the
+      // line's own first vertex, h1 to its last — orientation-match via
+      // `forward` the same way pA/pB used to (the actual vertex coords,
+      // still implicit in `deckOf`'s own h0/h1 assignment).
       const first = walk[0], last = walk[walk.length - 1];
-      const pA = lines[first.li][first.forward ? 0 : lines[first.li].length - 1];
-      const pB = lines[last.li][last.forward ? lines[last.li].length - 1 : 0];
-      const gA = sampleHeight(height, mask, H, W, pA[0], pA[1]);
-      const gB = sampleHeight(height, mask, H, W, pB[0], pB[1]);
+      const gA = first.forward ? deckOf[first.li].h0 : deckOf[first.li].h1;
+      const gB = last.forward ? deckOf[last.li].h1 : deckOf[last.li].h0;
       let total = 0; for (const w of walk) total += w.len;
       if (!(total > 0)) total = 1;
       // Rewrite each member's h0/h1 from its position along the chain.
@@ -260,15 +265,22 @@
         if (!m || !m.deck) continue;
         const ln = lines[li];
         if (ln.length < 2) continue;
-        const h0 = sampleHeight(height, mask, H, W, ln[0][0], ln[0][1]);
-        const h1 = sampleHeight(height, mask, H, W, ln[ln.length - 1][0], ln[ln.length - 1][1]);
+        // A mapped OSM `ele` tag (surveyed deck elevation) takes precedence
+        // over the DEM sample at the deck's own ends — the DEM can be
+        // contaminated under large viaducts (FABDEM leakage), and this keeps
+        // the graph engine's deck cost in agreement with the raster portal
+        // model (app.js buildPortalAdj also prefers ele over the DEM). Absent
+        // ele (undefined/NaN, e.g. the .gpkg live-load path, which never sets
+        // eleA/eleB) reproduces today's sampleHeight-only behaviour exactly.
+        const h0 = Number.isFinite(m.eleA) ? m.eleA : sampleHeight(height, mask, H, W, ln[0][0], ln[0][1]);
+        const h1 = Number.isFinite(m.eleB) ? m.eleB : sampleHeight(height, mask, H, W, ln[ln.length - 1][0], ln[ln.length - 1][1]);
         let total = 0;
         for (let k = 0; k + 1 < ln.length; k++) total += Math.hypot(ln[k + 1][0] - ln[k][0], ln[k + 1][1] - ln[k][1]);
         deckOf[li] = { h0, h1, total: total > 0 ? total : 1 };
       }
       // Multi-way bridges: re-flatten simple same-layer deck chains end-to-end
       // (see chainDeckFlattening) so shared joints don't V-dip to the ground.
-      chainDeckFlattening(lines, lineMeta, deckOf, snapTol, height, mask, H, W);
+      chainDeckFlattening(lines, lineMeta, deckOf, snapTol);
     }
 
     // Flatten polylines into segments [rA,cA,zA, rB,cB,zB, lineId]; segArc0[s]
@@ -294,77 +306,150 @@
     // Crossings mode: find intersections via a cell-bucket spatial hash, then
     // record split parameters per segment. Skip crossings whose interpolated Z
     // differs by > zTol on the two segments (bridges/overpasses) when Z exists.
-    const splits = segs.map(() => []); // per seg: list of t in (0,1)
+    // Each entry in splits[s] is either a plain number t (proper crossing —
+    // both segments split at the SAME computed point, so nodeOf's quantised
+    // merge unifies them without help) or an override object { t, or, oc }
+    // (T-junction cut — nodeOf must key off the touching ENDPOINT's own
+    // coordinates, not the perpendicular projection, or the two can round to
+    // different quantised nodes; see the T-JUNCTIONS block below).
+    const splits = segs.map(() => []); // per seg: list of t | {t,or,oc} in (0,1)
     if (junctionMode === "crossings") {
-      const buckets = new Map(); // "ri|ci" -> [segIdx,…]
-      const addBucket = (key, idx) => { let a = buckets.get(key); if (!a) { a = []; buckets.set(key, a); } a.push(idx); };
+      // ---- candidate-pair bucket hash --------------------------------------
+      // Packed-integer keys over the segments' OWN bounding box (not an
+      // assumed worst case), counting-sorted into flat CSR arrays instead of
+      // a Map<string,Array> — at the app's 2M-vertex network cap the old
+      // string-keyed Map allocated one JS object PER UNIQUE key (~10-20M of
+      // them) plus per-segment Set<string> churn; that per-key object
+      // allocation, not the key encoding, was the dominant transient-memory
+      // cost. The bbox is bounded by the DEM's own cell count (the app
+      // already holds height/mask arrays of that size), so the flat count
+      // table costs no more than arrays this app already resident-holds; a
+      // stray vertex that blows the bbox out anyway (the caller's
+      // bbox-intersection prefilter does not clip individual line geometry)
+      // falls back to the safe, unbounded string-keyed Map below rather than
+      // risk an oversized typed array or aliasing two distinct cells.
+      let rMin = Infinity, rMax = -Infinity, cMin = Infinity, cMax = -Infinity;
       for (let s = 0; s < segs.length; s++) {
         const [r1, c1, , r2, c2] = segs[s];
-        // Conservative bucketing. The candidate-pair scan only compares
-        // segments that SHARE a bucket cell, so the rasterisation must
-        // guarantee that two segments which truly intersect both insert the
-        // cell holding the intersection point. We step finely enough that
-        // consecutive samples are ≤1 cell apart on each axis (axis-summed
-        // step count), and insert each sample's 3×3 neighbourhood — so the
-        // intersection cell (within Chebyshev distance 1 of some sample on
-        // each segment) is inserted by both. The old length-stepped DDA
-        // inserted only a single floor cell per Euclidean step and skipped
-        // cells on near-diagonal segments, silently dropping ~3–10% of real
-        // crossings (they then stayed in separate connected components).
+        if (r1 < rMin) rMin = r1; if (r2 < rMin) rMin = r2;
+        if (r1 > rMax) rMax = r1; if (r2 > rMax) rMax = r2;
+        if (c1 < cMin) cMin = c1; if (c2 < cMin) cMin = c2;
+        if (c1 > cMax) cMax = c1; if (c2 > cMax) cMax = c2;
+      }
+      // Pad by 2: 1 for floor/ceil rounding at the extremes, 1 more for the
+      // 3×3 dilation the rasterisation below adds around each sample.
+      const rLo = segs.length ? Math.floor(rMin) - 2 : 0, rHi = segs.length ? Math.ceil(rMax) + 2 : 0;
+      const cLo = segs.length ? Math.floor(cMin) - 2 : 0, cHi = segs.length ? Math.ceil(cMax) + 2 : 0;
+      const rSpan = rHi - rLo + 1, cSpan = cHi - cLo + 1;
+      const nCells = rSpan * cSpan;
+      const boundedOk = segs.length === 0 || (Number.isFinite(nCells) && nCells > 0 && nCells <= Math.max(4 * H * W, 1 << 20));
+
+      // Rasterise one segment's dilated sample cells, deduped, calling
+      // visit(key) once per unique cell. Run twice (count, then fill) so the
+      // flat CSR build needs no per-segment array storage between passes.
+      const rasterizeSeg = (s, keyOf, visit) => {
+        const [r1, c1, , r2, c2] = segs[s];
         const steps = Math.max(1, Math.ceil(Math.abs(r2 - r1)) + Math.ceil(Math.abs(c2 - c1)));
         const seen = new Set(); // de-dupe this segment's own inserts
         for (let i = 0; i <= steps; i++) {
           const rr = Math.floor(r1 + (r2 - r1) * (i / steps));
           const cc = Math.floor(c1 + (c2 - c1) * (i / steps));
           for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-            const key = (rr + dr) + "|" + (cc + dc);
-            if (seen.has(key)) continue;
+            const key = keyOf(rr + dr, cc + dc);
+            if (key == null || seen.has(key)) continue;
             seen.add(key);
-            addBucket(key, s);
+            visit(key);
           }
         }
+      };
+
+      let bucketHead, bucketItems; // boundedOk path: CSR over packed integer keys
+      let bucketMap;               // fallback path: Map<string,Array> (unbounded extent)
+      const packedKey = (rr, cc) => (rr - rLo) * cSpan + (cc - cLo);
+      if (boundedOk) {
+        const counts = new Uint32Array(nCells);
+        for (let s = 0; s < segs.length; s++) rasterizeSeg(s, packedKey, (key) => { counts[key]++; });
+        bucketHead = new Uint32Array(nCells + 1);
+        for (let k = 0; k < nCells; k++) bucketHead[k + 1] = bucketHead[k] + counts[k];
+        const cursor = bucketHead.slice(0, nCells); // per-key write position (pass 2)
+        bucketItems = new Int32Array(bucketHead[nCells]);
+        for (let s = 0; s < segs.length; s++) rasterizeSeg(s, packedKey, (key) => { bucketItems[cursor[key]++] = s; });
+      } else {
+        bucketMap = new Map(); // "ri|ci" -> [segIdx,…]
+        const addBucket = (key, idx) => { let a = bucketMap.get(key); if (!a) { a = []; bucketMap.set(key, a); } a.push(idx); };
+        const strKey = (rr, cc) => rr + "|" + cc;
+        for (let s = 0; s < segs.length; s++) rasterizeSeg(s, strKey, (key) => addBucket(key, s));
       }
+      // Look up candidate segment indices for a raw (unshifted) cell; returns
+      // an array (fresh, safe to iterate/discard) or null if empty/out of range.
+      const lookupCell = boundedOk
+        ? (rr, cc) => {
+            const key = packedKey(rr, cc);
+            if (key < 0 || key >= nCells) return null;
+            const start = bucketHead[key], end = bucketHead[key + 1];
+            return end > start ? bucketItems.subarray(start, end) : null;
+          }
+        : (rr, cc) => bucketMap.get(rr + "|" + cc) || null;
+
       const tested = new Set();
-      for (const arr of buckets.values()) {
-        for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) {
-          const a = arr[i], b = arr[j];
-          if (segs[a][6] === segs[b][6]) continue;          // same polyline
-          const pk = a < b ? a * segs.length + b : b * segs.length + a;
-          if (tested.has(pk)) continue; tested.add(pk);
-          const A = segs[a], B = segs[b];
-          const hit = segIntersect(A[0], A[1], A[3], A[4], B[0], B[1], B[3], B[4], eps);
-          if (!hit) continue;
-          // Phase C: a deck (bridge/tunnel) crossing a way at a DIFFERENT layer
-          // is a vertical separation (overpass), not a junction — don't connect.
-          if (lineMeta) {
-            const mA = lineMeta[A[6]], mB = lineMeta[B[6]];
-            if ((mA?.deck || mB?.deck) && ((mA?.layer || 0) !== (mB?.layer || 0))) continue;
+      if (boundedOk) {
+        for (let k = 0; k < nCells; k++) {
+          const start = bucketHead[k], end = bucketHead[k + 1];
+          if (end - start < 2) continue;
+          for (let i = start; i < end; i++) for (let j = i + 1; j < end; j++) {
+            testPair(bucketItems[i], bucketItems[j]);
           }
-          if (anyZ) {
-            const zA = A[2] + (A[5] - A[2]) * hit.t, zB = B[2] + (B[5] - B[2]) * hit.u;
-            if (Number.isFinite(zA) && Number.isFinite(zB) && Math.abs(zA - zB) > zTol) continue;
-          }
-          splits[a].push(hit.t); splits[b].push(hit.u);
+        }
+      } else {
+        for (const arr of bucketMap.values()) {
+          for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) testPair(arr[i], arr[j]);
         }
       }
-      // T-JUNCTIONS: a line ENDPOINT resting on another line's segment
-      // INTERIOR is a junction too (non-noded .gpkg / hand-drawn networks),
-      // but segIntersect only finds PROPER crossings — the touch has u at 0/1
-      // and is skipped, silently splitting the network into components. For
-      // each polyline endpoint, find segments of OTHER lines passing within
-      // snapTol (candidates via the same bucket hash — the endpoint's 3×3
-      // neighbourhood covers the segments' own ±1 dilation) and split them at
-      // the perpendicular projection; the quantised node-merge (nodeOf) then
-      // unifies the endpoint with the cut.
+      function testPair(a, b) {
+        if (segs[a][6] === segs[b][6]) return;          // same polyline
+        const pk = a < b ? a * segs.length + b : b * segs.length + a;
+        if (tested.has(pk)) return; tested.add(pk);
+        const A = segs[a], B = segs[b];
+        const hit = segIntersect(A[0], A[1], A[3], A[4], B[0], B[1], B[3], B[4], eps);
+        if (!hit) return;
+        // Phase C: a deck (bridge/tunnel) crossing a way at a DIFFERENT layer
+        // is a vertical separation (overpass), not a junction — don't connect.
+        if (lineMeta) {
+          const mA = lineMeta[A[6]], mB = lineMeta[B[6]];
+          if ((mA?.deck || mB?.deck) && ((mA?.layer || 0) !== (mB?.layer || 0))) return;
+        }
+        if (anyZ) {
+          const zA = A[2] + (A[5] - A[2]) * hit.t, zB = B[2] + (B[5] - B[2]) * hit.u;
+          if (Number.isFinite(zA) && Number.isFinite(zB) && Math.abs(zA - zB) > zTol) return;
+        }
+        splits[a].push(hit.t); splits[b].push(hit.u);
+      }
+      // T-JUNCTIONS: a line VERTEX (endpoint OR interior) resting on another
+      // line's segment INTERIOR is a junction too (non-noded .gpkg /
+      // hand-drawn networks), but segIntersect only finds PROPER crossings —
+      // the touch has u at 0/1 and is skipped, silently splitting the network
+      // into components. For each polyline vertex, find segments of OTHER
+      // lines passing within snapTol (candidates via the same bucket hash —
+      // the vertex's 3×3 neighbourhood covers the segments' own ±1 dilation)
+      // and split them at the perpendicular projection Q. The cut node is
+      // placed AT the vertex P's own coordinates (an override carried on the
+      // split entry), not at Q, so nodeOf's quantised merge is GUARANTEED to
+      // unify P with the cut — P and Q can be up to snapTol apart and round
+      // to different quantised keys on a per-axis coin flip if the cut were
+      // placed at Q instead. Every polyline vertex (not just the two
+      // endpoints) is checked: an interior vertex resting on another line's
+      // interior is the same failure class one vertex inward, and the emit
+      // loop already creates a node at every vertex regardless.
       for (let li = 0; li < lines.length; li++) {
         const ln = lines[li];
         if (ln.length < 2) continue;
-        for (const P of [ln[0], ln[ln.length - 1]]) {
+        for (let vi = 0; vi < ln.length; vi++) {
+          const P = ln[vi];
           const pr = P[0], pc = P[1], pz = P.length > 2 ? P[2] : NaN;
           const rr = Math.floor(pr), cc = Math.floor(pc);
           const cand = new Set();
           for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-            const arr = buckets.get((rr + dr) + "|" + (cc + dc));
+            const arr = lookupCell(rr + dr, cc + dc);
             if (arr) for (const s of arr) cand.add(s);
           }
           for (const s of cand) {
@@ -389,7 +474,7 @@
               const zS = S[2] + (S[5] - S[2]) * t;
               if (Number.isFinite(pz) && Number.isFinite(zS) && Math.abs(pz - zS) > zTol) continue;
             }
-            splits[s].push(t);
+            splits[s].push({ t, or: pr, oc: pc });          // cut AT P, not at Q
           }
         }
       }
@@ -425,14 +510,28 @@
       const deck = deckOf[segs[s][6]];
       const segLenCells = deck ? Math.hypot(r2 - r1, c2 - c1) : 0;
       const ts = splits[s];
+      // Normalise mixed plain-number (crossing, no override) / {t,or,oc}
+      // (T-junction, override coords = the touching vertex) entries to a
+      // common shape, then sort by t; the segment's own endpoints (t=0/1)
+      // carry no override — nodeOf must key off the segment's own vertices
+      // there, which it already does via the fallback below.
       let cuts;
-      if (ts.length === 0) cuts = [0, 1];
-      else { cuts = ts.slice().sort((x, y) => x - y); cuts.unshift(0); cuts.push(1); }
+      if (ts.length === 0) cuts = [{ t: 0 }, { t: 1 }];
+      else {
+        cuts = ts.map((v) => (typeof v === "number" ? { t: v } : v));
+        cuts.sort((x, y) => x.t - y.t);
+        cuts.unshift({ t: 0 }); cuts.push({ t: 1 });
+      }
       for (let k = 0; k + 1 < cuts.length; k++) {
-        const ta = cuts[k], tb = cuts[k + 1];
+        const ca = cuts[k], cb = cuts[k + 1];
+        const ta = ca.t, tb = cb.t;
         if (tb - ta < eps) continue;
-        const na = nodeOf(r1 + (r2 - r1) * ta, c1 + (c2 - c1) * ta);
-        const nb = nodeOf(r1 + (r2 - r1) * tb, c1 + (c2 - c1) * tb);
+        // T-junction cuts place the node AT the touching vertex's own
+        // coordinates (ca.or/oc) — geometrically equivalent (within snapTol
+        // of the true perpendicular projection) but GUARANTEED to quantise to
+        // the same nodeOf key as that vertex, unlike the projection itself.
+        const na = nodeOf(ca.or ?? (r1 + (r2 - r1) * ta), ca.oc ?? (c1 + (c2 - c1) * ta));
+        const nb = nodeOf(cb.or ?? (r1 + (r2 - r1) * tb), cb.oc ?? (c1 + (c2 - c1) * tb));
         const e = pushEdge(na, nb);
         if (deck && e >= 0) {
           const arcA = segArc0[s] + ta * segLenCells, arcB = segArc0[s] + tb * segLenCells;
@@ -606,8 +705,11 @@
   // the analogue of v1's alpha). (linear/square repulsion are grid distance-
   // transform modes; on a graph they reduce to this per-edge form for now — see
   // the README note.) Route energies are reported UN-penalised (true energy);
-  // sharedEdges counts edges shared with other routes.
-  function topN(g, costAB, costBA, src, dst, eMax, nRoutes, penalty, distCoeff) {
+  // sharedEdges counts edges shared with other routes. `reverse` mirrors the
+  // raster A* top-N fix (energy-worker.js reverse: mode === "to"): mode "to"
+  // must score/settle in the true travel direction (energy TO dst, paid on
+  // the reverse-direction edge costs), not always forward from src.
+  function topN(g, costAB, costBA, src, dst, eMax, nRoutes, penalty, distCoeff, reverse) {
     const used = new Int32Array(g.nEdges);
     const pAB = new Float64Array(g.nEdges), pBA = new Float64Array(g.nEdges);
     const pen = penalty > 1 ? penalty : 1;
@@ -618,12 +720,12 @@
         const bump = (Math.pow(pen, used[e]) - 1) * distCoeff * g.edgeLenM[e];
         pAB[e] = costAB[e] + bump; pBA[e] = costBA[e] + bump;
       }
-      const tree = dijkstra(g, pAB, pBA, [src], eMax, false);
+      const tree = dijkstra(g, pAB, pBA, [src], eMax, reverse);
       if (!tree.settled[dst]) break;
       const path = reconstructPath(g, tree, dst);
       if (!path || !path.edges.length) break;
       let lenM = 0; for (let k = 0; k < path.edges.length; k++) lenM += g.edgeLenM[path.edges[k]];
-      const energy = pathEnergy(g, costAB, costBA, path, false);
+      const energy = pathEnergy(g, costAB, costBA, path, reverse);
       routes.push({ nodes: path.nodes, edges: path.edges, lengthM: lenM, energy, sharedEdges: 0 });
       for (let k = 0; k < path.edges.length; k++) { used[path.edges[k]]++; globalUse[path.edges[k]]++; }
     }
@@ -700,12 +802,16 @@
     }
 
     // top-N: base field + passes from src, then diverse penalised routes.
+    // mode "to" mirrors the non-topN "from"/"to" branch below (and the v49
+    // raster A* fix): score/settle in the TRUE travel direction, not always
+    // forward from srcNode.
     if (params.wantTopN && params.dstNode >= 0) {
-      const base = dijkstra(g, costAB, costBA, [params.srcNode], eMax, false);
+      const rev = params.mode === "to";
+      const base = dijkstra(g, costAB, costBA, [params.srcNode], eMax, rev);
       accumulatePasses(g, base, edgePass, null);
       nodeEnergy = new Float32Array(g.nNodes).fill(NaN);
       for (let j = 0; j < base.orderLen; j++) { const v = base.order[j]; nodeEnergy[v] = base.E[v]; }
-      const { routes } = topN(g, costAB, costBA, params.srcNode, params.dstNode, eMax, params.nRoutes > 0 ? params.nRoutes : 1, params.penalty, params.cost.aRoll + params.cost.aAero);
+      const { routes } = topN(g, costAB, costBA, params.srcNode, params.dstNode, eMax, params.nRoutes > 0 ? params.nRoutes : 1, params.penalty, params.cost.aRoll + params.cost.aAero, rev);
       const best = routes.length ? routes[0] : null;
       return {
         edgePasses: edgePass, edgeEnergy: edgeEnergyFromNodes(g, nodeEnergy), nodeEnergy,

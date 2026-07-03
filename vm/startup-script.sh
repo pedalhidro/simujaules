@@ -5,14 +5,17 @@
 # estar LIGADA.
 #
 # O que faz:
+#   0. Instala + HABILITA o idle-watchdog (`simujoules-watchdog.timer`, dispara
+#      a cada 1 min) ANTES de qualquer coisa que dependa de rede — backstop de
+#      custo mesmo se apt-get/Caddy/rustup+build falhar nos passos seguintes.
 #   1. Instala dependências de build + Rust (ou baixa um binário pré-compilado
 #      se a metadata `backend-binary-url` estiver setada).
 #   2. Compila/instala o backend simujoules em /opt/simujoules/simujoules-backend.
 #   3. Escreve o systemd unit `simujoules-backend.service` (backend em
-#      0.0.0.0:VM_PORT com --max-mem-gb dimensionado pra c4-standard-96).
-#   4. Instala o idle-watchdog como timer systemd
-#      (`simujoules-watchdog.timer`, dispara a cada 1 min).
-#   5. Habilita + inicia serviço e timer.
+#      0.0.0.0:VM_PORT com --max-mem-gb dimensionado pra c4-standard-96) e o
+#      Caddy (TLS/auth/CORS) do passo 3b.
+#   4. Habilita + inicia o backend e o Caddy (o watchdog já foi habilitado no
+#      passo 0).
 
 set -euo pipefail
 exec > >(tee -a /var/log/simujoules-startup.log) 2>&1
@@ -44,6 +47,105 @@ BIN_PATH="${INSTALL_DIR}/simujoules-backend"
 SRC_DIR="${INSTALL_DIR}/src"
 mkdir -p "$INSTALL_DIR"
 
+# --- 0) Idle-watchdog como timer systemd (INSTALADO/HABILITADO PRIMEIRO) -----
+# Backstop de custo: precisa estar rodando ANTES de qualquer etapa dependente de
+# rede (apt-get, download do Caddy, ou — no caminho sem binário pré-compilado —
+# rustup + git clone + cargo build, ~10 min) poder falhar e abortar o script
+# (set -e, topo do arquivo). Se o watchdog só fosse habilitado no fim (depois de
+# tudo isso), uma falha transiente de rede deixaria a VM RODANDO pra sempre, sem
+# nenhum teto de custo (o orquestrador não tem sweeper pra instâncias RUNNING;
+# /cloud/reap só mexe em STOPPED). O watchdog só precisa de bash/curl/python3
+# (presentes em qualquer imagem debian-12 do GCE) e já trata /health
+# indisponível como "ocupado" — instalar cedo é seguro. MAX_UPTIME_S é o teto
+# rígido de tempo ligado (substitui o HARD_CAP_S do antigo orquestrador local).
+# Escrito INLINE (não copiado do fonte): no caminho do binário pré-compilado o
+# repo NÃO é clonado, então depender de ${SRC_DIR}/vm/idle-watchdog.sh deixaria a
+# VM SEM o backstop de custo. Mantém paridade com vm/idle-watchdog.sh (que é a
+# cópia canônica/documentada, usada fora deste fluxo).
+WATCHDOG_PATH="${INSTALL_DIR}/idle-watchdog.sh"
+cat > "$WATCHDOG_PATH" <<'WATCHDOG'
+#!/usr/bin/env bash
+# Backstop de custo DENTRO da VM (timer systemd, ~1/min). Desliga a VM (→ STOP,
+# por causa do --instance-termination-action=STOP) se: (a) ociosa demais
+# (idle_seconds do /health do backend > IDLE_MAX_S) OU (b) ligada além do teto
+# rígido (uptime > MAX_UPTIME_S). Cópia em paridade com vm/idle-watchdog.sh.
+set -euo pipefail
+VM_PORT="${VM_PORT:-8077}"
+IDLE_MAX_S="${IDLE_MAX_S:-900}"
+MAX_UPTIME_S="${MAX_UPTIME_S:-7200}"
+HEALTH_URL="http://127.0.0.1:${VM_PORT}/health"
+
+# (b) Teto rígido de uptime: para a VM mesmo que pareça "ocupada", limitando o
+# pior caso de custo (ex.: um compute travado que nunca fica ocioso).
+uptime_s="$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)"
+if [[ "$uptime_s" =~ ^[0-9]+$ ]] && (( uptime_s > MAX_UPTIME_S )); then
+  echo "watchdog: uptime ${uptime_s}s > ${MAX_UPTIME_S}s (teto) — DESLIGANDO."
+  shutdown -h now
+  exit 0
+fi
+
+# (a) Ociosidade: falha do curl == "não ocioso" (backend ainda subindo).
+if ! body="$(curl -fsS --max-time 5 "$HEALTH_URL" 2>/dev/null)"; then
+  echo "watchdog: /health indisponível — backend não pronto; tratando como ocupado."
+  exit 0
+fi
+idle=""
+if command -v python3 >/dev/null 2>&1; then
+  idle="$(printf '%s' "$body" | python3 -c \
+    'import sys,json; print(int(json.load(sys.stdin).get("idle_seconds", -1)))' \
+    2>/dev/null || true)"
+fi
+if [[ -z "$idle" || ! "$idle" =~ ^[0-9]+$ ]]; then
+  echo "watchdog: não consegui ler idle_seconds (corpo: $body) — tratando como ocupado."
+  exit 0
+fi
+echo "watchdog: idle_seconds=${idle} (limite=${IDLE_MAX_S}s), uptime=${uptime_s}s"
+if (( idle > IDLE_MAX_S )); then
+  echo "watchdog: VM ociosa há ${idle}s (> ${IDLE_MAX_S}s) — DESLIGANDO (→ STOP)."
+  shutdown -h now
+fi
+WATCHDOG
+
+# Teto rígido de uptime (s) — default 2 h. Configurável via metadata.
+MAX_UPTIME_S="$(metadata max-uptime-s)"; MAX_UPTIME_S="${MAX_UPTIME_S:-7200}"
+
+if [[ -f "$WATCHDOG_PATH" ]]; then
+  chmod +x "$WATCHDOG_PATH"
+  echo "-- escrevendo simujoules-watchdog.service + .timer (a cada 1 min) --"
+  cat > /etc/systemd/system/simujoules-watchdog.service <<UNIT
+[Unit]
+Description=Simujoules idle watchdog (desliga a VM se ociosa ou no teto de uptime)
+
+[Service]
+Type=oneshot
+# VM_PORT, IDLE_MAX_S e MAX_UPTIME_S vêm do ambiente; o watchdog desliga via
+# shutdown -h now (com instance-termination-action=STOP, isso PARA — backstop).
+Environment=VM_PORT=${VM_PORT}
+Environment=IDLE_MAX_S=${IDLE_MAX_S}
+Environment=MAX_UPTIME_S=${MAX_UPTIME_S}
+ExecStart=${WATCHDOG_PATH}
+UNIT
+
+  cat > /etc/systemd/system/simujoules-watchdog.timer <<'UNIT'
+[Unit]
+Description=Dispara o idle-watchdog do Simujoules periodicamente
+
+[Timer]
+# Primeira checagem 2 min após o boot (dá tempo do backend subir), depois a
+# cada 1 min. AccuracySec baixo pra não atrasar o desligamento.
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+  echo "-- habilitando o watchdog AGORA (backstop de custo antes de qualquer etapa de rede) --"
+  systemctl daemon-reload
+  systemctl enable --now simujoules-watchdog.timer
+fi
+
 # --- 1) Dependências ---------------------------------------------------------
 echo "-- instalando dependências de sistema --"
 export DEBIAN_FRONTEND=noninteractive
@@ -52,11 +154,25 @@ apt-get install -y --no-install-recommends \
   curl ca-certificates git build-essential pkg-config python3
 
 # --- 2) Obter o binário ------------------------------------------------------
+# FAIL-OPEN: um BACKEND_BINARY_URL ausente/errado/404 NÃO deve abortar o script
+# (estamos sob `set -e`, e o passo de build a seguir ainda é uma via legítima,
+# só mais lenta). Se abortasse aqui, Caddy e o backend nunca seriam configurados
+# e a VM nunca ficaria saudável, independente do timeout do cliente.
+DOWNLOADED_BINARY=0
 if [[ -n "$BACKEND_BINARY_URL" ]]; then
   # Caminho rápido: binário pré-compilado (evita instalar a toolchain Rust).
   echo "-- baixando binário pré-compilado de: $BACKEND_BINARY_URL --"
-  curl -fSL "$BACKEND_BINARY_URL" -o "$BIN_PATH"
-  chmod +x "$BIN_PATH"
+  if curl -fSL "$BACKEND_BINARY_URL" -o "$BIN_PATH"; then
+    chmod +x "$BIN_PATH"
+    DOWNLOADED_BINARY=1
+  else
+    echo "AVISO: falha ao baixar BACKEND_BINARY_URL ($BACKEND_BINARY_URL) — não abortando (fail-open); caindo pro binário em cache ou build do fonte." >&2
+    rm -f "$BIN_PATH"
+  fi
+fi
+
+if [[ "$DOWNLOADED_BINARY" -eq 1 ]]; then
+  : # binário pré-compilado já baixado e pronto acima.
 elif [[ -x "$BIN_PATH" ]]; then
   # Cache do disco de boot: o binário persiste entre stop/start, então só o
   # PRIMEIRO boot compila. Sem este atalho, cada start recompilaria (~10 min) e
@@ -150,9 +266,32 @@ fi
 
 echo "-- escrevendo /etc/caddy/Caddyfile ($DATA_HOST → 127.0.0.1:$VM_PORT) --"
 mkdir -p /etc/caddy
-# Heredoc QUOTED: nada de expansão do shell — os {env.*} ficam literais pro
-# Caddy resolver em runtime. Os placeholders __X__ são trocados por sed depois.
-cat > /etc/caddy/Caddyfile <<'CADDY'
+if [[ -z "$CLOUD_AUTH_TOKEN" ]]; then
+  # Fail-closed: sem token de auth configurado, o plano de dados não deve servir
+  # NADA — não dá pra confiar num matcher Caddy comparando "Bearer " (token
+  # vazio) contra o header (trivia de parsing OWS). Mantém o wrapper de TLS
+  # (o cert continua sendo emitido normalmente por DNS-01, sem retry-storm no
+  # Let's Encrypt), mas o corpo interno vira um 401 incondicional — nem o
+  # preflight OPTIONS passa (não há nada legítimo a proteger atrás dele).
+  echo "AVISO: CLOUD_AUTH_TOKEN vazio na metadata — plano de dados NEGADO (fail-closed, 401 incondicional)." >&2
+  cat > /etc/caddy/Caddyfile <<'CADDY'
+{
+	email admin@pedalhidrografi.co
+}
+
+__DATA_HOST__:__DATA_PORT__ {
+	tls {
+		dns cloudflare {env.CF_API_TOKEN}
+	}
+
+	# CLOUD_AUTH_TOKEN vazio: sem token pra proteger nada, então negamos tudo.
+	respond "unauthorized" 401
+}
+CADDY
+else
+  # Heredoc QUOTED: nada de expansão do shell — os {env.*} ficam literais pro
+  # Caddy resolver em runtime. Os placeholders __X__ são trocados por sed depois.
+  cat > /etc/caddy/Caddyfile <<'CADDY'
 {
 	email admin@pedalhidrografi.co
 }
@@ -193,6 +332,7 @@ __DATA_HOST__:__DATA_PORT__ {
 	}
 }
 CADDY
+fi
 sed -i \
   -e "s|__DATA_HOST__|${DATA_HOST}|g" \
   -e "s|__DATA_PORT__|${DATA_PORT}|g" \
@@ -225,99 +365,10 @@ WantedBy=multi-user.target
 UNIT
 mkdir -p /var/lib/caddy
 
-# --- 4) Idle-watchdog como timer systemd ------------------------------------
-# Escrito INLINE (não copiado do fonte): no caminho do binário pré-compilado o
-# repo NÃO é clonado, então depender de ${SRC_DIR}/vm/idle-watchdog.sh deixaria a
-# VM SEM o backstop de custo. Mantém paridade com vm/idle-watchdog.sh (que é a
-# cópia canônica/documentada, usada fora deste fluxo). MAX_UPTIME_S é o teto
-# rígido de tempo ligado (substitui o HARD_CAP_S do antigo orquestrador local).
-WATCHDOG_PATH="${INSTALL_DIR}/idle-watchdog.sh"
-cat > "$WATCHDOG_PATH" <<'WATCHDOG'
-#!/usr/bin/env bash
-# Backstop de custo DENTRO da VM (timer systemd, ~1/min). Desliga a VM (→ STOP,
-# por causa do --instance-termination-action=STOP) se: (a) ociosa demais
-# (idle_seconds do /health do backend > IDLE_MAX_S) OU (b) ligada além do teto
-# rígido (uptime > MAX_UPTIME_S). Cópia em paridade com vm/idle-watchdog.sh.
-set -euo pipefail
-VM_PORT="${VM_PORT:-8077}"
-IDLE_MAX_S="${IDLE_MAX_S:-900}"
-MAX_UPTIME_S="${MAX_UPTIME_S:-7200}"
-HEALTH_URL="http://127.0.0.1:${VM_PORT}/health"
-
-# (b) Teto rígido de uptime: para a VM mesmo que pareça "ocupada", limitando o
-# pior caso de custo (ex.: um compute travado que nunca fica ocioso).
-uptime_s="$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)"
-if [[ "$uptime_s" =~ ^[0-9]+$ ]] && (( uptime_s > MAX_UPTIME_S )); then
-  echo "watchdog: uptime ${uptime_s}s > ${MAX_UPTIME_S}s (teto) — DESLIGANDO."
-  shutdown -h now
-  exit 0
-fi
-
-# (a) Ociosidade: falha do curl == "não ocioso" (backend ainda subindo).
-if ! body="$(curl -fsS --max-time 5 "$HEALTH_URL" 2>/dev/null)"; then
-  echo "watchdog: /health indisponível — backend não pronto; tratando como ocupado."
-  exit 0
-fi
-idle=""
-if command -v python3 >/dev/null 2>&1; then
-  idle="$(printf '%s' "$body" | python3 -c \
-    'import sys,json; print(int(json.load(sys.stdin).get("idle_seconds", -1)))' \
-    2>/dev/null || true)"
-fi
-if [[ -z "$idle" || ! "$idle" =~ ^[0-9]+$ ]]; then
-  echo "watchdog: não consegui ler idle_seconds (corpo: $body) — tratando como ocupado."
-  exit 0
-fi
-echo "watchdog: idle_seconds=${idle} (limite=${IDLE_MAX_S}s), uptime=${uptime_s}s"
-if (( idle > IDLE_MAX_S )); then
-  echo "watchdog: VM ociosa há ${idle}s (> ${IDLE_MAX_S}s) — DESLIGANDO (→ STOP)."
-  shutdown -h now
-fi
-WATCHDOG
-
-# Teto rígido de uptime (s) — default 2 h. Configurável via metadata.
-MAX_UPTIME_S="$(metadata max-uptime-s)"; MAX_UPTIME_S="${MAX_UPTIME_S:-7200}"
-
-if [[ -f "$WATCHDOG_PATH" ]]; then
-  chmod +x "$WATCHDOG_PATH"
-  echo "-- escrevendo simujoules-watchdog.service + .timer (a cada 1 min) --"
-  cat > /etc/systemd/system/simujoules-watchdog.service <<UNIT
-[Unit]
-Description=Simujoules idle watchdog (desliga a VM se ociosa ou no teto de uptime)
-
-[Service]
-Type=oneshot
-# VM_PORT, IDLE_MAX_S e MAX_UPTIME_S vêm do ambiente; o watchdog desliga via
-# shutdown -h now (com instance-termination-action=STOP, isso PARA — backstop).
-Environment=VM_PORT=${VM_PORT}
-Environment=IDLE_MAX_S=${IDLE_MAX_S}
-Environment=MAX_UPTIME_S=${MAX_UPTIME_S}
-ExecStart=${WATCHDOG_PATH}
-UNIT
-
-  cat > /etc/systemd/system/simujoules-watchdog.timer <<'UNIT'
-[Unit]
-Description=Dispara o idle-watchdog do Simujoules periodicamente
-
-[Timer]
-# Primeira checagem 2 min após o boot (dá tempo do backend subir), depois a
-# cada 1 min. AccuracySec baixo pra não atrasar o desligamento.
-OnBootSec=2min
-OnUnitActiveSec=1min
-AccuracySec=10s
-
-[Install]
-WantedBy=timers.target
-UNIT
-fi
-
-# --- 5) Habilitar + iniciar --------------------------------------------------
+# --- 4) Habilitar + iniciar (watchdog já habilitado no passo 0) --------------
 echo "-- habilitando e iniciando serviços --"
 systemctl daemon-reload
 systemctl enable --now simujoules-backend.service
 systemctl enable --now caddy.service
-if [[ -f /etc/systemd/system/simujoules-watchdog.timer ]]; then
-  systemctl enable --now simujoules-watchdog.timer
-fi
 
 echo "== startup-script concluída :: backend 127.0.0.1:${VM_PORT}, Caddy ${DATA_HOST}:${DATA_PORT} =="

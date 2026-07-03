@@ -31,7 +31,11 @@
 # Parametrizado por variáveis de ambiente (defaults batem com o orquestrador):
 #   GCP_PROJECT, GCP_ZONE, INSTANCE_NAME, MACHINE_TYPE, VM_PORT,
 #   FIREWALL_RULE, NETWORK_TAG, IMAGE_FAMILY, IMAGE_PROJECT, BOOT_DISK_SIZE,
-#   FW_SOURCE_RANGE, BACKEND_BINARY_URL (repassado à VM via metadata).
+#   FW_SOURCE_RANGE, BACKEND_BINARY_URL (repassado à VM via metadata),
+#   MAX_UPTIME_S (teto do watchdog em-guest), MAX_RUN_DURATION (teto SPOT
+#   enforçado pelo próprio GCP — backstop independente do watchdog).
+#   CLOUD_AUTH_TOKEN é OBRIGATÓRIO (sem ele o bake recusa rodar, mesmo em
+#   --dry-run — ver guard logo após o parse de argumentos).
 #
 # Uso:
 #   ./bake-instance.sh            # cria de verdade (COBRADO)
@@ -57,6 +61,9 @@ APP_ORIGIN="${APP_ORIGIN:-https://simujaules.pedalhidrografi.co}"
 CLOUD_AUTH_TOKEN="${CLOUD_AUTH_TOKEN:-}"   # token compartilhado app↔Caddy
 CF_API_TOKEN="${CF_API_TOKEN:-}"           # token Cloudflare DNS:Edit (DNS-01)
 MAX_UPTIME_S="${MAX_UPTIME_S:-7200}"       # teto rígido de uptime no watchdog
+MAX_RUN_DURATION="${MAX_RUN_DURATION:-4h}" # teto ENFORÇADO PELO GCP (Scheduling),
+                                            # backstop mesmo se a VM nunca rodar
+                                            # o startup-script (ver watchdog).
 
 # Modelo de provisionamento: SPOT (barato, preemptável → STOP) ou STANDARD (sob
 # demanda, não preemptável). Use STANDARD se a quota PREEMPTIBLE_CPUS da região
@@ -95,6 +102,17 @@ for arg in "$@"; do
     *) echo "argumento desconhecido: $arg" >&2; exit 2 ;;
   esac
 done
+
+# Recusa baker sem token: CLOUD_AUTH_TOKEN vazio deixa o Caddy da VM comparando
+# "Bearer " (com espaço) contra um header — comportamento de auth que depende de
+# trivia de parsing de whitespace, atrás de um firewall placeholder 0.0.0.0/0
+# até o primeiro aperto do orquestrador. Roda TAMBÉM sob --dry-run (de propósito:
+# é o único jeito barato de exercitar este guard sem gastar dinheiro numa
+# chamada gcloud real — exporte um CLOUD_AUTH_TOKEN placeholder só pra prever).
+if [[ -z "$CLOUD_AUTH_TOKEN" ]]; then
+  echo "ERRO: defina CLOUD_AUTH_TOKEN (o plano de dados ficaria sem auth definida)" >&2
+  exit 1
+fi
 
 # run: executa, ou só imprime quando --dry-run. Usa printf %q pra escapar.
 run() {
@@ -143,10 +161,13 @@ if gcloud compute instances describe "$INSTANCE_NAME" \
   echo "  já existe — pulando criação."
 else
   # --provisioning-model aceita SPOT ou STANDARD; --instance-termination-action
-  # só é válido p/ SPOT (preempção/shutdown PARAM a VM, não a deletam).
+  # e --max-run-duration só são válidos p/ SPOT (preempção/shutdown PARAM a VM,
+  # não a deletam). --max-run-duration é o teto ENFORÇADO PELO GCP — backstop
+  # de custo independente do watchdog em-guest (que precisa do startup-script
+  # rodar com sucesso pra existir).
   TERMINATION_FLAG=""
   if [ "$PROVISIONING_MODEL" = "SPOT" ]; then
-    TERMINATION_FLAG="--instance-termination-action=STOP"
+    TERMINATION_FLAG="--instance-termination-action=STOP --max-run-duration=${MAX_RUN_DURATION}"
   fi
   # --metadata leva porta, backend-binary-url (vazio = compila na boot) e
   # max-mem-gb (vazio = default 320 na startup-script), lidos pra montar o unit.

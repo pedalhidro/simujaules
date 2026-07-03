@@ -35,7 +35,9 @@ Este serviço só cuida do ciclo de vida.
   `compute.simujaules.pedalhidrografi.co` (DNS-only no Cloudflare, TTL 60s) pro
   IP atual. O cert TLS da VM é por **DNS-01** (independe do IP).
 - **Firewall pro /32 do navegador**: lido do `X-Forwarded-For` (no Cloud Run, o
-  1º item é o IP real do cliente). Só o navegador que pediu alcança a porta 443.
+  **último** item é o IP real do cliente — os anteriores, se houver, vêm do
+  próprio navegador e são forjáveis; o Cloud Run sempre acrescenta o IP real
+  como o hop final). Só o navegador que pediu alcança a porta 443.
 - **Token compartilhado**: a barreira contra qualquer um ligar uma VM de 96
   vCPUs. O MESMO token vale no controle (aqui) e nos dados (Caddy).
 
@@ -56,9 +58,16 @@ Este serviço só cuida do ciclo de vida.
 - `GET  /cloud/status` → `{"state","dataUrl","externalIp","leaseExpiresAt":null}`
   — estado do GCP. A **saúde** é confirmada pelo navegador batendo direto em
   `dataUrl/health` (o firewall já libera o /32 dele).
-- `POST /cloud/stop` → `{"state"}` — para a VM agora; aponta o DNS pro placeholder.
-- `POST /cloud/keepalive` → `{"ok":true}` — no-op (compat.); o custo é contido
-  pelo idle-watchdog DENTRO da VM.
+- `POST /cloud/stop` → `{"state"}` ou `{"state","skipped":"active-lease"}` — para
+  a VM agora e aponta o DNS pro placeholder, A MENOS que outro `client_id`
+  (header `X-Simu-Client`) tenha uma lease válida (keepalive há < `LEASE_TTL_S`)
+  — nesse caso pula o stop e devolve o estado real da VM, sem parar (ver
+  LEASES no código). Sem o header, é o comportamento antigo (para sempre).
+- `POST /cloud/keepalive` → `{"ok":true,"leaseExpiresAt":null}` — registra/renova
+  a lease do `client_id` (header `X-Simu-Client`), se mandado — protege o
+  `/cloud/stop` de um SEGUNDO cliente contra o "parar após cada cálculo" do
+  primeiro. Sem o header, é um no-op puro (compat. com clientes antigos). O
+  custo real ainda é contido pelo idle-watchdog DENTRO da VM, não por esta lease.
 - `POST /cloud/create` / `POST /cloud/delete` → ciclo de vida explícito.
 - `POST /cloud/reap` (admin) → deleta a VM se PARADA há mais de `REAP_IDLE_DAYS`
   (default 30), via `lastStopTimestamp`. Custo ocioso de longo prazo → ~0.
@@ -80,6 +89,7 @@ Este serviço só cuida do ciclo de vida.
 | `INSTANCE_NAME`     | `simu-compute`                           | Nome da VM (a ÚNICA tocada).              |
 | `FIREWALL_RULE`     | `simu-compute-allow-443`                 | Regra apertada pro /32 do navegador.      |
 | `STARTUP_SCRIPT_URL`| `gs://simujaules/vm/startup-script.sh`   | Startup-script (create-when-missing).     |
+| `BACKEND_BINARY_URL`| — (vazio)                                | Binário pré-compilado (vazio = compila do fonte no boot, ~10 min). |
 | `REAP_IDLE_DAYS`    | `30`                                     | Dias parada até o reaper deletar.         |
 | `DRY_RUN`           | `0`                                      | `1` → máquina de estados fake, sem GCP.   |
 

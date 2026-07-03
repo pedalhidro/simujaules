@@ -886,8 +886,16 @@ fn parse_grid_request(
     if body.len() < 4 + json_len {
         return Err((400, r#"{"error":"truncated json"}"#.to_string()));
     }
-    let params: Params = serde_json::from_slice(&body[4..4 + json_len])
+    let mut params: Params = serde_json::from_slice(&body[4..4 + json_len])
         .map_err(|e| (400, format!(r#"{{"error":"bad params: {}"}}"#, e)))?;
+    // Defense-in-depth mirror of energy-worker.js's eMaxEff: the kJ budget has
+    // no meaning against maximize's inverted (maxEdgeCost-scaled) costs, so a
+    // stale/non-app client sending both together must not silently prune the
+    // whole field. app.js already sends eMax=0 under maximize; this guards
+    // any other caller (backend/test-backend.mjs, a future orchestrator path).
+    if params.maximize {
+        params.e_max = 0.0;
+    }
     let n = params.h * params.w;
     // An empty grid (h or w == 0) is meaningless and would make per_slice == 0
     // in compute_density → a divide-by-zero panic that, on this single-threaded
@@ -1144,17 +1152,26 @@ fn main() {
                     ),
                 );
             }
-            // Carimba o relógio de ociosidade SÓ aqui (cálculo real), na chegada
-            // da requisição — ver LAST_COMPUTE_AT. Um cálculo longo conta a
-            // ociosidade desde a chegada, então IDLE_MAX_S deve folgar acima da
-            // duração de um cálculo único (o alvo roda em poucos minutos << 900 s).
+            // Carimba o relógio de ociosidade aqui (cálculo real), na chegada
+            // da requisição — ver LAST_COMPUTE_AT — E DE NOVO ao final, depois
+            // que o handler termina de responder. tiny_http serve requisições
+            // sequencialmente, então /health fica inacessível durante o cálculo
+            // (ociosidade corretamente conta como "ocupado"); sem o carimbo de
+            // conclusão, um cálculo grande em nuvem (>15 min, o normal em DEMs
+            // enormes — ver CLAUDE.md sobre a serialização 3-8x do slice cap)
+            // faz idle_seconds saltar pra duração inteira da requisição assim
+            // que ela termina, e o watchdog periódico pode desligar a VM no
+            // intervalo curto até a próxima requisição (ex.: as duas chamadas
+            // sequenciais de startDensityCompare em app.js).
             (Method::Post, "/density") => {
                 LAST_COMPUTE_AT.store(unix_now_secs(), Ordering::SeqCst);
-                handle_density(req)
+                handle_density(req);
+                LAST_COMPUTE_AT.store(unix_now_secs(), Ordering::SeqCst);
             }
             (Method::Post, "/single") => {
                 LAST_COMPUTE_AT.store(unix_now_secs(), Ordering::SeqCst);
-                handle_single(req)
+                handle_single(req);
+                LAST_COMPUTE_AT.store(unix_now_secs(), Ordering::SeqCst);
             }
             _ => respond_json(req, 404, r#"{"error":"not found"}"#),
         }

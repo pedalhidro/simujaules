@@ -1016,6 +1016,9 @@ function maxCostPathOfLength(opts) {
     L,
     progressBase = 0,
     progressScale = 1,
+    reverse = false,          // score edges in the opposite travel direction
+                              // (mode "to": field/path/top-N all measure
+                              // travel goal→seed — mirror that here).
   } = opts;
   const N = H * W;
 
@@ -1071,12 +1074,17 @@ function maxCostPathOfLength(opts) {
           const nc = c + dcs[k];
           if (nr < 0 || nr >= H || nc < 0 || nc >= W) continue;
           const n = nr * W + nc;
-          if (!mask[n]) continue;
+          // Soft seed, like dijkstra/astar: an off-mask start can still act
+          // as a predecessor (the search is allowed to STEP FROM it), it
+          // just can't be stepped THROUGH later — n === start is the only
+          // off-mask cell with a finite prev[] value (prev[start] = 0 at
+          // t=0), so this only ever admits the seed itself.
+          if (!mask[n] && n !== start) continue;
           const pVal = prev[n];
           if (!Number.isFinite(pVal)) continue;
 
           // Same cost model as Dijkstra/A*: the v2 per-edge leg energy.
-          const dh = hv - height[n];
+          const dh = reverse ? height[n] - hv : hv - height[n];
           const dist = dists[k];
           const edge = v2Edge(dist, dh, cost);
           const cand = pVal + edge;
@@ -1344,10 +1352,17 @@ self.onmessage = (ev) => {
   } = msg;
 
   const wantPath = goalR >= 0 && goalC >= 0;
+  // Defense in depth: app.js already zeroes eMax before sending under
+  // maximize (v49 fix for a prior finding — an unconverted kJ budget
+  // pruned nearly everything on the inverted cost, silently emptying the
+  // field), but the engine itself must not rely on the sender doing that
+  // (a stale SW-cached app.js, or an external /density-style caller).
+  // Every eMax use below in this handler goes through eMaxEff instead.
+  const eMaxEff = maximize ? 0 : eMax;
   // Round-trip total budget (see eMaxMode above). The per-leg Dijkstras
-  // still run with eMax — a leg can never exceed the total — and the
+  // still run with eMaxEff — a leg can never exceed the total — and the
   // combine loops below mask sums beyond this cap to Infinity.
-  const eMaxTotalCap = (eMaxMode === "total" && eMax > 0) ? eMax : 0;
+  const eMaxTotalCap = (eMaxMode === "total" && eMaxEff > 0) ? eMaxEff : 0;
   const goalIdx = wantPath ? goalR * W + goalC : -1;
   const N = H * W;
 
@@ -1435,7 +1450,7 @@ self.onmessage = (ev) => {
         height, mask: effMask, H, W,
         refPoints, dmode,
         cost, dx, dy,
-        eMax, maximize, maxEdgeCost, eMaxTotalCap,
+        eMax: eMaxEff, maximize, maxEdgeCost, eMaxTotalCap,
         portalAdj,
         onProgress: (frac) => postMessage({ kind: "progress", progress: frac }),
       });
@@ -1475,7 +1490,7 @@ self.onmessage = (ev) => {
         seedR, seedC,
         cost, dx, dy,
         reverse: false, trackParents: wantPath,
-        wantPasses, eMax,
+        wantPasses, eMax: eMaxEff,
         maximize, maxEdgeCost, portalAdj,
       });
       energy = r.E;
@@ -1490,7 +1505,7 @@ self.onmessage = (ev) => {
         seedR, seedC,
         cost, dx, dy,
         reverse: true, trackParents: wantPath,
-        wantPasses, eMax,
+        wantPasses, eMax: eMaxEff,
         maximize, maxEdgeCost, portalAdj,
       });
       energy = r.E;
@@ -1509,7 +1524,7 @@ self.onmessage = (ev) => {
         seedR, seedC,
         cost, dx, dy,
         reverse: false, trackParents: wantPath,
-        wantTree: wantPasses, eMax,
+        wantTree: wantPasses, eMax: eMaxEff,
         maximize, maxEdgeCost, portalAdj,
       });
       const b = dijkstra({
@@ -1517,7 +1532,7 @@ self.onmessage = (ev) => {
         seedR, seedC,
         cost, dx, dy,
         reverse: true, trackParents: false,
-        wantTree: wantPasses, eMax,
+        wantTree: wantPasses, eMax: eMaxEff,
         maximize, maxEdgeCost, portalAdj,
       });
       energy = new Float32Array(N);
@@ -1558,7 +1573,14 @@ self.onmessage = (ev) => {
           : null;
       let distUsed = null;
       const k = Math.max(1, Math.min(20, nRoutes | 0));
-      const pen = penalty > 0 ? penalty : 1.0;
+      // per-cell mode raises `penalty` to an integer power (Math.pow(penalty,
+      // used)); a sub-1 value would SHRINK the edge cost below its base value,
+      // producing negative A* edge weights (breaks settled-cell finality).
+      // linear/square modes add penalty/denom * distCost, which stays >= 0
+      // for any penalty > 0 — those keep the permissive clamp.
+      const pen = repulsionMode === "per-cell"
+        ? (penalty > 1 ? penalty : 1)
+        : (penalty > 0 ? penalty : 1.0);
       for (let r = 0; r < k; r++) {
         // Recompute the distance transform if any cells have been used so
         // far. On the first iteration nothing's been used → distUsed is
@@ -1573,7 +1595,7 @@ self.onmessage = (ev) => {
           cost, dx, dy,
           penalty: pen, usedCount,
           repulsionMode, distUsed,
-          eMax,
+          eMax: eMaxEff,
           maximize, maxEdgeCost,
           // Mode "to" fields/paths measure travel dst→seed (dijkstra
           // reverse:true) — score the routes in that same direction. Round
@@ -1585,9 +1607,31 @@ self.onmessage = (ev) => {
         for (let j = 0; j < res.path.length; j++) {
           if (usedCount[res.path[j]] > 0) shared++;
         }
+        // res.energy is astar()'s SEARCH cost — it includes the repulsion
+        // penalty layered on top of the base edge cost (routes 2..N only;
+        // route #1 has usedCount all-zero so its search cost already equals
+        // its true energy). That penalty exists to steer the search away
+        // from prior routes; it isn't energy a rider spends. Recompute the
+        // un-penalised (true) energy by re-summing v2Edge over the path's
+        // consecutive cells, in the same travel direction astar scored it
+        // in (reverse: mode === "to"). Skip this in maximize mode — there
+        // res.energy is the inverted-cost search total, not a v2Edge sum,
+        // and the field/route the user sees is meant to reflect that.
+        let trueE = res.energy;
+        if (!maximize) {
+          trueE = 0;
+          for (let j = 1; j < res.path.length; j++) {
+            const a = res.path[j - 1], b = res.path[j];
+            const ar = (a / W) | 0, ac = a - ar * W;
+            const br = (b / W) | 0, bc = b - br * W;
+            const d = Math.hypot((br - ar) * dy, (bc - ac) * dx);
+            const dh = (mode === "to") ? (height[a] - height[b]) : (height[b] - height[a]);
+            trueE += v2Edge(d, dh, cost);
+          }
+        }
         routes.push({
           path: res.path,
-          energy: res.energy,
+          energy: trueE,
           length: res.length,
           shared,
         });
@@ -1617,6 +1661,11 @@ self.onmessage = (ev) => {
         goalR, goalC,
         cost, dx, dy,
         L: maximizeLength,
+        // Mode "to" measures travel dst→seed everywhere else (field,
+        // single path, top-N astar) — mirror that here so the DP path
+        // isn't scored in the opposite direction from what it overlays.
+        // Round stays forward-only (outbound leg), same as top-N.
+        reverse: mode === "to",
       });
       // Always log the DP outcome to the console so it's clear whether the
       // length constraint actually kicked in.
@@ -1630,8 +1679,14 @@ self.onmessage = (ev) => {
         // Surface the failure to the UI; main thread routes 'warning'
         // through the status bar. Keep the inverted-Dijkstra outputs
         // so the user still sees the field.
+        // Structured (key + args) so app.js can route it through the
+        // STRINGS/t() i18n table instead of displaying this English
+        // sentence verbatim; `message` stays as a plain-English fallback
+        // for non-i18n consumers (node harnesses, older cached app.js).
         postMessage({
           kind: "warning",
+          key: "warn.dp_skipped",
+          args: [String(dp.error)],
           message: `Length-constrained DP did not run (${dp.error}). ` +
                    `Showing the inverted-Dijkstra path instead — try a larger L ` +
                    `(at minimum ~Chebyshev distance between src and dst).`,

@@ -417,7 +417,19 @@
 //              art). Same file names/paths — no manifest changes. Also placed
 //              beside the "Simujaules" title in the panel header (was
 //              text-only), via a new .brand wrapper in the header markup.
-const VERSION  = "v50";
+//   v50 → v51: Second full-repo review fix batch (docs/review-2026-07-02-round2-
+//              workorder.md): top-N/DP correctness (true energy reporting,
+//              "até"-mode DP direction + soft-seed, repulsion clamp), graph
+//              spatial-hash rewrite + T-junction merge fix, bundle geotransform
+//              check + zip-bomb cap, DEM-load / OSM-loader identity guards,
+//              worker-pool teardown, export georeferencing fixes, cloud VM
+//              lease (X-Simu-Client) + boot-order + XFF hardening, CSP +
+//              focus-trap, remaining i18n gaps, doc corrections. An
+//              adversarial re-review of the batch's own diff caught two more
+//              races: the water-mask rebuild's staleness check and a DEM
+//              load's generation guard could each be fooled by unrelated
+//              concurrent activity — both now check the right thing.
+const VERSION  = "v51";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
@@ -425,12 +437,65 @@ const RUNTIME  = `simu-runtime-${VERSION}`;
 // fetch handler already keeps the known big files out, but any other huge
 // response would both bloat the cache AND get fully re-downloaded in the
 // background on every reuse (stale-while-revalidate). Responses whose
-// Content-Length parses above this are served but never cached.
+// Content-Length parses above this are served but never cached. When
+// Content-Length is ABSENT — common on chunked/Content-Encoding responses
+// through a CDN — we can't trust "no header" to mean "small": putIfWithinCap
+// below counts the decoded bytes off the stream instead, so a big body still
+// can't slip past the cap uncapped.
 const MAX_RUNTIME_BYTES = 30 * 1024 * 1024;
 
-function withinRuntimeCap(res) {
+// Cache `res` into RUNTIME if it fits the size cap; a no-op otherwise. `res`
+// must already be a clone the caller owns (see the "res.clone() must happen
+// synchronously" note on handle(), below) — this function may consume its
+// body.
+//   - Content-Length present: today's fast path (size check, then put).
+//   - Content-Length absent, no body: nothing to count — put directly.
+//   - Content-Length absent, has a body: read it via the stream reader,
+//     counting bytes; cancel and skip caching once the count exceeds the
+//     cap, otherwise rebuild a Response from the counted chunks. The rebuilt
+//     Response's body is the DECODED bytes (the reader already inflated
+//     them), so content-encoding/content-length/transfer-encoding are
+//     stripped from its headers — keeping them would corrupt a later
+//     cache.match() read (a decoder trying to re-inflate already-decoded
+//     bytes, or a length header that no longer matches the body).
+async function putIfWithinCap(req, res) {
   const len = parseInt(res.headers.get("content-length") || "", 10);
-  return !(Number.isFinite(len) && len > MAX_RUNTIME_BYTES);
+  if (Number.isFinite(len)) {
+    if (len > MAX_RUNTIME_BYTES) return;
+    const cache = await caches.open(RUNTIME);
+    return cache.put(req, res);
+  }
+
+  if (!res.body) {
+    const cache = await caches.open(RUNTIME);
+    return cache.put(req, res);
+  }
+
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_RUNTIME_BYTES) {
+      reader.cancel();
+      return; // over cap — do not cache (memory bounded to ~cap + one chunk)
+    }
+    chunks.push(value);
+  }
+
+  const headers = new Headers(res.headers);
+  headers.delete("content-encoding");
+  headers.delete("content-length");
+  headers.delete("transfer-encoding");
+  const rebuilt = new Response(new Blob(chunks), {
+    status: res.status,
+    statusText: res.statusText,
+    headers,
+  });
+  const cache = await caches.open(RUNTIME);
+  return cache.put(req, rebuilt);
 }
 
 // Paths are relative to the SW's scope (the deploy root). Keep this list
@@ -540,9 +605,9 @@ async function handle(event) {
     // Background refresh, ignored failures — offline browsing is fine.
     event.waitUntil(
       fetch(req).then((res) => {
-        if (res && res.ok && withinRuntimeCap(res)) {
+        if (res && res.ok) {
           const copy = res.clone();
-          return caches.open(RUNTIME).then((c) => c.put(req, copy));
+          return putIfWithinCap(req, copy);
         }
       }).catch(() => {}),
     );
@@ -551,12 +616,12 @@ async function handle(event) {
 
   try {
     const res = await fetch(req);
-    if (res && res.ok && res.status < 400 && withinRuntimeCap(res)) {
-      // Cache only successful responses. opaque (cross-origin no-cors),
-      // 4xx/5xx and over-cap bodies are skipped to avoid poisoning or
-      // bloating the cache.
+    if (res && res.ok && res.status < 400) {
+      // Cache only successful responses. opaque (cross-origin no-cors) and
+      // 4xx/5xx are skipped to avoid poisoning the cache; over-cap bodies
+      // are skipped inside putIfWithinCap.
       const copy = res.clone();
-      event.waitUntil(caches.open(RUNTIME).then((c) => c.put(req, copy)));
+      event.waitUntil(putIfWithinCap(req, copy));
     }
     return res;
   } catch (err) {

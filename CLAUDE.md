@@ -20,9 +20,10 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   passes count, A* top-N routes, multi-ref density, layered-DP max-cost
   path, IDW network fill. Pure JS on typed arrays.
 - `backend/` — optional native compute server (Rust + rayon, see its
-  README). OFF by default; the app's "Use native backend" checkbox is a
-  top-level compute option (always visible, NOT inside the density panel) and
-  falls back to browser workers on any failure. Two endpoints: `POST /density`
+  README). OFF by default; the app's compute-source radiogroup (Browser /
+  Localhost / Cloud — a top-level compute option, always visible, NOT inside
+  the density panel) selects it, and falls back to browser workers on any
+  failure. Two endpoints: `POST /density`
   (multi-reference density) and `POST /single` (single-source from/to/round
   energy field + optional passes). Top-N / destination path / maximize stay
   browser-only — the backend produces no routes.

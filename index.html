@@ -4,6 +4,71 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
+  <!-- Content-Security-Policy: an allowlist of everything this build-step-
+       free app actually loads (verified against app.js/index.html, not
+       guessed) — the app already had one crafted-file XSS (v48 review C11,
+       fixed) and interpolates many user-derived strings into innerHTML, so
+       an unconstrained script-src is a real risk. Directive-by-directive:
+         script-src   — the three SRI-pinned CDN hosts; 'wasm-unsafe-eval'
+                         so sql.js (cdnjs) can compile the .wasm it fetches
+                         on first .gpkg open; sha256 hashes (NOT
+                         'unsafe-inline') for the JSON-LD block, the two
+                         inline scripts below (drawer toggle, SW
+                         registration), and the help-dialog focus-trap
+                         script further down — recompute a hash with
+                         `python3 -c "import hashlib,base64;print('sha256-'+base64.b64encode(hashlib.sha256(open('/dev/stdin','rb').read()).digest()).decode())"`
+                         fed the exact bytes of the inline script's body
+                         (between its opening tag's '>' and the matching
+                         closing tag) whenever you edit one of them, or it
+                         silently stops running (DevTools shows a CSP
+                         violation, not a JS error).
+         style-src    — 'unsafe-inline' for the many style="" attributes and
+                         the inline <style> block (impractical to hash/nonce
+                         without a build step); fonts.googleapis.com (the
+                         stylesheet below) and unpkg.com (Leaflet /
+                         Leaflet-Geoman CSS).
+         font-src     — fonts.gstatic.com (the actual font files the
+                         stylesheet below references).
+         img-src      — 'self' + data:/blob: (canvas.toDataURL() energy/
+                         passes overlays, Leaflet-Geoman's inline SVG toolbar
+                         icons) + the four basemap tile hosts and the
+                         rmsampa-v2 XYZ tiles host.
+         connect-src  — 'self' + every fetch() target: Overpass, the census
+                         .fgb bucket, the simujaules example DEM/vector/mask
+                         bucket, the Cloud orchestrator + its VM data-plane
+                         host, the FABDEM/tiles host, cdnjs (sql-wasm.wasm),
+                         and http://127.0.0.1:*/http://localhost:* for the
+                         optional native backend. NOTE: a user who points
+                         "Localhost URL" at a custom self-hosted backend
+                         OUTSIDE 127.0.0.1/localhost will be blocked here —
+                         a documented limitation (loosen connect-src for
+                         your own deploy if you self-host elsewhere), not a
+                         silent failure: the app already falls back to
+                         browser workers on any fetch failure.
+         worker-src, child-src — 'self' (energy-worker.js, and its
+                         importScripts of graph-engine.js).
+         object-src 'none'; base-uri 'self'; form-action 'self' — no
+                         plugins, no <base>, no <form> in this app; safe,
+                         standard hardening with zero behavioural cost.
+       The Google Fonts stylesheet below is deliberately NOT SRI-pinned (see
+       the comment on it) — that is a separate, accepted exception. -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' https://unpkg.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com 'wasm-unsafe-eval'
+      'sha256-Zummr8wLfJ3XxdgpKBzuhAKVQKIcBLTZ/vDz4TDv2lg='
+      'sha256-759bp9RLFyEKbmJ2/BusIfD6K8bDDx0xlabSImiad4M='
+      'sha256-xRKHkuCIqaZQ8tc4K6yAEK0CmbWBBJSpZvmHKcRdVIU='
+      'sha256-xChjLER4dCiBiSng0gVHR06gT1nCUkmOsZ/ajs/SZcg=';
+    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com;
+    font-src 'self' https://fonts.gstatic.com;
+    img-src 'self' data: blob: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://telhas.pedalhidrografi.co;
+    connect-src 'self' https://overpass-api.de https://storage.googleapis.com https://simujaules.pedalhidrografi.co https://orch.simujaules.pedalhidrografi.co https://compute.simujaules.pedalhidrografi.co https://telhas.pedalhidrografi.co https://cdnjs.cloudflare.com http://127.0.0.1:* http://localhost:*;
+    worker-src 'self';
+    child-src 'self';
+    object-src 'none';
+    base-uri 'self';
+    form-action 'self';
+  " />
   <!-- viewport: maximum-scale not pinned because pinch-zoom on the map is
        part of the UX. Some devices add their own zoom controls when the
        app is "installed" — that's fine. -->
@@ -12,6 +77,9 @@
        system monospace before it loads / offline). -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- Google serves this stylesheet's @font-face per-UA (a different src
+       per browser), so a fixed SRI hash cannot apply here — a deliberate,
+       accepted exception to this file's SRI convention, not an oversight. -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
   <!-- Replaced at runtime by applyTranslations() (PT/EN). This is just
        what crawlers and the OS task-bar see before JS runs. -->
@@ -1115,8 +1183,9 @@
 
       <details class="group" id="execution-group">
         <summary data-i18n="group.execution">2C. Execução</summary>
-        <!-- Compute source: Browser (default), Localhost (native Rust),
-             Cloud (local orchestrator boots a VM; offered only when served locally). -->
+        <!-- Compute source: Browser (default), Localhost (native Rust), Cloud
+             (orchestrator boots a VM on demand — a public Cloud Run service,
+             reachable from any origin, gated by the shared cloud password). -->
         <label id="compute-source-label" data-i18n="param.compute_source" style="margin-top: 8px;">Compute source</label>
         <div id="compute-source" role="radiogroup" aria-labelledby="compute-source-label">
           <label style="display: flex; align-items: center; gap: 6px;">
@@ -1494,9 +1563,6 @@
           <p data-i18n-html="help.p.params"></p>
           <p data-i18n-html="help.p.budget_mode"></p>
 
-          <h4 data-i18n="help.h.maximize">Maximizar energia</h4>
-          <p data-i18n-html="help.p.maximize"></p>
-
           <h4 data-i18n="help.h.compute">4 · Computar</h4>
           <p data-i18n-html="help.p.compute"></p>
           <p data-i18n-html="help.p.backend"></p>
@@ -1506,12 +1572,14 @@
           <p data-i18n-html="help.p.viz"></p>
           <p data-i18n-html="help.p.energy_range"></p>
           <p data-i18n-html="help.p.passes_blend"></p>
+          <p data-i18n-html="help.p.compare"></p>
           <p data-i18n-html="help.p.passes_dual"></p>
           <p data-i18n-html="help.p.relief"></p>
           <p data-i18n-html="help.p.tiles"></p>
 
           <h4 data-i18n="help.h.bundle">6 · Salvar / restaurar</h4>
           <p data-i18n-html="help.p.bundle"></p>
+          <p data-i18n-html="help.p.io_group"></p>
         </div>
 
         <div class="modal-page">
@@ -1545,6 +1613,9 @@
           <p data-i18n-html="help.p.network_extra"></p>
           <p data-i18n-html="help.p.network_osm"></p>
 
+          <h4 data-i18n="help.h.graph">Grafo da rede (seguir os vetores)</h4>
+          <p data-i18n-html="help.p.graph"></p>
+
           <h4 data-i18n="help.h.interp">Interpolação fora da rede</h4>
           <p data-i18n-html="help.p.interp"></p>
           <p data-i18n-html="help.p.interp_only"></p>
@@ -1562,6 +1633,20 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v51</strong> — 2026-07-03<br/>
+              <strong>Second full-repo review fix batch</strong> (see
+              <code>docs/review-2026-07-02-round2-workorder.md</code>). Top-N and
+              length-constrained-DP correctness fixes (true route energy, "até"-mode
+              direction, repulsion clamp); graph-mode spatial-hash rewrite and a
+              T-junction merge fix; bundle geotransform check and a zip-bomb cap;
+              DEM-load and OSM-loader identity guards; worker-pool teardown; export
+              georeferencing fixes; cloud VM lease + boot-order + spoofing
+              hardening; a Content-Security-Policy and help-dialog focus trap;
+              remaining i18n gaps and doc corrections. An adversarial
+              re-review of the batch's own diff caught two more races it had
+              introduced: a water-mask rebuild's staleness check and a DEM
+              load's generation guard could each be fooled by unrelated
+              concurrent activity — both now check the right thing.</p>
               <p><strong>v50</strong> — 2026-07-02<br/>
               <strong>New app icon</strong> — a yellow ascent arrow crossing a
               blue topographic contour field, replacing the old bicycle glyph.
@@ -1931,6 +2016,79 @@
       </div>
     </div>
   </div>
+
+  <!-- Help-dialog focus management (role="dialog" aria-modal="true" above):
+       per the ARIA authoring-practices "dialog" pattern, aria-modal=true
+       requires moving focus INTO the dialog on open and restoring it on
+       close — the browser does neither by itself, so without this a
+       keyboard/screen-reader user's focus stayed on the "?" button, which
+       aria-modal semantically hides from the accessibility tree once the
+       dialog is open. Implemented here (not in app.js's openHelp/closeHelp,
+       which only toggle the .active class) via a MutationObserver on that
+       class, so it reacts correctly no matter which path opens/closes the
+       dialog (the "?" button, Escape, or a backdrop click — all wired in
+       app.js) without touching app.js. The layer-order panel just below
+       (role="region") is non-modal by design and is left untouched. -->
+  <script>
+    (function () {
+      const modal = document.getElementById('help-modal');
+      const dialog = modal ? modal.querySelector('.modal') : null;
+      const helpBtn = document.getElementById('help-btn');
+      if (!modal || !dialog) return;
+
+      // The dialog container itself is the focus target (no single control
+      // inside it is the obvious default); Tab from there reaches the ×
+      // button first, matching DOM order.
+      dialog.setAttribute('tabindex', '-1');
+
+      let lastFocused = null;
+
+      function focusables() {
+        // Elements a keyboard user can reach: the × button plus any links/
+        // <summary> in the theory page (attribution, tiles credit, the
+        // collapsed changelog). offsetParent is null for the changelog's
+        // content while <details> is closed, so it's correctly excluded
+        // until the user expands it (recomputed fresh on every Tab).
+        return Array.from(dialog.querySelectorAll(
+          'a[href], button:not([disabled]), summary, input:not([disabled]), ' +
+          'select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        )).filter((el) => el.offsetParent !== null);
+      }
+
+      function trapTab(e) {
+        if (e.key !== 'Tab') return;
+        const els = focusables();
+        if (els.length === 0) { e.preventDefault(); return; }
+        const first = els[0], last = els[els.length - 1];
+        const active = document.activeElement;
+        if (e.shiftKey) {
+          // Shift-Tab from the first control (or from the dialog container
+          // itself, right after opening) would otherwise escape backward
+          // into the hidden-behind-the-backdrop page — wrap to the last.
+          if (active === first || active === dialog) { e.preventDefault(); last.focus(); }
+        } else if (active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+
+      let wasOpen = modal.classList.contains('active');
+      new MutationObserver(() => {
+        const open = modal.classList.contains('active');
+        if (open === wasOpen) return; // ignore unrelated class mutations
+        wasOpen = open;
+        if (open) {
+          lastFocused = document.activeElement;
+          dialog.focus();
+          dialog.addEventListener('keydown', trapTab);
+        } else {
+          dialog.removeEventListener('keydown', trapTab);
+          (lastFocused || helpBtn)?.focus();
+          lastFocused = null;
+        }
+      }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+    })();
+  </script>
 
   <!-- Layer stacking-order modal. Rows are rendered by app.js (top of the
        list = drawn on top); ↑/↓ apply immediately and persist. -->

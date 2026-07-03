@@ -372,5 +372,116 @@ function graphComps(g) {
   ok(`stepCost === v2Edge exactly on all ${checked} samples`, mismatches === 0, `${mismatches} mismatch(es)`);
 }
 
+// ---- 13. T-junction node merge survives a per-axis quantisation straddle ---
+// Regression: the T-junction cut used to be placed at the PERPENDICULAR
+// PROJECTION Q, not the touching endpoint P itself — P and Q can be up to
+// snapTol apart, and Math.round(x/snapTol) assigns them DIFFERENT quantised
+// keys whenever they straddle a half-quantum boundary, so the segment split
+// for nothing and the two lines stayed in separate components. Empirically
+// (snapTol=0.5): gaps of 0.26 and 0.49 used to disconnect (2 components)
+// while 0 and 0.2 happened to still connect. The fix places the cut node AT
+// P, guaranteeing the same nodeOf key regardless of gap.
+{
+  const dem = flatDem(5, 5, 0);
+  const street = [ctr(0, 0), ctr(0, 4)];
+  const compsForGap = (gap) => {
+    const stub = [[0.5 + gap, 2.5], ctr(2, 2)]; // endpoint `gap` cells off the street's interior
+    const g = GraphEngine.buildGraph([street, stub], dem, { junctionMode: "crossings", snapTolCells: 0.5 });
+    return graphComps(g);
+  };
+  ok("T-junction: gap 0.26 (was disconnecting) now connects", compsForGap(0.26) === 1, `comps=${compsForGap(0.26)}`);
+  ok("T-junction: gap 0.49 (near-tolerance, was disconnecting) now connects", compsForGap(0.49) === 1, `comps=${compsForGap(0.49)}`);
+  ok("T-junction: gap 0.2 (already worked) still connects", compsForGap(0.2) === 1, `comps=${compsForGap(0.2)}`);
+  ok("T-junction: gap 0 (exact touch) still connects", compsForGap(0) === 1, `comps=${compsForGap(0)}`);
+}
+
+// ---- 14. T-junction also fires on an INTERIOR vertex, not just endpoints ---
+// Regression: the v49 T-junction scan iterated only each polyline's two
+// ENDPOINTS. An interior vertex resting on another line's segment interior
+// (a non-noded .gpkg / hand-drawn network) — the same failure class, one
+// vertex inward — still produced no junction.
+{
+  const dem = flatDem(5, 5, 0);
+  const lineA = [ctr(0, 0), ctr(2, 2), ctr(0, 4)]; // interior vertex at (2.5,2.5)
+  const lineB = [ctr(0, 2), ctr(4, 2)];            // passes through (2.5,2.5)
+  const g = GraphEngine.buildGraph([lineA, lineB], dem, { junctionMode: "crossings" });
+  ok("interior-vertex T-junction: one connected component", graphComps(g) === 1, `comps=${graphComps(g)}`);
+  const src = GraphEngine.nearestNode(g, 0.5, 0.5), dst = GraphEngine.nearestNode(g, 4.5, 2.5);
+  const res = GraphEngine.computeGraph(g, { mode: "from", cost, eMax: 0, srcNode: src, dstNode: dst, wantPath: true });
+  ok("interior-vertex T-junction: a route crosses the junction", !!res.path && res.path.nodes[0] === dst && res.path.nodes[res.path.nodes.length - 1] === src);
+}
+
+// ---- 15. graph top-N respects mode "to" (score the dst→src direction) -----
+// Regression: v49 fixed the raster A* top-N's `reverse` flag for mode "to"
+// but computeGraph's wantTopN branch hardcoded forward (`false`) twice — the
+// base field and topN's own internal search/scoring never paid the
+// reverse-direction edge costs, diverging from the (correct) non-topN
+// "from"/"to" branch right below it.
+{
+  const dxM = 10, W = 6;
+  // Rising terrain (+5 m/cell): forward (uphill) and reverse (downhill)
+  // travel cost differently under the asymmetric v2 model — the test bites.
+  const dem = { height: new Float32Array(Array.from({ length: W }, (_, c) => c * 5)), mask: new Uint8Array(W).fill(1), H: 1, W, dxM, dyM: 10 };
+  const chain = []; for (let c = 0; c < W; c++) chain.push(ctr(0, c));
+  const g = GraphEngine.buildGraph([chain], dem, { junctionMode: "shared" });
+  const src = GraphEngine.nearestNode(g, 0.5, 0.5), dst = GraphEngine.nearestNode(g, 0.5, 5.5);
+  const fieldFrom = GraphEngine.computeGraph(g, { mode: "from", cost, eMax: 0, srcNode: src, dstNode: dst });
+  const fieldTo = GraphEngine.computeGraph(g, { mode: "to", cost, eMax: 0, srcNode: src, dstNode: dst });
+  ok("terrain is asymmetric (from vs to field at dst differ)",
+     Math.abs(fieldFrom.nodeEnergy[dst] - fieldTo.nodeEnergy[dst]) > 1,
+     `from=${fieldFrom.nodeEnergy[dst]} to=${fieldTo.nodeEnergy[dst]}`);
+  const toTopN = GraphEngine.computeGraph(g, { mode: "to", cost, eMax: 0, srcNode: src, dstNode: dst, wantTopN: true, nRoutes: 1 });
+  const fromTopN = GraphEngine.computeGraph(g, { mode: "from", cost, eMax: 0, srcNode: src, dstNode: dst, wantTopN: true, nRoutes: 1 });
+  ok('mode "to" top-N route #1 energy == reverse-field E[dst]',
+     approx(toTopN.routes[0].energy, fieldTo.nodeEnergy[dst]),
+     `got ${toTopN.routes[0].energy} want ${fieldTo.nodeEnergy[dst]}`);
+  ok('mode "from" top-N route #1 energy == forward-field E[dst]',
+     approx(fromTopN.routes[0].energy, fieldFrom.nodeEnergy[dst]),
+     `got ${fromTopN.routes[0].energy} want ${fieldFrom.nodeEnergy[dst]}`);
+}
+
+// ---- 16. Phase C: a mapped OSM `ele` tag overrides deckOf h0/h1 ------------
+// graph-engine.js side of the ele channel ONLY (wiring the Overpass ele pull
+// into app.js's loadOsmNetwork/lineMeta is a separate lane's file and is not
+// implemented here — see the round-2 work order). A deck whose lineMeta
+// carries eleA/eleB must flatten to those values instead of the DEM sample at
+// its own ends; absent ele reproduces today's sampleHeight-only behaviour.
+{
+  const dxM = 10;
+  const dem = { height: new Float32Array([10, 0, 0, 0, 10]), mask: new Uint8Array(5).fill(1), H: 1, W: 5, dxM, dyM: 10 };
+  const chain = [ctr(0, 0), ctr(0, 1), ctr(0, 2), ctr(0, 3), ctr(0, 4)];
+  const mkRes = (lineMeta) => {
+    const g = GraphEngine.buildGraph([chain], dem, { junctionMode: "shared", lineMeta });
+    const src = GraphEngine.nearestNode(g, 0.5, 0.5), dst = GraphEngine.nearestNode(g, 0.5, 4.5);
+    return { g, res: GraphEngine.computeGraph(g, { mode: "from", cost, eMax: 0, srcNode: src, dstNode: dst, wantPath: true }) };
+  };
+  const withoutEle = mkRes([{ deck: true, layer: 1 }]);
+  const withEle = mkRes([{ deck: true, layer: 1, eleA: 30, eleB: 30 }]);
+  const flat = 4 * distStep * dxM; // 4 flat edges either way — ele changes the LEVEL, not the grade
+  ok("no ele: deck still flattens via sampleHeight (today's behaviour)",
+     approx(withoutEle.res.path.energy, flat), `got ${withoutEle.res.path.energy} want ${flat}`);
+  ok("mapped ele overrides the DEM-sampled ends (still flat, just at a different level)",
+     approx(withEle.res.path.energy, flat), `got ${withEle.res.path.energy} want ${flat}`);
+  // Energy alone can't tell "still flat" apart from "actually used ele" (both
+  // are zero-grade) — read the stored profile's absolute elevation directly.
+  ok("without ele the profile sits at the DEM's 10 m ends", approx(withoutEle.g.profH[0], 10), `got ${withoutEle.g.profH[0]}`);
+  ok("with ele the profile sits at the mapped 30 m, not the DEM's 10 m", approx(withEle.g.profH[0], 30), `got ${withEle.g.profH[0]}`);
+}
+
+// ---- 17. bucket hash falls back safely for geometry far outside a tiny DEM -
+// Robustness for the packed-integer bucket-key restructuring: a network
+// whose bbox blows the DEM's own cell count out (permitted since the
+// caller's bbox-intersection prefilter does not clip individual line
+// geometry) must fall back to the safe, unbounded string-keyed path instead
+// of risking an oversized/aliased flat array — and must still find the
+// crossing correctly.
+{
+  const dem = flatDem(4, 4, 0);
+  const lines = [[[0, 0], [2000, 2000]], [[0, 2000], [2000, 0]]]; // cross at (1000,1000)
+  const g = GraphEngine.buildGraph(lines, dem, { junctionMode: "crossings" });
+  ok("far-out-of-DEM crossing still merges into one component (fallback path)",
+     graphComps(g) === 1, `comps=${graphComps(g)}`);
+}
+
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

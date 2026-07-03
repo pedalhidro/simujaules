@@ -229,6 +229,13 @@ public/routes.json
 
 .DS_Store
 dem/*
+# Re-include just the provenance doc — a directory-level exclusion blocks
+# traversal, so un-exclude dem/vector/ itself, re-exclude everything in it,
+# then re-include the one file (verified empirically: a plain
+# `!dem/vector/README.md` negation alone does NOT work here).
+!dem/vector/
+dem/vector/*
+!dem/vector/README.md
 fabdem/*
 docs/articles/*
 

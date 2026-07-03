@@ -9,6 +9,67 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v51 — 2026-07-03
+
+**Second full-repo review fix batch** (`docs/review-2026-07-02-round2-workorder.md`),
+covering rendering/export, bundle round-trip, data loaders, cloud-ops, i18n
+completeness, the DP/interp worker paths, memory at scale, and a fresh-eyes
+pass on v49 itself:
+
+- **Correctness.** Top-N alternative routes now report their true (un-penalised)
+  energy instead of the A\*'s internal penalised search cost; the length-constrained
+  DP now respects **"até"** mode's travel direction and soft-masks the start cell
+  like every other search mode; per-cell top-N repulsion can no longer go
+  negative. The graph-mode spatial hash is now a packed-integer CSR structure
+  (was string-keyed) — faster and bounded, with a safe fallback for
+  out-of-bounds geometry. Graph T-junctions merge correctly regardless of which
+  side of a snap-tolerance boundary the touching vertex falls on. Bundle
+  binary-replay now checks the DEM's full geotransform, not just its
+  dimensions — a same-size DEM at a different location can no longer silently
+  render a bundle's rasters/routes at the wrong place. A rapid double-click
+  across two DEM-loading buttons can no longer let the slower load's parse
+  silently overwrite a faster, more-recent one.
+- **Cloud.** The in-VM cost backstops (idle watchdog, uptime cap) now install
+  *before* any network-dependent boot step, so a transient failure can't leave
+  a VM running with zero safety net. The orchestrator now tracks a short-lived
+  per-tab lease (`X-Simu-Client`) so a second browser's "stop after run" can't
+  kill a VM mid-compute for someone else, and reads the X-Forwarded-For chain's
+  *last* (Cloud-Run-appended, unforgeable) entry instead of the first
+  (client-spoofable) one for its firewall rule.
+- **Robustness.** DEM/OSM/vector loaders gained DEM-identity guards (a DEM swap
+  mid-load can no longer install a stale-sized layer), Overpass timeout/partial
+  responses are now detected and rejected instead of silently installing
+  incomplete data, multi-band GeoTIFFs and GDAL_NODATA comparisons are read
+  correctly, and worker pools/interp workers are properly torn down instead of
+  accumulating. Exported GeoTIFFs and PNG world files are now correctly
+  georeferenced (including the stride-downsampled huge-DEM case and
+  FABDEM-derived CRS tags), and a crafted zip bundle can no longer OOM the tab
+  before its size is checked.
+- **Security & i18n.** Added a Content-Security-Policy meta tag; the help
+  dialog now traps focus while open. Filled in the last hardcoded-English UI
+  strings (DEM metadata, colormap group labels, OSM/DP status and warning
+  messages) and rewrote the help modal's stale sections (compute-source radio,
+  graph mode, compare view, dormant "maximizar" wording removed).
+- **Docs.** README/CLAUDE.md/orchestrator+vm READMEs corrected to match shipped
+  behaviour (compute-source radio, deploy bucket, lease semantics, the
+  `--dry-run` token requirement); the "Viário RMSampa" example network gained
+  a provenance doc and its OSM/ODbL attribution.
+
+See the work order for the full 78-finding list and disposition; one item
+(a linear-taper fix for the climb-threshold cost discontinuity) is deliberately
+deferred to its own release, and the OSM `ele`-tag pull-through for graph-mode
+decks is deferred pending a live-tested Overpass query change.
+
+An adversarial re-review of this batch's own diff (hunting specifically for
+damage from the lane agents' unintended concurrent editing of `app.js`) found
+none, but caught two genuine new races the batch introduced: the OSM
+water-mask rebuild's staleness check reused a generation counter that also
+bumps on unrelated bridge/impassable toggles (now checks DEM identity
+instead, like every sibling loader), and a DEM load's generation guard only
+covered its fetch stage — a slow parse could still silently finish after and
+overwrite a faster, more recent load (now re-checked right before the DEM is
+installed).
+
 ## v50 — 2026-07-02
 
 **New app icon.** Replaced the old bicycle glyph with a yellow ascent arrow
