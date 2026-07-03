@@ -429,7 +429,17 @@
 //              races: the water-mask rebuild's staleness check and a DEM
 //              load's generation guard could each be fooled by unrelated
 //              concurrent activity — both now check the right thing.
-const VERSION  = "v51";
+//   v51 → v52: From an audit against bicycling-energy-model (the energy law's
+//              spec repo): graph-mode maximize now respects mode "to" (was
+//              always scoring forward from srcNode, unlike topN and the raster
+//              maxCostPathOfLength); round-mode path energy now reports the
+//              round-trip total (fwd+bwd) instead of silently recomputing the
+//              outbound leg alone. Two new regression tests confirm both bite
+//              on unfixed code. Stale abRatio comment corrected. Removed the
+//              legacy QGIS plugins (qgis/) this app was originally ported from
+//              — long superseded by energy-worker.js's v2 engine and carrying
+//              no served files.
+const VERSION  = "v52";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

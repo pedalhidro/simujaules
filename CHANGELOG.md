@@ -9,6 +9,23 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v52 — 2026-07-03
+
+**Cross-repo energy-model audit fixes.** An adversarial audit against
+`bicycling-energy-model` (the energy law's spec repo) confirmed `v2Edge` is
+correctly implemented everywhere it's called — zero computational bugs in the
+core cost function — but surfaced two engine-vs-engine inconsistencies:
+graph-mode **maximize** now respects mode `"to"` (it previously always scored
+the walk forward from `srcNode`, unlike top-N and the raster
+`maxCostPathOfLength`, which already handle this); **round-mode path energy**
+now reports the round-trip total (forward + backward) instead of silently
+recomputing just the outbound leg. Two new regression tests
+(`test-graph-engine.mjs`) confirm both bite on the unfixed code. Also fixed a
+stale code comment (`abRatio` was documented as smoothed; it's deliberately
+not) and removed the legacy QGIS plugins (`qgis/`) this app was originally
+ported from — long superseded by `energy-worker.js`'s v2 engine and never
+part of the deployed file set.
+
 ## v51 — 2026-07-03
 
 **Second full-repo review fix batch** (`docs/review-2026-07-02-round2-workorder.md`),

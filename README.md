@@ -87,8 +87,9 @@ first load).
   [backend/README.md](backend/README.md).
 - `deploy.sh` — stages and rsyncs the deployable files to `gs://simujaules`.
 - `test-*.mjs`, `backend/test-backend.mjs` — the node test suites (see below).
-- `dem/`, `fabdem/`, `vocab/`, `qgis/` — example DEMs, the FABDEM fetcher, the
-  export vocabulary, and the original QGIS plugins this was ported from.
+- `dem/`, `fabdem/`, `vocab/` — example DEMs, the FABDEM fetcher, and the
+  export vocabulary. (The original QGIS plugins this was ported from have
+  been removed — superseded by `energy-worker.js`'s v2 engine.)
 
 ## Running
 

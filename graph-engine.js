@@ -737,7 +737,10 @@
   // Layered DP: the maximum-energy walk of EXACTLY L edges from src (revisits
   // allowed, like energy-worker's maxCostPathOfLength). dp[k][v] = max energy to
   // reach v in k edges; reconstruct via the per-layer half-edge that achieved it.
-  function maximizeWalk(g, costAB, costBA, src, L, dst) {
+  // `reverse` mirrors dijkstra's reverse flag (mode "to": score edges in the
+  // opposite travel direction, i.e. energy TO src) — the graph analogue of the
+  // raster maxCostPathOfLength's `reverse` (energy-worker.js, dh flip).
+  function maximizeWalk(g, costAB, costBA, src, L, dst, reverse) {
     const nN = g.nNodes;
     const NEG = -Infinity;
     let dpPrev = new Float64Array(nN).fill(NEG); dpPrev[src] = 0;
@@ -750,7 +753,7 @@
         if (dpPrev[u] === NEG) continue;
         for (let he = g.csrHead[u]; he < g.csrHead[u + 1]; he++) {
           const v = g.csrTarget[he], e = g.csrEdge[he], atob = g.csrAtoB[he];
-          const w = atob ? costAB[e] : costBA[e];
+          const w = reverse ? (atob ? costBA[e] : costAB[e]) : (atob ? costAB[e] : costBA[e]);
           const nd = dpPrev[u] + w;
           if (nd > dpCur[v]) { dpCur[v] = nd; pk[v] = he; }
         }
@@ -789,9 +792,12 @@
     let edgeEnergy = null, nodeEnergy = null, path = null;
 
     // maximize: layered-DP max-energy walk of L edges (its own path + field).
+    // mode "to" mirrors the non-maximize "from"/"to" branch below and the raster
+    // maxCostPathOfLength fix (energy-worker.js): score the walk in the true
+    // travel direction (energy TO srcNode), not always forward from it.
     if (params.maximize) {
       const L = params.maximizeLength > 0 ? params.maximizeLength : 1;
-      const mw = maximizeWalk(g, costAB, costBA, params.srcNode, L, params.dstNode != null ? params.dstNode : -1);
+      const mw = maximizeWalk(g, costAB, costBA, params.srcNode, L, params.dstNode != null ? params.dstNode : -1, params.mode === "to");
       nodeEnergy = new Float32Array(g.nNodes).fill(NaN);
       for (let v = 0; v < g.nNodes; v++) if (mw.bestNode[v] > -Infinity) nodeEnergy[v] = mw.bestNode[v];
       if (mw.path) for (let k = 0; k < mw.path.edges.length; k++) edgePass[mw.path.edges[k]] = 1;
@@ -874,8 +880,13 @@
     if (path && path.nodes.length) {
       let lenM = 0, en = 0;
       for (let i = 0; i < path.edges.length; i++) lenM += g.edgeLenM[path.edges[i]];
-      // energy along the path = sum of directed costs in travel order
-      en = pathEnergy(g, costAB, costBA, path, params.mode === "to");
+      // energy along the path = sum of directed costs in travel order — EXCEPT
+      // round mode, where the shown path is only the outbound leg (the return
+      // leg is ambiguous, mirroring energy-worker.js's round dispatch: "the
+      // path is ambiguous... report the outbound path for visualisation") but
+      // the reported energy must be the ROUND-TRIP total already computed in
+      // nodeEnergy (fwd + bwd), not the outbound leg's own cost alone.
+      en = params.mode === "round" ? nodeEnergy[path.nodes[0]] : pathEnergy(g, costAB, costBA, path, params.mode === "to");
       pathOut = { nodes: path.nodes, edges: path.edges, lengthM: lenM, energy: en };
     }
 

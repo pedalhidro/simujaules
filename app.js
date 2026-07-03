@@ -755,8 +755,10 @@ const PERSIST_KEY = "simu-params";
 // bit-parity. See bicycling-energy-model/notas.md (v2). Coefficients are in
 // kJ-based units (energy field / budget / legend stay kJ, as before α/β/η).
 // epsOffset is the empirical −0.13 descent-recovery offset (a constant, not a
-// UI knob). abRatio = (aRoll+aAero)/beta is the dimensionless flat-resistance
-// grade (= α/β) used by the per-grade descent recovery ε.
+// UI knob). abRatio = crr + aeroCoef/mg is the dimensionless flat-resistance
+// grade (= α/β) used by the per-grade descent recovery ε — deliberately
+// UN-smoothed (it equals (aRoll+aAero)/beta only when kSmooth = 1; ε is a
+// grade-geometry factor, not an energy one, so it must not scale with k_smooth).
 // Flat reference speed v_f (m/s) from the rider's power on the flat: solve the
 // steady wheel-power balance keff·P = (Crr·m·g + ½ρCdA·v²)·v by bisection.
 // Mirrors bicycling-energy-model compare.mjs flatEqSpeed (wind = 0).

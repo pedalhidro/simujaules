@@ -1633,6 +1633,15 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v52</strong> — 2026-07-03<br/>
+              <strong>Cross-repo energy-model audit fixes.</strong> An audit against
+              <code>bicycling-energy-model</code> (the energy law's spec repo) confirmed
+              <code>v2Edge</code> is correct everywhere it's called, but found graph-mode
+              <strong>maximize</strong> ignoring mode "to" (always scored forward, unlike
+              top-N and the raster path) and <strong>round-mode</strong> path energy
+              reporting only the outbound leg instead of the round-trip total. Both fixed,
+              with new regression tests. Removed the legacy QGIS plugins this app was
+              ported from.</p>
               <p><strong>v51</strong> — 2026-07-03<br/>
               <strong>Second full-repo review fix batch</strong> (see
               <code>docs/review-2026-07-02-round2-workorder.md</code>). Top-N and

@@ -483,5 +483,49 @@ function graphComps(g) {
      graphComps(g) === 1, `comps=${graphComps(g)}`);
 }
 
+// ---- 18. graph maximize respects mode "to" (score the dst→src direction) ---
+// Regression: unlike topN and the plain "from"/"to" branch, computeGraph's
+// maximize dispatch called maximizeWalk with no reverse flag at all — it
+// always scored forward from srcNode regardless of params.mode, diverging
+// from the raster maxCostPathOfLength fix (energy-worker.js: reverse = mode
+// === "to"). Same asymmetric-terrain trick as test 15: forward and reverse
+// single-hop costs differ under the v2 model, so a dropped reverse flag bites.
+{
+  const dxM = 10, W = 6;
+  const dem = { height: new Float32Array(Array.from({ length: W }, (_, c) => c * 5)), mask: new Uint8Array(W).fill(1), H: 1, W, dxM, dyM: 10 };
+  const chain = []; for (let c = 0; c < W; c++) chain.push(ctr(0, c));
+  const g = GraphEngine.buildGraph([chain], dem, { junctionMode: "shared" });
+  const src = GraphEngine.nearestNode(g, 0.5, 2.5), dst = GraphEngine.nearestNode(g, 0.5, 3.5);
+  const fieldTo = GraphEngine.computeGraph(g, { mode: "to", cost, eMax: 0, srcNode: src, dstNode: dst });
+  const fieldFrom = GraphEngine.computeGraph(g, { mode: "from", cost, eMax: 0, srcNode: src, dstNode: dst });
+  ok("terrain is asymmetric (from vs to single-hop cost differ — test bites)",
+     Math.abs(fieldFrom.nodeEnergy[dst] - fieldTo.nodeEnergy[dst]) > 0.01,
+     `from=${fieldFrom.nodeEnergy[dst]} to=${fieldTo.nodeEnergy[dst]}`);
+  const maxTo = GraphEngine.computeGraph(g, { mode: "to", cost, eMax: 0, srcNode: src, dstNode: dst, maximize: true, maximizeLength: 1 });
+  ok('maximize mode "to" L=1 matches the reverse-scored field at dst, not the forward one',
+     maxTo.path && approx(maxTo.path.energy, fieldTo.nodeEnergy[dst]),
+     `got ${maxTo.path && maxTo.path.energy} want ${fieldTo.nodeEnergy[dst]} (forward would be ${fieldFrom.nodeEnergy[dst]})`);
+}
+
+// ---- 19. round-mode path energy is the round-trip total, not the outbound leg only
+// Regression: computeGraph's final pathOut block recomputed path energy via
+// pathEnergy(..., params.mode === "to") for EVERY mode, including "round" —
+// where that's false, so it silently returned the outbound leg's own cost
+// instead of the round-trip sum (fwd+bwd) already sitting in nodeEnergy[dst].
+// Mirrors energy-worker.js's round dispatch: pathEnergy = energy[goalIdx]
+// (the combined field value), not a fresh single-direction recomputation.
+{
+  const dxM = 10, W = 6;
+  const dem = { height: new Float32Array(Array.from({ length: W }, (_, c) => c * 5)), mask: new Uint8Array(W).fill(1), H: 1, W, dxM, dyM: 10 };
+  const chain = []; for (let c = 0; c < W; c++) chain.push(ctr(0, c));
+  const g = GraphEngine.buildGraph([chain], dem, { junctionMode: "shared" });
+  const src = GraphEngine.nearestNode(g, 0.5, 0.5), dst = GraphEngine.nearestNode(g, 0.5, 5.5);
+  const res = GraphEngine.computeGraph(g, { mode: "round", cost, eMax: 0, srcNode: src, dstNode: dst, wantPath: true });
+  ok("round-mode field is finite at dst", Number.isFinite(res.nodeEnergy[dst]), `got ${res.nodeEnergy[dst]}`);
+  ok("round-mode path energy == round-trip field total (fwd+bwd), not the outbound leg alone",
+     res.path && approx(res.path.energy, res.nodeEnergy[dst]),
+     `got ${res.path && res.path.energy} want ${res.nodeEnergy[dst]}`);
+}
+
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
