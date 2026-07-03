@@ -409,7 +409,15 @@
 //              cloud VM startup script; SW precache bypasses the HTTP cache (no
 //              more stale/mixed-version installs) and stops caching big DEM/GPKG
 //              files; i18n + v1→v2 cost-model doc fixes; census pipeline fixed.
-const VERSION  = "v49";
+//   v49 → v50: New app icon — a yellow ascent arrow crossing a blue topographic
+//              contour field, replacing the old bicycle glyph. Regenerated every
+//              size (favicon.ico, icon-192/512, apple-touch-icon, maskable
+//              192/512) from the design source; icon.svg/icon-maskable.svg now
+//              wrap the raster (a hand-authored vector no longer matched the
+//              art). Same file names/paths — no manifest changes. Also placed
+//              beside the "Simujaules" title in the panel header (was
+//              text-only), via a new .brand wrapper in the header markup.
+const VERSION  = "v50";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

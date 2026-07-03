@@ -351,9 +351,14 @@
     /* padding-left clears the fixed top-left hamburger (collapse) toggle. */
     .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
     .panel-header h1 { margin: 0; }
-    /* Title + tagline stacked on one side; actions stay on the other. */
+    /* Icon + title + tagline on one side; actions stay on the other (the
+       .brand wrapper keeps panel-header's space-between to exactly 2 items). */
+    .panel-header .brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .panel-header .title-block { display: flex; flex-direction: column; min-width: 0; }
     .panel-header .subtitle { font-size: 11px; font-weight: 400; color: var(--muted); margin-top: 1px; line-height: 1.25; }
+    /* App icon beside the title — decorative (the name sits right next to it),
+       so it's alt="" and not announced by screen readers. */
+    .panel-header .app-icon { width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0; }
     /* Two-column key/value table (label | input): the 1B network params and the
        2A parameter block. Fixed value column so inputs/selects align. */
     .kv-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
@@ -798,9 +803,12 @@
   <div id="app">
     <aside id="panel">
       <div class="panel-header">
-        <div class="title-block">
-          <h1 data-i18n="title">Simujaules</h1>
-          <span class="subtitle" data-i18n="subtitle">Imaginador de caminhos fáceis para o encontro</span>
+        <div class="brand">
+          <img class="app-icon" src="./icons/icon-192.png" alt="" width="28" height="28" />
+          <div class="title-block">
+            <h1 data-i18n="title">Simujaules</h1>
+            <span class="subtitle" data-i18n="subtitle">Imaginador de caminhos fáceis para o encontro</span>
+          </div>
         </div>
         <div class="header-actions">
           <button type="button" class="engine-tag" id="lang-tag" data-i18n-aria="lang.toggle.aria" data-i18n-title="lang.toggle.title" title="Language — click to switch">EN</button>
@@ -1554,6 +1562,14 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v50</strong> — 2026-07-02<br/>
+              <strong>New app icon</strong> — a yellow ascent arrow crossing a
+              blue topographic contour field, replacing the old bicycle glyph.
+              Regenerated every size (favicon, 192/512, apple-touch, maskable
+              192/512) from the new design source; same file names throughout,
+              so no manifest changes were needed. Also placed beside the
+              <strong>"Simujaules"</strong> title in the panel header, which was
+              text-only before.</p>
               <p><strong>v49</strong> — 2026-07-02<br/>
               <strong>Full-repo review fix batch</strong> (see
               <code>docs/review-2026-07-01.md</code>). Top-N: an admissible A*

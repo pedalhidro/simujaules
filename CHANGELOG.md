@@ -9,6 +9,21 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v50 — 2026-07-02
+
+**New app icon.** Replaced the old bicycle glyph with a yellow ascent arrow
+crossing a blue topographic contour field — closer to what the app actually
+computes (climbing effort over terrain relief). Regenerated every size
+(`favicon.ico`, `icon-192.png`/`icon-512.png`, `apple-touch-icon.png`, and the
+maskable `192`/`512` variants, safe-zone-padded the same way the previous
+design was) from the new design source (`simujaules-v2.png`, kept at the repo
+root). `icon.svg`/`icon-maskable.svg` now wrap that raster in an SVG shell
+instead of hand-authored vector paths — the contour texture isn't practical
+to hand-vectorise. Same file names/paths throughout, so `manifest.webmanifest`
+and `deploy.sh` needed no changes. The same icon now also sits beside the
+**"Simujaules"** title in the panel header (`icons/icon-192.png`, 28×28,
+decorative/`alt=""`) — previously the header had text only.
+
 ## v49 — 2026-07-02
 
 **Correctness fixes from a full-repo review** (`docs/review-2026-07-01.md`), spanning
