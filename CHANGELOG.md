@@ -9,6 +9,22 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v53 — 2026-07-03
+
+**Icon cache-bust fix.** v50's icon redesign kept every filename identical to
+minimize the diff — but `deploy.sh` sets a 30-day `Cache-Control` on `icons/`,
+and its own comment already warned about exactly this: a browser or
+Cloudflare edge that had cached the old icon bytes under that header wouldn't
+see the new one for up to 30 days, no matter how many times the site got
+redeployed. Every shipped icon file (`icon.svg`, `icon-192`/`512`, the
+maskable `192`/`512` variants, `apple-touch-icon`) is renamed with a `-v2`
+suffix — a new URL bypasses every existing cache outright, old or new.
+`favicon.ico` is the one exception (browsers fetch it at a fixed well-known
+path, so it can't be renamed); its cache lifetime is cut from 30 days to 1 so
+this specific failure mode doesn't recur for it. Next icon redesign: bump
+every filename to `-v3` (see the comment above the icon `gcloud storage
+objects update` call in `deploy.sh`).
+
 ## v52 — 2026-07-03
 
 **Cross-repo energy-model audit fixes.** An adversarial audit against

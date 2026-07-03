@@ -439,7 +439,17 @@
 //              legacy QGIS plugins (qgis/) this app was originally ported from
 //              — long superseded by energy-worker.js's v2 engine and carrying
 //              no served files.
-const VERSION  = "v52";
+//   v52 → v53: Icon cache-bust fix. v50's icon redesign kept every filename
+//              identical, colliding with the 30-day Cache-Control deploy.sh
+//              sets on icons/ — browsers/Cloudflare that had already cached
+//              the old bytes wouldn't see the new icon for up to 30 days
+//              regardless of redeploying. Every shipped icon file (icon.svg,
+//              icon-192/512, maskable 192/512, apple-touch-icon) renamed with
+//              a "-v2" suffix — a new URL bypasses every existing cache
+//              outright. favicon.ico can't be renamed (browsers fetch it at a
+//              fixed well-known path); its cache lifetime is cut from 30 days
+//              to 1, so this doesn't recur for it specifically.
+const VERSION  = "v53";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
@@ -522,12 +532,12 @@ const PRECACHE_URLS = [
   "./energy-worker.js",
   "./graph-engine.js",
   "./manifest.webmanifest",
-  "./icons/icon.svg",
-  "./icons/icon-192.png",
-  "./icons/icon-512.png",
-  "./icons/icon-maskable-192.png",
-  "./icons/icon-maskable-512.png",
-  "./icons/apple-touch-icon.png",
+  "./icons/icon-v2.svg",
+  "./icons/icon-192-v2.png",
+  "./icons/icon-512-v2.png",
+  "./icons/icon-maskable-192-v2.png",
+  "./icons/icon-maskable-512-v2.png",
+  "./icons/apple-touch-icon-v2.png",
   "./vocab/simujoules.jsonld",
 ];
 

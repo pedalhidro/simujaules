@@ -95,13 +95,13 @@
   <meta property="og:title" content="Simujaules — Simulador bici-geo-energético" />
   <meta property="og:description" content="Campos de energia para ciclismo sobre DEMs: custo assimétrico de subida/descida, rotas ótimas, corredores naturais e densidade de passagens. Roda no navegador, exporta GeoTIFF para QGIS." />
   <meta property="og:url" content="https://simujaules.pedalhidrografi.co/" />
-  <meta property="og:image" content="https://simujaules.pedalhidrografi.co/icons/icon-512.png" />
+  <meta property="og:image" content="https://simujaules.pedalhidrografi.co/icons/icon-512-v2.png" />
   <meta property="og:locale" content="pt_BR" />
   <meta property="og:locale:alternate" content="en_US" />
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content="Simujaules — Simulador bici-geo-energético" />
   <meta name="twitter:description" content="Campos de energia para ciclismo sobre DEMs: custo assimétrico de subida/descida, rotas ótimas, corredores naturais e densidade de passagens. Roda no navegador, exporta GeoTIFF para QGIS." />
-  <meta name="twitter:image" content="https://simujaules.pedalhidrografi.co/icons/icon-512.png" />
+  <meta name="twitter:image" content="https://simujaules.pedalhidrografi.co/icons/icon-512-v2.png" />
   <!-- schema.org structured data: the machine-readable summary search
        engines and LLM crawlers actually parse. -->
   <script type="application/ld+json">
@@ -117,7 +117,7 @@
     "browserRequirements": "Requires JavaScript and Web Workers",
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "BRL" },
     "inLanguage": ["pt-BR", "en"],
-    "image": "https://simujaules.pedalhidrografi.co/icons/icon-512.png",
+    "image": "https://simujaules.pedalhidrografi.co/icons/icon-512-v2.png",
     "publisher": { "@type": "Organization", "name": "pedalhidrografi.co", "url": "https://pedalhidrografi.co/" },
     "featureList": [
       "Asymmetric climb/descent energy cost model derived from physical rider/bike parameters (mass, rolling resistance, drag area, air density, drivetrain efficiency, cruise power), with grade-dependent descent recovery",
@@ -137,8 +137,8 @@
        on iOS Safari (which still ignores parts of the manifest spec). -->
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#0f1115" />
-  <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
-  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+  <link rel="icon" type="image/svg+xml" href="./icons/icon-v2.svg" />
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon-v2.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Simujaules" />
@@ -872,7 +872,7 @@
     <aside id="panel">
       <div class="panel-header">
         <div class="brand">
-          <img class="app-icon" src="./icons/icon-192.png" alt="" width="28" height="28" />
+          <img class="app-icon" src="./icons/icon-192-v2.png" alt="" width="28" height="28" />
           <div class="title-block">
             <h1 data-i18n="title">Simujaules</h1>
             <span class="subtitle" data-i18n="subtitle">Imaginador de caminhos fáceis para o encontro</span>
@@ -1633,6 +1633,15 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v53</strong> — 2026-07-03<br/>
+              <strong>Icon cache-bust fix.</strong> v50's icon redesign kept every
+              filename identical, colliding with the 30-day cache <code>deploy.sh</code>
+              sets on <code>icons/</code> — a browser or CDN edge that had cached the
+              old bytes wouldn't see the new icon for up to 30 days regardless of
+              redeploys. Every shipped icon file now carries a <code>-v2</code>
+              suffix, bypassing every existing cache outright.
+              <code>favicon.ico</code> can't be renamed (fixed well-known path), so
+              its cache lifetime is cut from 30 days to 1 instead.</p>
               <p><strong>v52</strong> — 2026-07-03<br/>
               <strong>Cross-repo energy-model audit fixes.</strong> An audit against
               <code>bicycling-energy-model</code> (the energy law's spec repo) confirmed

@@ -72,12 +72,12 @@ cp llms.txt sitemap.xml CHANGELOG.md "$STAGE/"
 cp manifest.webmanifest "$STAGE/"
 cp sw.js                "$STAGE/"
 mkdir -p "$STAGE/icons"
-cp icons/icon.svg               "$STAGE/icons/"
-cp icons/icon-192.png           "$STAGE/icons/"
-cp icons/icon-512.png           "$STAGE/icons/"
-cp icons/icon-maskable-192.png  "$STAGE/icons/"
-cp icons/icon-maskable-512.png  "$STAGE/icons/"
-cp icons/apple-touch-icon.png   "$STAGE/icons/"
+cp icons/icon-v2.svg               "$STAGE/icons/"
+cp icons/icon-192-v2.png           "$STAGE/icons/"
+cp icons/icon-512-v2.png           "$STAGE/icons/"
+cp icons/icon-maskable-192-v2.png  "$STAGE/icons/"
+cp icons/icon-maskable-512-v2.png  "$STAGE/icons/"
+cp icons/apple-touch-icon-v2.png   "$STAGE/icons/"
 
 if ! command -v gcloud >/dev/null 2>&1; then
   echo "gcloud not on PATH. Install the Google Cloud SDK." >&2
@@ -154,19 +154,27 @@ gcloud storage objects update "$BUCKET/manifest.webmanifest" \
 gcloud storage objects update "$BUCKET/sw.js" \
   --content-type="application/javascript" --cache-control="no-cache"
 
-# Icons: long cache (rename + bump in manifest if you ever redesign).
+# Icons: long cache — filenames carry a "-v2"-style version suffix SPECIFICALLY
+# so a redesign gets a new URL instead of colliding with this 30-day cache (see
+# the v50->v51 icon change: it kept old filenames, so every browser/CDN that
+# had cached the old bytes under this same max-age didn't see the new icon for
+# up to 30 days regardless of redeploying). Next redesign: bump every filename
+# here AND in manifest.webmanifest/index.html/sw.js's PRECACHE_URLS to "-v3".
 gcloud storage objects update \
-  "$BUCKET/icons/icon.svg" "$BUCKET/icons/icon-192.png" "$BUCKET/icons/icon-512.png" \
-  "$BUCKET/icons/icon-maskable-192.png" "$BUCKET/icons/icon-maskable-512.png" \
-  "$BUCKET/icons/apple-touch-icon.png" \
+  "$BUCKET/icons/icon-v2.svg" "$BUCKET/icons/icon-192-v2.png" "$BUCKET/icons/icon-512-v2.png" \
+  "$BUCKET/icons/icon-maskable-192-v2.png" "$BUCKET/icons/icon-maskable-512-v2.png" \
+  "$BUCKET/icons/apple-touch-icon-v2.png" \
   --cache-control="public, max-age=2592000"
 
 gcloud storage objects update "$BUCKET/index.html" \
   --cache-control="public, max-age=300"
 
-# Favicon: explicit MIME (would otherwise be octet-stream) + long cache.
+# Favicon: explicit MIME (would otherwise be octet-stream). Unlike the other
+# icons, browsers request this at a hardcoded well-known path (/favicon.ico) —
+# it CANNOT be renamed to bust the cache, so its lifetime is short (1 day) on
+# purpose, not long, so a future favicon change actually propagates.
 gcloud storage objects update "$BUCKET/favicon.ico" \
-  --content-type="image/x-icon" --cache-control="public, max-age=2592000"
+  --content-type="image/x-icon" --cache-control="public, max-age=86400"
 
 # 5. Purge Cloudflare's cache for the deployed URLs (Cloudflare fronts the site,
 #    so this is a CF cache purge — there is no Google Cloud CDN url-map). Purges
