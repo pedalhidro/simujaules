@@ -467,7 +467,7 @@
 //              per-pixel noise inflates measured ascent. App-only (help
 //              modal + JS comments + CLAUDE.md); engine/worker/backend
 //              bit-parity unchanged.
-//   v54 → v55: DEM pre-smoothing + validated accuracy goal (journal Entry 20).
+//   v54 → v55: DEM pre-smoothing + validated accuracy goal (journal Entry 21).
 //              Fine DTMs (pixel ≤ 10 m) get a static mask-normalized Gaussian
 //              pre-smoothing (σ = 10 m) once at DEM load — the Entry-19
 //              resolution-over-charge mitigation in its validated config. New
@@ -479,7 +479,12 @@
 //              params, held-out error validated at med|Δ%| 3.7/2.7/4.9 with
 //              bias < ±1% (three riders) — meets the ±5%/±2% goal. New
 //              test-dem-smoothing.mjs locks the transform.
-const VERSION  = "v55";
+//   v55 → v56: Docs-only — the bicycling-energy-model journal renumbered its
+//              Entries 20↔21 (parameter-hypothesis is now 20; the smoothing/
+//              goal validation is now 21). Every reference here (help modal,
+//              comments, CLAUDE.md, the v55 changelog text) now says Entry 21
+//              for the validated-smoothing evidence. No behaviour change.
+const VERSION  = "v56";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

@@ -1,15 +1,15 @@
 // test-dem-smoothing.mjs — the deployable DEM pre-smoothing transform + its tests.
 //
 // smoothHeightsInPlace() below is THE canonical implementation destined for
-// app.js (v55, Entry-20 mitigation): sequential per-axis mask-normalized
+// app.js (v55, Entry-21 mitigation): sequential per-axis mask-normalized
 // Gaussian (rows then columns), truncation 3σ, per-axis σ_px from the
 // geotransform, in place, O(rows) temp memory. It must stay byte-identical to
 // the copy pasted into app.js (same hand-kept-in-sync rule as the other test
-// mirrors in this repo) and semantically identical to the Entry-20 python
+// mirrors in this repo) and semantically identical to the Entry-21 python
 // reference in bicycling-energy-model/data/activities/goal_calibration.mjs's
 // Phase-A header — the σ* selected there is only valid for THIS transform.
 //
-// Scheme (pinned in the journal Entry-20 pre-registration amendment):
+// Scheme (pinned in the journal Entry-21 pre-registration amendment):
 //   pass 1 (rows): for each valid cell, value' = Σ w_k·h[i±k]·m[i±k] / Σ w_k·m[i±k]
 //     over the 1-D window k ∈ [0, R], R = ceil(3σ_px); invalid cells stay
 //     untouched and never contribute.
@@ -128,7 +128,7 @@ let seed = 123456789;
 const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
 
 // ---------------------------------------------------------------------------
-console.log("dem pre-smoothing (Entry-20 deployable transform)");
+console.log("dem pre-smoothing (Entry-21 deployable transform)");
 
 // 1. Flat terrain is invariant (any mask-normalized average of a constant is the constant).
 {

@@ -2,7 +2,7 @@
 
 Goal (Danilo, 2026-07-07): routed-path prediction error < ±5% med |Δ%| with bias
 < ±2% median signed Δ%, validated per-corpus on danlessa/ppaz/jaam held-out rides.
-Evidence base: `bicycling-energy-model` journal **Entry 20** — pre-registered
+Evidence base: `bicycling-energy-model` journal **Entry 21** — pre-registered
 train/validation protocol, **VALIDATION PASSED**: ppaz 3.69/+0.96,
 jaam 2.74/+0.31, danlessa 4.94/+0.81 (n = 121/94/216 held-out rides) at the
 frozen config σ\* = 10 m + per-rider fitted (CdA, Crr, kSmooth). Shipped as
@@ -15,12 +15,12 @@ over-charge at 5 m. The two levers, both deployable:
 
 1. **Static DEM pre-smoothing at load** (the Entry-19 roadmap item) — σ\* = 10 m.
 2. **Per-rider calibration** of the existing parameter panel (CdA, Crr, kSmooth;
-   mass at the rider's known value) — documented procedure in Entry 20, no new
+   mass at the rider's known value) — documented procedure in Entry 21, no new
    app code (fitted values are per-rider and live in the journal, not here).
 
 ## WI-1 — `smoothHeightsInPlace(height, mask, H, W, dxM, dyM, sigmaM)` in app.js
 
-The EXACT scheme validated by the Entry-20 harness (its header documents it;
+The EXACT scheme validated by the Entry-21 harness (its header documents it;
 port verbatim — this was pinned pre-registration precisely so the app and the
 evidence use one transform):
 
@@ -58,17 +58,17 @@ evidence use one transform):
 - Help modal: what the smoothing is, why (journal Entries 19/20 — measured
   +9.4/+3.6 pp resolution over-charge at 5 m, validation numbers TBD), the
   auto rule, and the reload-on-change caveat. Update the v54 resolution
-  disclosure to say the mitigation now ships (numbers from Entry 20).
+  disclosure to say the mitigation now ships (numbers from Entry 21).
 - CLAUDE.md: update the "v2 model is tuned for ~30 m" invariant — the roadmap
   item is now implemented; state the auto rule and the double-smoothing guard.
-- Per-rider calibration: document the Entry-20 procedure (fit CdA/Crr/kSmooth
+- Per-rider calibration: document the Entry-21 procedure (fit CdA/Crr/kSmooth
   on your own rides at the deployed σ*) in the help modal or a docs/ page —
   values themselves live in the journal, not hardcoded here.
 - Tests: extend `test-energy-v2.mjs` (or a new `test-dem-smoothing.mjs`) with
   a pure mirror of `smoothHeightsInPlace` — hand-computed 1-D cases (flat
   stays flat; a spike attenuates by the analytic kernel factor; hole cells
   untouched and non-contributing; border normalization), plus a tiny 2-D
-  case cross-checked against the Entry-20 python reference on the same array.
+  case cross-checked against the Entry-21 python reference on the same array.
 - Full suite must stay green (engines untouched — smoothing is app-side
   preprocessing; heights ship identically to JS worker / graph / Rust, so NO
   parity implications). sw.js VERSION v55 + changelog trio + release commit
@@ -80,5 +80,5 @@ evidence use one transform):
 - No per-rider parameters hardcoded into the app.
 - No smoothing of already-coarse DEMs (the auto rule) and no re-smoothing of
   tagged exports.
-- If Entry 20's validation FAILS, stop at its fallback ladder — do not ship a
+- If Entry 21's validation FAILS, stop at its fallback ladder — do not ship a
   σ that wasn't validated.

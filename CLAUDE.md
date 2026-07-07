@@ -187,7 +187,7 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   IGC-SP 5 m DTM, `v2Edge`'s grade-local ε collapses on steep local grades and
   reads conservatively HIGH vs ∫P·dt (journal Entry 19: measured ~+9% median
   bias on real São Paulo rides at 5 m vs ~+6% at 30 m). Since v55 the
-  mitigation SHIPS as app-side preprocessing (journal Entry 20's validated
+  mitigation SHIPS as app-side preprocessing (journal Entry 21's validated
   config): `smoothHeightsInPlace()` — sequential per-axis mask-normalized
   Gaussian, in place at DEM load — driven by the `#dem-smooth` knob ("auto"
   = σ 10 m when min pixel ≤ 10 m; skips coarse sources AND already-smoothed
@@ -195,10 +195,10 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   BEFORE heights ship to the engines, so JS/graph/Rust bit-parity is
   untouched — never move smoothing INTO an engine (path-history state,
   forbidden above). `test-dem-smoothing.mjs` holds the byte-identical mirror
-  and reference tests (hand-kept-in-sync); Entry 20's σ is only valid for THIS
+  and reference tests (hand-kept-in-sync); Entry 21's σ is only valid for THIS
   transform — don't swap in a plain blur or change σ/the auto rule without
   re-running the journal validation. Accuracy itself is carried by per-rider
-  calibration (CdA/Crr/k_s fitted on the rider's own rides — Entry 20:
+  calibration (CdA/Crr/k_s fitted on the rider's own rides — Entry 21:
   validated med|Δ%| 3.7/2.7/4.9 with bias < ±1% on three independent riders,
   meeting the ±5%/±2% product goal); smoothing alone does NOT rescue
   uncalibrated fine-DEM accuracy.
