@@ -170,6 +170,32 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   `escapeHtml()` before any `status.innerHTML` interpolation.
 - UI text goes through the `STRINGS` table / `data-i18n`; never hardcode
   display text in JS (it clobbers the PT translation).
+- **Viewing energy ≡ routing energy, by construction** (product requirement,
+  `docs/energy-journal-2026-07-06-workorder.md`): never add a second
+  "estimated energy" number for a routed path/cell — whatever is shown IS the
+  per-edge sum the search optimized. `v2Edge`'s trailing `max(0, e)` descent
+  clamp is provably unreachable (journal Entry 18: 1.78 M-combo sweep, global
+  min pre-clamp +4.1e-4 kJ; confirmed on real data, min pre-clamp descent
+  edge +4.6 J across 1 402 rides) — there is nothing to reconcile between
+  "viewed" and "routed" energy, so don't build a reconciliation mechanism.
+- **Edge costs stay O(1)-local** (product requirement): no path-history-
+  dependent term may ever enter `dijkstra()`/`densityField()`/`graph-engine.js`
+  `stepCost`/`backend/src/main.rs` — this is why the descent clamp above
+  can't just be removed via a global reweighting; any such change must
+  re-run `verify_v2edge_clamp.mjs`-style proof against the new formula.
+- **v2 model is tuned for ~30 m DEM sampling**, not 5 m. On the deployed
+  IGC-SP 5 m DTM, `v2Edge`'s grade-local ε collapses on steep local grades and
+  reads conservatively HIGH vs ∫P·dt (journal Entry 19: measured ~+9% median
+  bias on real São Paulo rides at 5 m vs ~+6% at 30 m). A static ~30 m
+  pre-smoothing of the height raster at DEM load (keeps 5 m cell spacing +
+  O(1)-local costs) is a ROADMAP item, its own future release — NOT
+  implemented. Don't silently "fix" this by adding a deadband/smoothing
+  hack to the engine outside that dedicated change.
+- **FABDEM is unsuitable for energy computations on flat/urban terrain**:
+  its per-pixel noise inflates h₊ by +57% median (up to +135% on flat
+  corpora) vs the validated local IGC survey, and `v2Edge` amplifies it
+  (journal Entry 19). Do not substitute FABDEM for energy work without
+  accounting for this wherever the app's FABDEM loader is documented/used.
 
 ## Testing & verification
 

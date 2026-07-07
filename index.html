@@ -1589,6 +1589,7 @@
           <p data-i18n-html="help.p.cost"></p>
           <div class="formula" data-i18n="help.formula"></div>
           <p data-i18n-html="help.p.cost_extra"></p>
+          <p data-i18n-html="help.p.cost_resolution"></p>
 
           <h4 data-i18n="help.h.field">Campo de energia</h4>
           <p data-i18n-html="help.p.field"></p>
@@ -1633,6 +1634,22 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v54</strong> — 2026-07-07<br/>
+              <strong>Energy-model journal alignment</strong> (<code>bicycling-energy-model</code>
+              journal Entries 18/19). Reference-geometry (imported/drawn track)
+              energy readout only — routed-path/field energy is untouched.
+              <code>refEnergyKJ</code>'s descent-recovery ε now ports the champion
+              harness's <code>epsGeom</code> estimator exactly: drop-weighted over
+              30 m-resampled cells, replacing a lumped mean-descent-grade
+              approximation its own comment had claimed but never implemented.
+              Also clarified (comments only, no behaviour change): the v2 engine's
+              trailing descent-cost clamp is provably dead code — a 1.78 M-combo
+              sweep plus 1 402 real rides never triggered it — kept only for
+              JS/Rust bit-parity. New disclosures: the v2 model is tuned for
+              ~30 m DEM sampling, so on the deployed 5 m IGC-SP DTM energies read
+              conservatively high on hilly terrain; and FABDEM is not recommended
+              for energy work on flat/urban terrain, since its per-pixel noise
+              inflates measured ascent.</p>
               <p><strong>v53</strong> — 2026-07-03<br/>
               <strong>Icon cache-bust fix.</strong> v50's icon redesign kept every
               filename identical, colliding with the 30-day cache <code>deploy.sh</code>

@@ -250,6 +250,15 @@ type PortalAdj = HashMap<u32, Vec<(u32, f64, f64)>>;
 /// THE single per-edge cost — a byte-identical port of energy-worker.js's v2Edge
 /// (same operation order so the bit-parity test holds). `dist` = ground length,
 /// `dh` = signed rise (m).
+///
+/// The trailing `max(0, e)` on descents is provably dead code: given the
+/// grade-local `eps = clamp01(min(1, ab_ratio/s) - eps_offset)`, the descent
+/// cost is bounded below by +epsOffset*a_roll*dist > 0 for every parameter
+/// bundle (see bicycling-energy-model journal Entry 18 / the `descFloor`
+/// derivation in energy-worker.js's A* heuristic, ~617-637; 1.78M-combo sweep,
+/// global min pre-clamp = +4.1e-4 kJ). It is kept ONLY for JS/Rust bit-parity
+/// defense — never remove it on one side alone, and never remove it at all
+/// without re-running the Entry 18 proof against the changed formula.
 #[inline]
 fn v2_edge(dist: f64, dh: f64, c: &Cost) -> f64 {
     if dh >= 0.0 {

@@ -101,6 +101,13 @@
   // ONE step of the v2 per-edge leg-energy cost, identical to energy-worker.js's
   // v2Edge (and backend/src/main.rs::v2_edge). `c` is the cost bundle
   // { aRoll, aAero, beta, climbThr, abRatio, epsOffset }.
+  // The trailing max(0, ·) on descents is provably dead code (journal Entry 18's
+  // dead-clamp proof: the grade-local ε keeps every descent edge cost at or
+  // above a strictly positive floor — same bound as `descFloor` in
+  // energy-worker.js's A* heuristic, ~617-637). Kept ONLY as defensive
+  // bit-parity code — do NOT remove it on one side (JS/Rust/graph) without the
+  // others, and never remove it at all without re-running the Entry 18 proof
+  // (verify_v2edge_clamp.mjs) against the changed formula.
   function stepCost(d, dh, c) {
     if (dh >= 0) {
       const aero = (dh < c.climbThr * d) ? c.aAero * d : 0;

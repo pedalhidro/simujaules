@@ -9,6 +9,23 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v54 — 2026-07-07
+
+**Energy-model journal alignment** (`bicycling-energy-model` journal Entries
+18/19; `docs/energy-journal-2026-07-06-workorder.md`). Reference-geometry
+(imported/drawn track) energy readout only — routed-path/field energy is
+untouched. `refEnergyKJ`'s descent-recovery ε now ports the champion
+harness's `epsGeom` estimator exactly: drop-weighted over 30 m-resampled
+cells, replacing a lumped mean-descent-grade approximation its own comment
+had claimed but never implemented. Also clarified (code comments +
+`CLAUDE.md`, no behaviour change): the v2 engine's trailing descent-cost
+clamp is provably dead code — a 1.78 M-combo parameter sweep plus 1 402 real
+rides never once triggered it — and is kept only for JS/Rust bit-parity. New
+disclosures: the v2 model is tuned for ~30 m DEM sampling, so on the deployed
+5 m IGC-SP DTM energies read conservatively high on hilly terrain (help
+modal, PT/EN); and FABDEM is not recommended for energy work on flat/urban
+terrain, since its per-pixel noise inflates measured ascent.
+
 ## v53 — 2026-07-03
 
 **Icon cache-bust fix.** v50's icon redesign kept every filename identical to

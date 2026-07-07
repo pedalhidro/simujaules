@@ -16,6 +16,13 @@
 //   dh ≥ 0: aRoll·dist + (grade<climbThr ? aAero·dist : 0) + beta·dh
 //   dh < 0: max(0, aRoll·dist + aAero·dist − ε·beta·|dh|),
 //           ε = clamp₀₁(min(1, abRatio·dist/|dh|) − epsOffset)
+// The trailing max(0, ·) on descents is provably dead code (journal Entry 18's
+// dead-clamp proof: the grade-local ε keeps every descent edge cost at or
+// above a strictly positive floor — same bound as `descFloor` in the A*
+// heuristic below, ~617-637). Kept ONLY as defensive bit-parity code — do NOT
+// remove it on one side (JS/Rust) without the other, and never remove it at
+// all without re-running the Entry 18 proof (verify_v2edge_clamp.mjs) against
+// the changed formula.
 //
 // Modes: "from" | "to" | "round"
 // Always returns a Float32Array of energies (Infinity for unreachable).

@@ -510,6 +510,7 @@ const STRINGS = {
   "help.formula":        { pt: "subida (Δh ≥ 0):  a_rol·d + (a_aero·d se rampa < limiar) + β·Δh\ndescida (Δh < 0): max(0, a_rol·d + a_aero·d − ε·β·|Δh|)\nε = clamp₀₁(min(1, (α/β)·d/|Δh|) − 0.13)",
                            en: "uphill (Δh ≥ 0):   a_roll·d + (a_aero·d if grade < threshold) + β·Δh\ndownhill (Δh < 0): max(0, a_roll·d + a_aero·d − ε·β·|Δh|)\nε = clamp₀₁(min(1, (α/β)·d/|Δh|) − 0.13)" },
   "help.p.cost_extra":   { pt: "Nos padrões (75 kg, Crr 0.008, CdA 0.45, ρ 1.1, k_eff 0.97, 80 W no plano), <code>β = m·g/k_eff ≈ 0.76 kJ/m</code> de subida; o arrasto (<code>a_aero</code>) só é cobrado abaixo do <em>limiar de subida</em> (2%) — subindo forte a velocidade cai e o arrasto some. Na descida a recuperação <code>ε</code> depende da rampa: descidas suaves devolvem quase todo o custo de resistência, descidas íngremes não devolvem nada (nunca abaixo de zero).", en: 'At the defaults (75 kg, Crr 0.008, CdA 0.45, ρ 1.1, k_eff 0.97, 80 W on the flat), <code>β = m·g/k_eff ≈ 0.76 kJ/m</code> of climb; aero (<code>a_aero</code>) is only charged below the <em>climb threshold</em> (2%) — on a steep climb speed drops and drag vanishes. Downhill the recovery <code>ε</code> depends on grade: gentle descents refund most of the resistance cost, steep ones refund nothing (never below zero).' },
+  "help.p.cost_resolution": { pt: "O modelo v2 funciona melhor perto de ~30 m de amostragem do relevo. Em DTMs de 5 m — como o IGC-SP usado aqui — a energia lida sai conservadoramente ALTA (mediana medida ~+9% em passeios reais de São Paulo) e rotas com muita descida acabam relativamente mais penalizadas, porque a recuperação <code>ε</code> é calculada por rampa local e rampas finas de 5 m leem mais íngremes/ruidosas do que a 30 m.", en: 'The v2 model behaves best near ~30 m terrain sampling. On 5 m DTMs — like the IGC-SP DEM used here — energies read conservatively HIGH (measured ~+9% median on real São Paulo rides), and descent-heavy routes end up relatively over-charged, because the <code>ε</code> recovery is computed per local grade and fine 5 m grades read steeper/noisier than at 30 m.' },
   "help.h.field":        { pt: "Campo de energia", en: "Energy field" },
   "help.p.field":        { pt: "Dijkstra sobre todas as células passáveis a partir do ponto-fonte (ou para o ponto-destino, com arestas reversas) dá o custo mínimo de chegar a cada célula. É isso que a camada <em>Energia</em> renderiza.", en: 'Dijkstra over all passable cells starting from the source (or terminating at the destination, with reversed edges) gives the minimum cost to reach each cell. That\'s what the <em>Energy</em> layer renders.' },
   "help.h.modes":        { pt: "Modos", en: "Modes" },
@@ -755,7 +756,9 @@ const PERSIST_KEY = "simu-params";
 // bit-parity. See bicycling-energy-model/notas.md (v2). Coefficients are in
 // kJ-based units (energy field / budget / legend stay kJ, as before α/β/η).
 // epsOffset is the empirical −0.13 descent-recovery offset (a constant, not a
-// UI knob). abRatio = crr + aeroCoef/mg is the dimensionless flat-resistance
+// UI knob) — originally fit on 44 rides, now cross-validated on 3 independent
+// riders + the author's full export (bicycling-energy-model journal Entries
+// 12/14/16). abRatio = crr + aeroCoef/mg is the dimensionless flat-resistance
 // grade (= α/β) used by the per-grade descent recovery ε — deliberately
 // UN-smoothed (it equals (aRoll+aAero)/beta only when kSmooth = 1; ε is a
 // grade-geometry factor, not an energy one, so it must not scale with k_smooth).
@@ -2268,6 +2271,14 @@ async function loadImpassableFromUrl(url, label) {
 // keyed by the SW corner. geotiff.js's fromUrl uses HTTP Range requests
 // so we never download more than the visible cells (the 50 MB cap is
 // enforced as decompressed pixel-bytes, since that's what we allocate).
+//
+// CAUTION (bicycling-energy-model journal Entry 19): FABDEM is NOT adequate
+// for energy work on flat/urban terrain. Its per-pixel noise inflates h₊ by
+// +57% median (up to +135% on flat corpora), and v2Edge's per-grade ε
+// amplifies that noise (pooled 17.6% vs 7.1% med |Δ%| against the validated
+// local IGC 30 m survey). The IGC-SP DTM (loaded elsewhere in this app) is
+// the load-bearing, validated source for São Paulo; treat FABDEM here as a
+// convenience for terrain OUTSIDE that coverage, not a substitute for it.
 
 const FABDEM_BASE_URL = "https://telhas.pedalhidrografi.co/fabdem/";
 const FABDEM_TILE_DEG = 1;          // 1° per tile, keyed by SW corner
@@ -8160,8 +8171,10 @@ function buildRefTrack(latlngs, eles) {
 // v2 leg energy (kJ) of a route from its {d, dh} segments: the closed form with
 // a 2 m elevation deadband (rejects sub-τ jitter in h±) and the ε descent-
 // recovery estimator — mirrors bicycling-energy-model compare.mjs
-// approximate()+deadband(). readCost()'s coefficients are kJ-based, so the sum
-// is in kJ. Aero is charged only OFF climbs; descent gets the drop-weighted ε.
+// approximate()+deadband() for the roll/aero/climb walk, and regime_compare.mjs
+// epsGeom (journal Entry 18/WI-1) for ε itself. readCost()'s coefficients are
+// kJ-based, so the sum is in kJ. Aero is charged only OFF climbs; descent gets
+// the drop-weighted ε.
 function refEnergyKJ(segs) {
   const c = readCost();
   const tdv = parseFloat(document.getElementById("deadband")?.value);
@@ -8175,18 +8188,45 @@ function refEnergyKJ(segs) {
     if (h[i] > y + TAU) y = h[i] - TAU; else if (h[i] < y - TAU) y = h[i] + TAU;
     hS[i] = y;
   }
-  let X = 0, Xnc = 0, hPlus = 0, hMinus = 0, Xdesc = 0;
+  let X = 0, Xnc = 0, hPlus = 0, hMinus = 0;
   for (let i = 0; i < n; i++) {
     const d = segs[i].d; if (!(d > 0)) continue;
     const dh = hS[i + 1] - hS[i];
     X += d;
     if (dh >= 0) { hPlus += dh; if (dh < c.climbThr * d) Xnc += d; }  // aero off climbs
-    else { hMinus += -dh; Xnc += d; Xdesc += d; }                    // descents: full flat aero
+    else { hMinus += -dh; Xnc += d; }                                // descents: full flat aero
   }
-  // Drop-weighted ε via the mean descent grade s̄ = H₋/X₋.
-  const sbar = Xdesc > 0 ? hMinus / Xdesc : 0;
-  let eps = sbar > 0 ? Math.min(1, c.abRatio / sbar) - c.epsOffset : 0;
-  if (eps < 0) eps = 0; else if (eps > 1) eps = 1;
+  // ε (descent-recovery factor): ports bicycling-energy-model regime_compare.mjs
+  // epsGeom EXACTLY (journal Entry 18/WI-1) — every epsGeom call site in that
+  // harness resamples the RAW (pre-deadband) profile, never the τ-smoothed one
+  // the walk above uses, so this resamples `h`/cumulative distance, not `hS`.
+  // Resample into 30 m cells (confirmed load-bearing by Entry 19 — do not
+  // change the cell size), accumulate the drop-weighted
+  // Σ drop_k·min(1, abRatio/(drop_k/30)) over descending cells, divide by the
+  // total drop, THEN subtract epsOffset and clamp₀₁ ONCE on that aggregate
+  // (never per-cell — clamping per-cell is what the old lumped-mean-grade s̄ =
+  // H₋/X₋ estimator effectively approximated, and it collapses under mixed
+  // grades / fine resolution; see Entry 18/19).
+  const xCum = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) xCum[i + 1] = xCum[i] + segs[i].d;
+  const totalM = xCum[n], DX = 30, nc = Math.floor(totalM / DX);
+  let eps = 0;
+  if (nc >= 2) {
+    let j = 0;
+    const hAt = (d) => {
+      while (j < n - 1 && xCum[j + 1] < d) j++;
+      const seg = xCum[j + 1] - xCum[j], f = seg > 1e-9 ? (d - xCum[j]) / seg : 0;
+      return h[j] * (1 - f) + h[j + 1] * f;
+    };
+    const cellH = new Float64Array(nc + 1);
+    for (let k = 0; k <= nc; k++) cellH[k] = hAt(k * DX);
+    let Hd = 0, epsW = 0;
+    for (let k = 0; k < nc; k++) {
+      const dh = cellH[k + 1] - cellH[k];
+      if (dh < 0) { const drop = -dh; Hd += drop; epsW += drop * Math.min(1, c.abRatio / (drop / DX)); }
+    }
+    if (Hd >= 1) eps = Math.max(0, Math.min(1, epsW / Hd - c.epsOffset));
+  }
   return c.aRoll * X + c.aAero * Xnc + c.beta * (hPlus - eps * hMinus);
 }
 

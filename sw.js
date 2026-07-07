@@ -449,7 +449,25 @@
 //              outright. favicon.ico can't be renamed (browsers fetch it at a
 //              fixed well-known path); its cache lifetime is cut from 30 days
 //              to 1, so this doesn't recur for it specifically.
-const VERSION  = "v53";
+//   v53 → v54: Energy-model journal alignment (bicycling-energy-model journal
+//              Entries 18/19). Reference-geometry (imported/drawn track)
+//              energy readout only — routed-path/field energy is untouched.
+//              refEnergyKJ's descent-recovery ε now ports the champion
+//              harness's epsGeom estimator exactly: drop-weighted over 30 m-
+//              resampled cells, replacing a lumped mean-descent-grade
+//              approximation its own comment had claimed but never
+//              implemented. Also clarified (comments only, no behaviour
+//              change): the v2 engine's trailing descent-cost clamp is
+//              provably dead code — a 1.78 M-combo sweep plus 1 402 real
+//              rides never triggered it — kept only for JS/Rust bit-parity.
+//              New disclosures: the v2 model is tuned for ~30 m DEM sampling,
+//              so on the deployed 5 m IGC-SP DTM energies read conservatively
+//              high on hilly terrain (help modal, PT/EN); and FABDEM is not
+//              recommended for energy work on flat/urban terrain, since its
+//              per-pixel noise inflates measured ascent. App-only (help
+//              modal + JS comments + CLAUDE.md); engine/worker/backend
+//              bit-parity unchanged.
+const VERSION  = "v54";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
