@@ -510,7 +510,7 @@ const STRINGS = {
   "help.formula":        { pt: "subida (Δh ≥ 0):  a_rol·d + (a_aero·d se rampa < limiar) + β·Δh\ndescida (Δh < 0): max(0, a_rol·d + a_aero·d − ε·β·|Δh|)\nε = clamp₀₁(min(1, (α/β)·d/|Δh|) − 0.13)",
                            en: "uphill (Δh ≥ 0):   a_roll·d + (a_aero·d if grade < threshold) + β·Δh\ndownhill (Δh < 0): max(0, a_roll·d + a_aero·d − ε·β·|Δh|)\nε = clamp₀₁(min(1, (α/β)·d/|Δh|) − 0.13)" },
   "help.p.cost_extra":   { pt: "Nos padrões (75 kg, Crr 0.008, CdA 0.45, ρ 1.1, k_eff 0.97, 80 W no plano), <code>β = m·g/k_eff ≈ 0.76 kJ/m</code> de subida; o arrasto (<code>a_aero</code>) só é cobrado abaixo do <em>limiar de subida</em> (2%) — subindo forte a velocidade cai e o arrasto some. Na descida a recuperação <code>ε</code> depende da rampa: descidas suaves devolvem quase todo o custo de resistência, descidas íngremes não devolvem nada (nunca abaixo de zero).", en: 'At the defaults (75 kg, Crr 0.008, CdA 0.45, ρ 1.1, k_eff 0.97, 80 W on the flat), <code>β = m·g/k_eff ≈ 0.76 kJ/m</code> of climb; aero (<code>a_aero</code>) is only charged below the <em>climb threshold</em> (2%) — on a steep climb speed drops and drag vanishes. Downhill the recovery <code>ε</code> depends on grade: gentle descents refund most of the resistance cost, steep ones refund nothing (never below zero).' },
-  "help.p.cost_resolution": { pt: "O modelo v2 funciona melhor perto de ~30 m de amostragem do relevo. Em DTMs de 5 m — como o IGC-SP usado aqui — a energia lida sai conservadoramente ALTA (mediana medida ~+9% em passeios reais de São Paulo) e rotas com muita descida acabam relativamente mais penalizadas, porque a recuperação <code>ε</code> é calculada por rampa local e rampas finas de 5 m leem mais íngremes/ruidosas do que a 30 m. Desde a v55 o app aplica, ao carregar MDTs finos (pixel ≤ 10 m), uma <em>suavização</em> gaussiana estática (σ = 10 m, controlável em 1A) — a configuração validada no journal (Entry 21). A precisão fina vem de <em>calibrar os parâmetros</em> (CdA, Crr, k_s) nos seus próprios percursos: com calibração, o erro validado fica abaixo de ±5% com viés < ±2% (procedimento no journal).", en: 'The v2 model behaves best near ~30 m terrain sampling. On 5 m DTMs — like the IGC-SP DEM used here — energies read conservatively HIGH (measured ~+9% median on real São Paulo rides), and descent-heavy routes end up relatively over-charged, because the <code>ε</code> recovery is computed per local grade and fine 5 m grades read steeper/noisier than at 30 m. Since v55 the app applies, when loading fine DTMs (pixel ≤ 10 m), a static Gaussian <em>smoothing</em> (σ = 10 m, controllable in 1A) — the journal-validated configuration (Entry 21). Fine accuracy comes from <em>calibrating the parameters</em> (CdA, Crr, k_s) on your own rides: calibrated, the validated error is under ±5% with bias < ±2% (procedure in the journal).' },
+  "help.p.cost_resolution": { pt: "O modelo v2 funciona melhor perto de ~30 m de amostragem do relevo. Em DTMs de 5 m — como o IGC-SP usado aqui — a energia lida sai conservadoramente ALTA (mediana medida ~+9% em passeios reais de São Paulo) e rotas com muita descida acabam relativamente mais penalizadas, porque a recuperação <code>ε</code> é calculada por rampa local e rampas finas de 5 m leem mais íngremes/ruidosas do que a 30 m. Desde a v55 o app aplica, ao carregar MDTs finos (pixel ≤ 10 m), uma <em>suavização</em> gaussiana estática (σ = 10 m, controlável em 1A) — a configuração validada no journal (Entry 20). A precisão fina vem de <em>calibrar os parâmetros</em> (CdA, Crr, k_s) nos seus próprios percursos: com calibração, o erro validado fica abaixo de ±5% com viés < ±2% (procedimento no journal).", en: 'The v2 model behaves best near ~30 m terrain sampling. On 5 m DTMs — like the IGC-SP DEM used here — energies read conservatively HIGH (measured ~+9% median on real São Paulo rides), and descent-heavy routes end up relatively over-charged, because the <code>ε</code> recovery is computed per local grade and fine 5 m grades read steeper/noisier than at 30 m. Since v55 the app applies, when loading fine DTMs (pixel ≤ 10 m), a static Gaussian <em>smoothing</em> (σ = 10 m, controllable in 1A) — the journal-validated configuration (Entry 20). Fine accuracy comes from <em>calibrating the parameters</em> (CdA, Crr, k_s) on your own rides: calibrated, the validated error is under ±5% with bias < ±2% (procedure in the journal).' },
   "param.dem_smooth":    { pt: "Suavização do MDT", en: "DEM smoothing" },
   "demsmooth.auto":      { pt: "auto (σ = 10 m em MDTs finos)", en: "auto (σ = 10 m on fine DTMs)" },
   "demsmooth.off":       { pt: "desligada", en: "off" },
@@ -2553,14 +2553,14 @@ async function loadFabdemForView() {
   }
 }
 
-// Static DEM pre-smoothing (v55, journal Entry 21's validated mitigation for the
+// Static DEM pre-smoothing (v55, journal Entry 20's validated mitigation for the
 // Entry-19 fine-DEM over-charge): sequential per-axis mask-normalized Gaussian
 // (rows then columns), truncation 3σ, per-axis σ_px from the geotransform, in
 // place, O(rows) temp memory (~10 s at 135 M cells). Runs app-side at DEM load
 // only — heights then ship identically to the JS worker, graph engine and Rust
 // backend, so there are NO engine/parity implications. test-dem-smoothing.mjs
 // holds the verbatim mirror + reference tests (hand-kept-in-sync, like the
-// other engine mirrors); the Entry-21 harness (goal_calibration.mjs Phase A)
+// other engine mirrors); the Entry-20 harness (goal_calibration.mjs Phase A)
 // validated this exact scheme, so σ choices are only meaningful for THIS
 // transform — don't swap in a plain gaussian blur.
 function smoothHeightsInPlace(height, mask, H, W, dxM, dyM, sigmaM) {
@@ -2713,7 +2713,7 @@ async function loadDemFromArrayBuffer(buf, label, gen) {
     return;
   }
 
-  // Static pre-smoothing (v55, journal Entry 21). "auto" applies σ = 10 m to
+  // Static pre-smoothing (v55, journal Entry 20). "auto" applies σ = 10 m to
   // fine DTMs (pixel ≤ 10 m — e.g. the IGC-SP 5 m rasters) and skips coarse
   // sources (FABDEM 30 m is already at the model's happy scale, Entry 19) AND
   // sources whose ImageDescription tag says they were smoothed already (our

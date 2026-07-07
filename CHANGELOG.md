@@ -9,21 +9,10 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
-## v56 — 2026-07-07
-
-**Docs: journal entries 20↔21 renumbered.** The `bicycling-energy-model`
-journal swapped its Entries 20 and 21 (the parameter-hypothesis entry is now
-20, the goal-calibration/smoothing-validation entry is now 21), so every
-reference in this app — help modal, code comments, `CLAUDE.md`, the v55
-changelog text — now points at "Entry 21" for the validated-smoothing
-evidence. Text-only; no behaviour change. (The journal harnesses' split-tag
-literal `'entry20:'` is unchanged — it names the train/validation split, not
-the entry.)
-
 ## v55 — 2026-07-07
 
 **DEM pre-smoothing + validated accuracy goal** (`bicycling-energy-model`
-journal Entry 21). Fine DTMs (pixel ≤ 10 m, e.g. the IGC-SP 5 m rasters) now
+journal Entry 20). Fine DTMs (pixel ≤ 10 m, e.g. the IGC-SP 5 m rasters) now
 get a static, mask-normalized Gaussian pre-smoothing (σ = 10 m) applied once
 at DEM load — the Entry-19 "resolution over-charge" mitigation, in its
 journal-validated configuration. New "Suavização do MDT" control in 1A
