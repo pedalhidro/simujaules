@@ -953,6 +953,16 @@
             <span data-i18n="ex.fabdem">Carregar FABDEM para a janela atual</span> <span class="ex-tag" data-i18n="ex.tag.fabdem">≤ 50 MB</span>
           </button>
         </div>
+        <div style="margin-top: 6px;">
+          <label for="dem-smooth" data-i18n="param.dem_smooth">Suavização do MDT</label>
+          <select id="dem-smooth">
+            <option value="auto" data-i18n="demsmooth.auto">auto (σ = 10 m em MDTs finos)</option>
+            <option value="0" data-i18n="demsmooth.off">desligada</option>
+            <option value="10">σ = 10 m</option>
+            <option value="20">σ = 20 m</option>
+            <option value="30">σ = 30 m</option>
+          </select>
+        </div>
         <div class="meta" id="dem-meta" data-i18n="dem.no_dem">No DEM loaded.</div>
       </details>
 
@@ -1634,6 +1644,26 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v55</strong> — 2026-07-07<br/>
+              <strong>Suavização do MDT + meta de precisão validada</strong>
+              (<code>bicycling-energy-model</code> journal Entry 20). MDTs finos
+              (pixel ≤ 10 m, como os rasters IGC-SP de 5 m) agora recebem uma
+              suavização gaussiana estática (σ = 10 m, normalizada por máscara)
+              aplicada uma vez ao carregar — a mitigação da sobrecarga de
+              resolução do Entry 19, na configuração validada. Novo controle
+              "Suavização do MDT" em 1A (auto / desligada / 10 / 20 / 30 m; o
+              auto pula fontes grossas como FABDEM e re-importações já
+              suavizadas, que o <code>dem.tif</code> exportado agora marca via
+              tag). As alturas são suavizadas no app antes de irem aos motores —
+              paridade JS/Rust intocada; mudar o controle vale no próximo
+              carregamento de MDT. Com esse σ + parâmetros calibrados por
+              ciclista (CdA, Crr, k_s ajustados no próprio histórico —
+              procedimento no journal), o erro validado em passeios não vistos
+              ficou em mediana |Δ%| 3.7 / 2.7 / 4.9 com viés &lt; ±1% em três
+              ciclistas independentes — atingindo a meta de ±5% / ±2%. Nota
+              honesta: a calibração é a alavanca maior; a suavização é o padrão
+              validado que também ameniza o viés sem calibração. Novo
+              <code>test-dem-smoothing.mjs</code> trava a transformação.</p>
               <p><strong>v54</strong> — 2026-07-07<br/>
               <strong>Energy-model journal alignment</strong> (<code>bicycling-energy-model</code>
               journal Entries 18/19). Reference-geometry (imported/drawn track)

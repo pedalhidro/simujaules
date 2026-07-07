@@ -510,7 +510,11 @@ const STRINGS = {
   "help.formula":        { pt: "subida (Δh ≥ 0):  a_rol·d + (a_aero·d se rampa < limiar) + β·Δh\ndescida (Δh < 0): max(0, a_rol·d + a_aero·d − ε·β·|Δh|)\nε = clamp₀₁(min(1, (α/β)·d/|Δh|) − 0.13)",
                            en: "uphill (Δh ≥ 0):   a_roll·d + (a_aero·d if grade < threshold) + β·Δh\ndownhill (Δh < 0): max(0, a_roll·d + a_aero·d − ε·β·|Δh|)\nε = clamp₀₁(min(1, (α/β)·d/|Δh|) − 0.13)" },
   "help.p.cost_extra":   { pt: "Nos padrões (75 kg, Crr 0.008, CdA 0.45, ρ 1.1, k_eff 0.97, 80 W no plano), <code>β = m·g/k_eff ≈ 0.76 kJ/m</code> de subida; o arrasto (<code>a_aero</code>) só é cobrado abaixo do <em>limiar de subida</em> (2%) — subindo forte a velocidade cai e o arrasto some. Na descida a recuperação <code>ε</code> depende da rampa: descidas suaves devolvem quase todo o custo de resistência, descidas íngremes não devolvem nada (nunca abaixo de zero).", en: 'At the defaults (75 kg, Crr 0.008, CdA 0.45, ρ 1.1, k_eff 0.97, 80 W on the flat), <code>β = m·g/k_eff ≈ 0.76 kJ/m</code> of climb; aero (<code>a_aero</code>) is only charged below the <em>climb threshold</em> (2%) — on a steep climb speed drops and drag vanishes. Downhill the recovery <code>ε</code> depends on grade: gentle descents refund most of the resistance cost, steep ones refund nothing (never below zero).' },
-  "help.p.cost_resolution": { pt: "O modelo v2 funciona melhor perto de ~30 m de amostragem do relevo. Em DTMs de 5 m — como o IGC-SP usado aqui — a energia lida sai conservadoramente ALTA (mediana medida ~+9% em passeios reais de São Paulo) e rotas com muita descida acabam relativamente mais penalizadas, porque a recuperação <code>ε</code> é calculada por rampa local e rampas finas de 5 m leem mais íngremes/ruidosas do que a 30 m.", en: 'The v2 model behaves best near ~30 m terrain sampling. On 5 m DTMs — like the IGC-SP DEM used here — energies read conservatively HIGH (measured ~+9% median on real São Paulo rides), and descent-heavy routes end up relatively over-charged, because the <code>ε</code> recovery is computed per local grade and fine 5 m grades read steeper/noisier than at 30 m.' },
+  "help.p.cost_resolution": { pt: "O modelo v2 funciona melhor perto de ~30 m de amostragem do relevo. Em DTMs de 5 m — como o IGC-SP usado aqui — a energia lida sai conservadoramente ALTA (mediana medida ~+9% em passeios reais de São Paulo) e rotas com muita descida acabam relativamente mais penalizadas, porque a recuperação <code>ε</code> é calculada por rampa local e rampas finas de 5 m leem mais íngremes/ruidosas do que a 30 m. Desde a v55 o app aplica, ao carregar MDTs finos (pixel ≤ 10 m), uma <em>suavização</em> gaussiana estática (σ = 10 m, controlável em 1A) — a configuração validada no journal (Entry 20). A precisão fina vem de <em>calibrar os parâmetros</em> (CdA, Crr, k_s) nos seus próprios percursos: com calibração, o erro validado fica abaixo de ±5% com viés < ±2% (procedimento no journal).", en: 'The v2 model behaves best near ~30 m terrain sampling. On 5 m DTMs — like the IGC-SP DEM used here — energies read conservatively HIGH (measured ~+9% median on real São Paulo rides), and descent-heavy routes end up relatively over-charged, because the <code>ε</code> recovery is computed per local grade and fine 5 m grades read steeper/noisier than at 30 m. Since v55 the app applies, when loading fine DTMs (pixel ≤ 10 m), a static Gaussian <em>smoothing</em> (σ = 10 m, controllable in 1A) — the journal-validated configuration (Entry 20). Fine accuracy comes from <em>calibrating the parameters</em> (CdA, Crr, k_s) on your own rides: calibrated, the validated error is under ±5% with bias < ±2% (procedure in the journal).' },
+  "param.dem_smooth":    { pt: "Suavização do MDT", en: "DEM smoothing" },
+  "demsmooth.auto":      { pt: "auto (σ = 10 m em MDTs finos)", en: "auto (σ = 10 m on fine DTMs)" },
+  "demsmooth.off":       { pt: "desligada", en: "off" },
+  "status.dem_smoothing": { pt: "Suavizando MDT (σ = {0} m)…", en: "Smoothing DEM (σ = {0} m)…" },
   "help.h.field":        { pt: "Campo de energia", en: "Energy field" },
   "help.p.field":        { pt: "Dijkstra sobre todas as células passáveis a partir do ponto-fonte (ou para o ponto-destino, com arestas reversas) dá o custo mínimo de chegar a cada célula. É isso que a camada <em>Energia</em> renderiza.", en: 'Dijkstra over all passable cells starting from the source (or terminating at the destination, with reversed edges) gives the minimum cost to reach each cell. That\'s what the <em>Energy</em> layer renders.' },
   "help.h.modes":        { pt: "Modos", en: "Modes" },
@@ -817,7 +821,7 @@ function updateCostReadout() {
 
 const PERSIST_IDS = [
   // Parameters
-  "mode", "mass", "crr", "cda", "rho", "keff", "pflat", "climb-thr", "ksmooth", "deadband", "e-max", "e-max-mode",
+  "mode", "mass", "crr", "cda", "rho", "keff", "pflat", "climb-thr", "ksmooth", "deadband", "dem-smooth", "e-max", "e-max-mode",
   "want-passes", "want-topn", "want-density",
   "n-refs", "ref-sampling", "refs-visible",
   "backend-url", "orchestrator-url", "cloud-keep-warm", "n-routes", "penalty", "repulsion-mode",
@@ -2549,6 +2553,76 @@ async function loadFabdemForView() {
   }
 }
 
+// Static DEM pre-smoothing (v55, journal Entry 20's validated mitigation for the
+// Entry-19 fine-DEM over-charge): sequential per-axis mask-normalized Gaussian
+// (rows then columns), truncation 3σ, per-axis σ_px from the geotransform, in
+// place, O(rows) temp memory (~10 s at 135 M cells). Runs app-side at DEM load
+// only — heights then ship identically to the JS worker, graph engine and Rust
+// backend, so there are NO engine/parity implications. test-dem-smoothing.mjs
+// holds the verbatim mirror + reference tests (hand-kept-in-sync, like the
+// other engine mirrors); the Entry-20 harness (goal_calibration.mjs Phase A)
+// validated this exact scheme, so σ choices are only meaningful for THIS
+// transform — don't swap in a plain gaussian blur.
+function smoothHeightsInPlace(height, mask, H, W, dxM, dyM, sigmaM) {
+  if (!(sigmaM > 0)) return;
+  const passes = [
+    { sigPx: sigmaM / dxM, horizontal: true },
+    { sigPx: sigmaM / dyM, horizontal: false },
+  ];
+  for (const p of passes) {
+    const R = Math.ceil(3 * p.sigPx);
+    if (!(R >= 1)) continue;
+    const w = new Float64Array(R + 1);
+    for (let k = 0; k <= R; k++) w[k] = Math.exp(-(k * k) / (2 * p.sigPx * p.sigPx));
+    if (p.horizontal) {
+      const buf = new Float64Array(W);
+      for (let r = 0; r < H; r++) {
+        const base = r * W;
+        for (let c = 0; c < W; c++) {
+          const idx = base + c;
+          if (!mask[idx]) continue;
+          let num = w[0] * height[idx], den = w[0];
+          for (let k = 1; k <= R; k++) {
+            const a = c - k, b = c + k;
+            if (a >= 0 && mask[base + a]) { num += w[k] * height[base + a]; den += w[k]; }
+            if (b < W && mask[base + b]) { num += w[k] * height[base + b]; den += w[k]; }
+          }
+          buf[c] = num / den;
+        }
+        for (let c = 0; c < W; c++) if (mask[base + c]) height[base + c] = buf[c];
+      }
+    } else {
+      // Vertical pass, row-major streaming: for output row r, accumulate the
+      // (2R+1) source rows r±k sequentially into num/den, then defer the
+      // write by R rows via a ring buffer (source rows must stay unmodified
+      // while they can still appear in a later output row's window).
+      const num = new Float64Array(W), den = new Float64Array(W);
+      const ring = []; // { row, vals: Float64Array }
+      const flushRow = (entry) => {
+        const base = entry.row * W;
+        for (let c = 0; c < W; c++) if (mask[base + c]) height[base + c] = entry.vals[c];
+      };
+      for (let r = 0; r < H; r++) {
+        num.fill(0); den.fill(0);
+        const k0 = Math.max(0, r - R), k1 = Math.min(H - 1, r + R);
+        for (let rr = k0; rr <= k1; rr++) {
+          const wk = w[Math.abs(rr - r)], base = rr * W;
+          for (let c = 0; c < W; c++) {
+            if (mask[base + c]) { num[c] += wk * height[base + c]; den[c] += wk; }
+          }
+        }
+        const vals = new Float64Array(W);
+        const base = r * W;
+        for (let c = 0; c < W; c++) vals[c] = mask[base + c] ? num[c] / den[c] : height[base + c];
+        ring.push({ row: r, vals });
+        // Flush rows whose window can no longer include any unwritten source row.
+        while (ring.length && ring[0].row <= r - R) flushRow(ring.shift());
+      }
+      while (ring.length) flushRow(ring.shift());
+    }
+  }
+}
+
 async function loadDemFromArrayBuffer(buf, label, gen) {
   // A compute still running against the previous DEM would render arrays
   // sized to the old H×W onto the new grid — kill it before anything else.
@@ -2639,6 +2713,28 @@ async function loadDemFromArrayBuffer(buf, label, gen) {
     return;
   }
 
+  // Static pre-smoothing (v55, journal Entry 20). "auto" applies σ = 10 m to
+  // fine DTMs (pixel ≤ 10 m — e.g. the IGC-SP 5 m rasters) and skips coarse
+  // sources (FABDEM 30 m is already at the model's happy scale, Entry 19) AND
+  // sources whose ImageDescription tag says they were smoothed already (our
+  // own dem.tif exports carry it — guards double-smoothing on re-import). An
+  // explicit σ choice overrides both guards. Runs AFTER the generation
+  // re-check so a superseded load never burns the ~10 s worst-case pass.
+  const imgDescRaw = fileDirectory.getValue ? fileDirectory.getValue("ImageDescription") : null;
+  const srcSmoothSigmaM = parseFloat((String(imgDescRaw || "").match(/simujaules:demSmoothSigmaM=([0-9.]+)/) || [])[1]) || 0;
+  const smoothSel = document.getElementById("dem-smooth")?.value ?? "auto";
+  let smoothSigmaM = 0;
+  if (smoothSel === "auto") {
+    smoothSigmaM = (Math.min(dxM, dyM) <= 10 && !(srcSmoothSigmaM > 0)) ? 10 : 0;
+  } else {
+    smoothSigmaM = Math.max(0, parseFloat(smoothSel) || 0);
+  }
+  if (smoothSigmaM > 0) {
+    status.textContent = t("status.dem_smoothing", smoothSigmaM);
+    await new Promise((r) => setTimeout(r, 0)); // let the status line paint before the sync pass
+    smoothHeightsInPlace(height, mask, H, W, dxM, dyM, smoothSigmaM);
+  }
+
   // A new DEM invalidates the cached network graph (elevations changed).
   state.networkGraph = null; state.networkGraphToken = null;
   state.dem = {
@@ -2651,6 +2747,11 @@ async function loadDemFromArrayBuffer(buf, label, gen) {
     isGeographic: isProbablyGeographic,
     geoKeys,                 // for GeoTIFF round-trip on export
     nodata,                  // source GDAL_NODATA sentinel (f32-rounded), or null — re-emitted by exportDemTif so the round trip doesn't turn nodata cells into valid terrain
+    smoothSigmaM,            // σ applied by THIS load (0 = none)
+    // Cumulative smoothing across export/re-import cycles (Gaussians compose
+    // in quadrature) — stamped into exported dem.tif's ImageDescription so the
+    // auto rule never double-smooths a re-imported export.
+    smoothCumSigmaM: Math.hypot(srcSmoothSigmaM, smoothSigmaM),
   };
   state.demLabel = label;
 
@@ -2943,9 +3044,14 @@ function exportDemTif() {
   try {
     // Re-emit the source GDAL_NODATA tag so a re-imported dem.tif reconstructs
     // the same mask — without it, nodata cells (still holding the raw
-    // sentinel in state.dem.height) round-trip as "valid" terrain.
-    const extraMd = state.dem.nodata != null ? { GDAL_NODATA: String(state.dem.nodata) } : undefined;
-    ioDownload(new Uint8Array(writeRasterAsGeoTIFF(state.dem.height, state.dem, "float32", extraMd)), "dem.tif", "image/tiff");
+    // sentinel in state.dem.height) round-trip as "valid" terrain. Also stamp
+    // the cumulative pre-smoothing σ (v55): the exported surface IS the
+    // smoothed one, and the tag stops loadDemFromArrayBuffer's auto rule from
+    // smoothing it again on re-import.
+    const extraMd = {};
+    if (state.dem.nodata != null) extraMd.GDAL_NODATA = String(state.dem.nodata);
+    if (state.dem.smoothCumSigmaM > 0) extraMd.ImageDescription = `simujaules:demSmoothSigmaM=${state.dem.smoothCumSigmaM}`;
+    ioDownload(new Uint8Array(writeRasterAsGeoTIFF(state.dem.height, state.dem, "float32", Object.keys(extraMd).length ? extraMd : undefined)), "dem.tif", "image/tiff");
     status.textContent = t("io.exported", "dem.tif");
   } catch (e) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(e.message)}</span>`; }
 }
@@ -9893,6 +9999,11 @@ function buildMetadata(result, withOutputs = true) {
     pFlat:         parseFloat(document.getElementById("pflat")?.value),
     kSmooth:       parseFloat(document.getElementById("ksmooth")?.value),
     deadbandM:     parseFloat(document.getElementById("deadband")?.value),
+    // DEM pre-smoothing (v55): the knob setting AND the σ actually applied to
+    // the loaded DEM (0 = none) — replay disclosure; results were computed on
+    // the smoothed surface, and the auto rule is deterministic per DEM+knob.
+    demSmooth:     document.getElementById("dem-smooth")?.value ?? "auto",
+    demSmoothAppliedSigmaM: state.dem?.smoothSigmaM ?? 0,
     climbThr:      parseFloat(document.getElementById("climb-thr")?.value) / 100,
     eMax:          parseFloat(document.getElementById("e-max")?.value) || 0,
     eMaxMode:      document.getElementById("e-max-mode")?.value || "leg",
@@ -10502,6 +10613,9 @@ function applyMetadataToUI(md, bin = {}) {
   set("pflat", p.pFlat);
   set("ksmooth", p.kSmooth);
   set("deadband", p.deadbandM);
+  // DEM pre-smoothing knob (v55). Old bundles (< v55) carry no demSmooth —
+  // leave the current selection alone rather than resetting it.
+  if (p.demSmooth != null) set("dem-smooth", p.demSmooth);
   set("climb-thr", p.climbThr != null ? p.climbThr * 100 : p.climbThr); // bundle stores grade; input is %
   set("e-max", p.eMax);
   set("e-max-mode", p.eMaxMode);

@@ -186,11 +186,22 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 - **v2 model is tuned for ~30 m DEM sampling**, not 5 m. On the deployed
   IGC-SP 5 m DTM, `v2Edge`'s grade-local ε collapses on steep local grades and
   reads conservatively HIGH vs ∫P·dt (journal Entry 19: measured ~+9% median
-  bias on real São Paulo rides at 5 m vs ~+6% at 30 m). A static ~30 m
-  pre-smoothing of the height raster at DEM load (keeps 5 m cell spacing +
-  O(1)-local costs) is a ROADMAP item, its own future release — NOT
-  implemented. Don't silently "fix" this by adding a deadband/smoothing
-  hack to the engine outside that dedicated change.
+  bias on real São Paulo rides at 5 m vs ~+6% at 30 m). Since v55 the
+  mitigation SHIPS as app-side preprocessing (journal Entry 20's validated
+  config): `smoothHeightsInPlace()` — sequential per-axis mask-normalized
+  Gaussian, in place at DEM load — driven by the `#dem-smooth` knob ("auto"
+  = σ 10 m when min pixel ≤ 10 m; skips coarse sources AND already-smoothed
+  re-imports via the exported dem.tif's `ImageDescription` tag). It runs
+  BEFORE heights ship to the engines, so JS/graph/Rust bit-parity is
+  untouched — never move smoothing INTO an engine (path-history state,
+  forbidden above). `test-dem-smoothing.mjs` holds the byte-identical mirror
+  and reference tests (hand-kept-in-sync); Entry 20's σ is only valid for THIS
+  transform — don't swap in a plain blur or change σ/the auto rule without
+  re-running the journal validation. Accuracy itself is carried by per-rider
+  calibration (CdA/Crr/k_s fitted on the rider's own rides — Entry 20:
+  validated med|Δ%| 3.7/2.7/4.9 with bias < ±1% on three independent riders,
+  meeting the ±5%/±2% product goal); smoothing alone does NOT rescue
+  uncalibrated fine-DEM accuracy.
 - **FABDEM is unsuitable for energy computations on flat/urban terrain**:
   its per-pixel noise inflates h₊ by +57% median (up to +135% on flat
   corpora) vs the validated local IGC survey, and `v2Edge` amplifies it
@@ -201,6 +212,9 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 
 ```sh
 node test-worker-pool.mjs                  # worker regression suite
+node test-energy-v2.mjs                    # v2 closed form + refEnergyKJ/epsGeom mirrors
+node test-dem-smoothing.mjs                # DEM pre-smoothing transform (mirrors app.js)
+node test-graph-engine.mjs                 # vector-network graph engine
 node test-water-raster.mjs                 # OSM water-mask rasterisation (areas/sea/rivers)
 node census/test-census-sampler.mjs        # in-browser census sampler helpers (mirrors app.js)
 node census/test-census-density.mjs        # census density harness end-to-end (needs npm install in census/)

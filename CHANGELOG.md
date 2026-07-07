@@ -9,6 +9,26 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v55 — 2026-07-07
+
+**DEM pre-smoothing + validated accuracy goal** (`bicycling-energy-model`
+journal Entry 20). Fine DTMs (pixel ≤ 10 m, e.g. the IGC-SP 5 m rasters) now
+get a static, mask-normalized Gaussian pre-smoothing (σ = 10 m) applied once
+at DEM load — the Entry-19 "resolution over-charge" mitigation, in its
+journal-validated configuration. New "Suavização do MDT" control in 1A
+(auto / off / 10 / 20 / 30 m; auto skips coarse sources like FABDEM and
+already-smoothed re-imports, which exported `dem.tif` files now flag via an
+`ImageDescription` tag). Heights are smoothed app-side before shipping to the
+engines, so JS worker / graph / Rust bit-parity is untouched; changing the
+knob takes effect on the next DEM load. With this σ plus per-rider calibrated
+parameters (CdA, Crr, k_s fitted on each rider's own ride history — procedure
+in the journal), held-out prediction error validated at med |Δ%| 3.7 / 2.7 /
+4.9 with bias < ±1% across three independent riders — meeting the ±5% / ±2%
+product goal. Honest note: the calibration is the bigger lever; the smoothing
+is the validated default that also softens the uncalibrated fine-DEM bias.
+New `test-dem-smoothing.mjs` locks the transform (byte-identical mirror of
+the app.js copy).
+
 ## v54 — 2026-07-07
 
 **Energy-model journal alignment** (`bicycling-energy-model` journal Entries

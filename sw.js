@@ -467,7 +467,19 @@
 //              per-pixel noise inflates measured ascent. App-only (help
 //              modal + JS comments + CLAUDE.md); engine/worker/backend
 //              bit-parity unchanged.
-const VERSION  = "v54";
+//   v54 → v55: DEM pre-smoothing + validated accuracy goal (journal Entry 20).
+//              Fine DTMs (pixel ≤ 10 m) get a static mask-normalized Gaussian
+//              pre-smoothing (σ = 10 m) once at DEM load — the Entry-19
+//              resolution-over-charge mitigation in its validated config. New
+//              "Suavização do MDT" select in 1A (auto/off/10/20/30 m; auto
+//              skips coarse sources and already-smoothed re-imports, flagged
+//              via an ImageDescription tag on exported dem.tif). Heights are
+//              smoothed app-side before shipping to the engines — JS/graph/
+//              Rust bit-parity untouched. With σ=10 + per-rider calibrated
+//              params, held-out error validated at med|Δ%| 3.7/2.7/4.9 with
+//              bias < ±1% (three riders) — meets the ±5%/±2% goal. New
+//              test-dem-smoothing.mjs locks the transform.
+const VERSION  = "v55";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
