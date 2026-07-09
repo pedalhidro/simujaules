@@ -125,8 +125,11 @@ fi
 #                                            run, so without this every file
 #                                            looks changed and re-uploads.
 echo ">> Uploading to $BUCKET …"
+# NB: the extra '^modelo/$' alternative shields the "/modelo/" directory-index
+# ALIAS OBJECT (an object literally named "modelo/", created in step 4b below)
+# from the delete pass — it never exists in the staging dir.
 gcloud storage rsync -r --checksums-only --delete-unmatched-destination-objects \
-  --exclude='^(census|vector|mask|vm)(/|$)' \
+  --exclude='^(census|vector|mask|vm)(/|$)|^modelo/$' \
   "$STAGE" "$BUCKET/" 2>&1 | tee "$RSYNC_LOG"
 
 # 4. Set headers (metadata-only — cheap, so run every deploy). HTML gets a short
@@ -175,6 +178,34 @@ gcloud storage objects update \
 
 gcloud storage objects update "$BUCKET/index.html" \
   --cache-control="public, max-age=300"
+
+# Working paper (/modelo/): short cache on the HTML (like index.html) so
+# article updates propagate; a day on the PDFs (stable filenames).
+gcloud storage objects update "$BUCKET/modelo/index.html" "$BUCKET/modelo/en.html" \
+  --cache-control="public, max-age=300"
+gcloud storage objects update "$BUCKET/modelo/artigo.pdf" "$BUCKET/modelo/paper.pdf" \
+  --cache-control="public, max-age=86400"
+
+# 4b. Directory-index alias for /modelo/: the Cloudflare origin is the GCS XML
+#     API, which has NO MainPageSuffix — the bare "/" works only via a
+#     Cloudflare rewrite, so "/modelo/" needs an object literally NAMED
+#     "modelo/" carrying a copy of modelo/index.html. gcloud can't create
+#     trailing-slash object names; the JSON API can. Idempotent overwrite; the
+#     rsync --exclude above shields it from the delete pass.
+echo ">> Creating the /modelo/ directory-index alias…"
+ALIAS_BODY="$STAGE/.modelo-alias-body"   # inside $STAGE so the EXIT trap cleans it
+{
+  printf -- '--modelo_alias\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'
+  printf '{"name":"modelo/","contentType":"text/html; charset=utf-8","cacheControl":"public, max-age=300"}\r\n'
+  printf -- '--modelo_alias\r\nContent-Type: text/html; charset=utf-8\r\n\r\n'
+  cat "$STAGE/modelo/index.html"
+  printf '\r\n--modelo_alias--\r\n'
+} > "$ALIAS_BODY"
+curl -sSf -X POST \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: multipart/related; boundary=modelo_alias" \
+  --data-binary @"$ALIAS_BODY" \
+  "https://storage.googleapis.com/upload/storage/v1/b/${BUCKET#gs://}/o?uploadType=multipart" >/dev/null
 
 # Favicon: explicit MIME (would otherwise be octet-stream). Unlike the other
 # icons, browsers request this at a hardcoded well-known path (/favicon.ico) —
