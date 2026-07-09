@@ -52,6 +52,10 @@
 ## Links
 
 - [App](https://simujaules.pedalhidrografi.co/): the simulator (PWA, works offline after first load)
+- [Working paper (pt-BR)](https://simujaules.pedalhidrografi.co/modelo/): the energy model's paper —
+  derivation, validation against ~1,400 power-meter rides, and the deployed calibration; the app's
+  `v2Edge` cost function is §9.1. [English version](https://simujaules.pedalhidrografi.co/modelo/en.html);
+  PDFs alongside. Source + harnesses: https://github.com/danlessa/bicycling-energy-model
 - [Changelog](https://simujaules.pedalhidrografi.co/CHANGELOG.md): version history
 - [JSON-LD vocabulary](https://telhas.pedalhidrografi.co/simujoules/vocab/simujoules.jsonld): terms used in exported bundle metadata
 

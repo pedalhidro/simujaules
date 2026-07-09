@@ -60,6 +60,13 @@ cp dem/*.tif "$STAGE/dem/"
 mkdir -p "$STAGE/vocab"
 cp vocab/simujoules.jsonld "$STAGE/vocab/"
 
+# The working paper (pt-BR + EN + PDFs + figures), served at /modelo/.
+# Static output built by bicycling-energy-model's research/build-modelo.sh
+# and committed here — regenerate there, don't hand-edit.
+mkdir -p "$STAGE/modelo/figs"
+cp modelo/index.html modelo/en.html modelo/artigo.pdf modelo/paper.pdf "$STAGE/modelo/"
+cp modelo/figs/*.svg "$STAGE/modelo/figs/"
+
 # SEO / LLM-crawler descriptors + the changelog (linked from llms.txt and
 # index.html's noscript). sitemap.xml now lives at the subdomain root
 # (https://simujaules.pedalhidrografi.co/sitemap.xml); still worth submitting it

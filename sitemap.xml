@@ -1,9 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Single-page app: one canonical URL at the subdomain root. Submit this file
-     in Search Console (https://simujaules.pedalhidrografi.co/sitemap.xml). -->
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<!-- App: one canonical URL at the subdomain root; /modelo/ hosts the working
+     paper (pt-BR canonical + EN alternate). Submit this file in Search
+     Console (https://simujaules.pedalhidrografi.co/sitemap.xml). -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
     <loc>https://simujaules.pedalhidrografi.co/</loc>
     <changefreq>monthly</changefreq>
+  </url>
+  <url>
+    <loc>https://simujaules.pedalhidrografi.co/modelo/</loc>
+    <changefreq>yearly</changefreq>
+    <xhtml:link rel="alternate" hreflang="pt-BR" href="https://simujaules.pedalhidrografi.co/modelo/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://simujaules.pedalhidrografi.co/modelo/en.html"/>
+  </url>
+  <url>
+    <loc>https://simujaules.pedalhidrografi.co/modelo/en.html</loc>
+    <changefreq>yearly</changefreq>
+    <xhtml:link rel="alternate" hreflang="pt-BR" href="https://simujaules.pedalhidrografi.co/modelo/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://simujaules.pedalhidrografi.co/modelo/en.html"/>
   </url>
 </urlset>
