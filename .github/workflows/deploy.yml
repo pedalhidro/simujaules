@@ -1,0 +1,120 @@
+# CI + deploy for simujaules: every push to the `deploy` branch runs the node
+# regression suites and, if green, publishes via deploy.sh (the same tested
+# path as a manual deploy: stage → gcloud storage rsync → headers → CF purge).
+#
+# Keyless auth (Workload Identity Federation), mirroring pedalhidro/amora's
+# deploy workflow: the runner swaps GitHub's OIDC token for a short-lived GCP
+# token — no long-lived secret in this PUBLIC repo. The deploy job stays INERT
+# ("skipped") until the one-time setup below is run and the repo variables are
+# set; the test job always runs.
+#
+# ── One-time setup (run LOCALLY with gcloud+gh authenticated; ~2 min) ────────
+# PROJECT=pedal-hidrografico
+# SA=gh-simujaules@$PROJECT.iam.gserviceaccount.com
+# # 1) Deploy service account, scoped to the simujaules bucket only
+# gcloud iam service-accounts create gh-simujaules --project=$PROJECT \
+#   --display-name="GitHub Actions deploy (simujaules)"
+# gcloud storage buckets add-iam-policy-binding gs://simujaules \
+#   --member="serviceAccount:$SA" --role=roles/storage.objectAdmin
+# # 2) OIDC provider for THIS repo in the existing "github" pool (the pool was
+# #    created by amora's setup — see pedalhidro/amora .github/workflows/deploy.yml;
+# #    create it first if it doesn't exist yet)
+# gcloud iam workload-identity-pools providers create-oidc github-oidc-simujaules \
+#   --project=$PROJECT --location=global --workload-identity-pool=github \
+#   --display-name="GitHub OIDC (simujaules)" \
+#   --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
+#   --attribute-condition="assertion.repository=='pedalhidro/simujaules'" \
+#   --issuer-uri="https://token.actions.githubusercontent.com"
+# POOL=$(gcloud iam workload-identity-pools describe github --project=$PROJECT \
+#   --location=global --format='value(name)')
+# gcloud iam service-accounts add-iam-policy-binding $SA --project=$PROJECT \
+#   --role=roles/iam.workloadIdentityUser \
+#   --member="principalSet://iam.googleapis.com/$POOL/attribute.repository/pedalhidro/simujaules"
+# PROVIDER=$(gcloud iam workload-identity-pools providers describe github-oidc-simujaules \
+#   --project=$PROJECT --location=global --workload-identity-pool=github \
+#   --format='value(name)')
+# # 3) Repo variables (activate the deploy job) + optional Cloudflare purge
+# gh variable set GCP_WORKLOAD_IDENTITY_PROVIDER --repo pedalhidro/simujaules --body "$PROVIDER"
+# gh variable set GCP_DEPLOY_SA --repo pedalhidro/simujaules --body "$SA"
+# gh secret   set CF_API_TOKEN --repo pedalhidro/simujaules --body "<Zone › Cache Purge token>"
+# gh secret   set CF_ZONE_ID   --repo pedalhidro/simujaules --body "<pedalhidrografi.co zone id>"
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI + Deploy
+
+on:
+  push:
+    branches: [deploy]
+  pull_request:
+    branches: [main, deploy]
+  workflow_dispatch: {}   # manual deploy button on the Actions tab
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The self-contained suites (no npm install, no DEM files, no network).
+      # backend/test-backend.mjs (needs a cargo build) and
+      # census/test-census-density.mjs (needs npm install in census/) are the
+      # two documented exceptions — run those locally on engine changes.
+      - name: Worker regression suite
+        run: node test-worker-pool.mjs
+      - name: v2 energy closed form
+        run: node test-energy-v2.mjs
+      - name: DEM pre-smoothing transform
+        run: node test-dem-smoothing.mjs
+      - name: Vector-network graph engine
+        run: node test-graph-engine.mjs
+      - name: OSM water-mask rasterisation
+        run: node test-water-raster.mjs
+      - name: Census sampler helpers
+        run: node census/test-census-sampler.mjs
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test
+    # Deploy only on the deploy branch (never for PRs), and stay INERT
+    # ("skipped") until the WIF setup above is done.
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/deploy' &&
+      vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    # Serialize deploys: a new push waits for the previous one (an interrupted
+    # rsync would leave the bucket half-updated).
+    concurrency:
+      group: deploy-simujaules
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write   # required for WIF OIDC
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # dem/*.tif (the example DEMs) are GITIGNORED — the live bucket is their
+      # canonical home. deploy.sh stages dem/*.tif and rsyncs with
+      # --delete-unmatched-destination-objects, so on a bare checkout this
+      # pre-pull is LOAD-BEARING: without it the deploy would fail at the cp
+      # (no .tif matches) — and an "empty dem/" stage would otherwise DELETE
+      # every DEM from the bucket.
+      - name: Pull example DEMs from the bucket
+        run: gcloud storage cp 'gs://simujaules/dem/*.tif' dem/
+
+      - name: Deploy (stage + rsync + headers + CF purge)
+        env:
+          # Optional — deploy.sh skips the Cloudflare purge with a notice when
+          # unset; sw.js is no-cache so updates still propagate, just slower.
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+        run: ./deploy.sh
