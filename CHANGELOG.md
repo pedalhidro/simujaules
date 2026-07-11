@@ -9,6 +9,33 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v56 — 2026-07-11
+
+**Accessibility KPIs — "300 kJ city" initiative.** Density runs now also
+sample each reference's energy field at every other reference's cell,
+producing a pairwise K×K ref↔ref energy matrix at zero extra Dijkstra cost
+(the per-ref field already existed transiently inside `densityField`). A new
+**"3B. Acessibilidade"** results block evaluates the initiative's two KPIs
+live from the cached matrix: the share of the population that can access at
+least K people within E₁ kJ (defaults: 1 000 000 people / 200 kJ), and the
+share that can access at least J% of the population within E₂ kJ (defaults:
+80% / 600 kJ). Census sampling ("IBGE 2022") now records the in-extent
+population total M — each reference proxies M/K people, so "% of references"
+reads as "% of population"; other sampling strategies take a hand-entered M
+(KPI 2 needs none). Threshold edits re-evaluate instantly without a
+recompute (style-knob rule); reference markers recolor red→yellow→green by
+attained access with per-ref tooltips; per-reference and full-matrix CSV
+exports. The Rust backend gains `want_matrix` on `/density` (f32×K² appended
+after the energy field, announced by `"matrix":K` in the response meta) in
+bit-parity with the JS worker — enforced by new `+matrix` cases in
+`backend/test-backend.mjs`, including a dropped-ref index regression (both
+engines key matrix rows by the ORIGINAL ref index; an older backend binary
+degrades to "KPI unavailable", never a wrong matrix). The block warns when a
+threshold exceeds the run's energy budget — the matrix is truncated there,
+so the KPIs become lower bounds. New matrix section in
+`test-worker-pool.mjs` (brute-force vs single-source, pooled ≡ single,
+budget bounds, maximize suppression).
+
 ## v55 — 2026-07-07
 
 **DEM pre-smoothing + validated accuracy goal** (`bicycling-energy-model`

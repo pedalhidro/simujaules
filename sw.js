@@ -479,7 +479,23 @@
 //              params, held-out error validated at med|Δ%| 3.7/2.7/4.9 with
 //              bias < ±1% (three riders) — meets the ±5%/±2% goal. New
 //              test-dem-smoothing.mjs locks the transform.
-const VERSION  = "v55";
+//   v55 → v56: Accessibility KPIs ("300 kJ city" initiative). Density runs now
+//              also sample each reference's energy field at every OTHER ref's
+//              cell — a pairwise K×K matrix at zero extra Dijkstra cost —
+//              powering a new "3B. Acessibilidade" results block: % of the
+//              population that can access ≥ K people within E₁ kJ (default
+//              1M / 200 kJ) and ≥ J% of the population within E₂ kJ (default
+//              80% / 600 kJ). Census sampling now records the in-extent
+//              population total M (each ref proxies M/K people); other
+//              sampling strategies take a hand-entered M (KPI 2 needs none).
+//              Threshold edits re-evaluate the cached matrix live (never a
+//              recompute); ref markers recolor red→yellow→green by attained
+//              access; per-ref + matrix CSV exports. Rust backend gains
+//              want_matrix on /density (f32×K² appended, "matrix":K in the
+//              meta; bit-parity with the JS worker, enforced by new +matrix
+//              cases incl. a dropped-ref index regression). Warns when a
+//              threshold exceeds the run's energy budget (lower bound).
+const VERSION  = "v56";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

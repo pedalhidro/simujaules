@@ -1673,6 +1673,30 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v56</strong> — 2026-07-11<br/>
+              <strong>KPIs de acessibilidade — iniciativa "cidade 300 kJ"</strong>.
+              Cálculos de densidade agora também amostram o campo de energia de
+              cada referência na célula de todas as outras — uma matriz K×K
+              par-a-par sem custo extra de Dijkstra. Novo bloco
+              <strong>"3B. Acessibilidade"</strong> nos resultados avalia os dois
+              KPIs ao vivo a partir da matriz em cache: fração da população que
+              alcança ≥ K pessoas com ≤ E₁ kJ (padrão 1 milhão / 200 kJ) e
+              fração que alcança ≥ J% da população com ≤ E₂ kJ (padrão 80% /
+              600 kJ). A amostragem censitária (IBGE 2022) agora registra a
+              população total M da extensão — cada referência representa M/K
+              pessoas; outras estratégias aceitam um M digitado (o KPI 2
+              dispensa M). Editar os limiares reavalia na hora, sem recalcular;
+              os marcadores das referências são recoloridos
+              vermelho→amarelo→verde pelo acesso atingido; exportações CSV por
+              referência e da matriz completa. O backend Rust ganha
+              <code>want_matrix</code> no <code>/density</code> (f32×K² anexado,
+              <code>"matrix":K</code> no meta; paridade bit-a-bit com o worker
+              JS, garantida por novos casos <code>+matrix</code> no
+              <code>test-backend.mjs</code>, incluindo regressão de índice com
+              referência descartada — um binário antigo degrada para "KPI
+              indisponível", nunca uma matriz errada). O bloco avisa quando um
+              limiar excede o orçamento de energia do cálculo — ali a matriz é
+              truncada e os KPIs viram um piso.</p>
               <p><strong>v55</strong> — 2026-07-07<br/>
               <strong>Suavização do MDT + meta de precisão validada</strong>
               (<code>bicycling-energy-model</code> journal Entry 20). MDTs finos
