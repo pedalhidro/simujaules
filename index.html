@@ -1243,6 +1243,35 @@
           <summary data-i18n="group.result_stats">3A. Estatísticas</summary>
           <div class="meta" id="result-meta" data-i18n="result.empty">—</div>
         </details>
+
+        <!-- 3B. Accessibility KPIs — shown only after a density run that
+             carried the pairwise ref↔ref energy matrix (app.js installKpiResult).
+             The threshold inputs re-evaluate from the cached matrix live; they
+             never trigger a recompute (same rule as the style knobs). Defaults
+             are the 300 kJ initiative's targets: ≥1M people within 200 kJ and
+             ≥80% of the population within 600 kJ. -->
+        <details class="group" id="kpi-group" open style="display: none;">
+          <summary data-i18n="group.kpi">3B. Acessibilidade (KPIs 300 kJ)</summary>
+          <div class="meta" data-i18n="kpi.intro" style="margin-bottom: 6px;">—</div>
+          <table class="kv-table" role="presentation">
+            <tr><td class="kv-key"><label for="kpi-ek" data-i18n="kpi.ek">E₁ (kJ)</label></td>
+                <td class="kv-val"><input type="number" id="kpi-ek" value="200" step="any" min="0" /></td></tr>
+            <tr><td class="kv-key"><label for="kpi-k" data-i18n="kpi.k">pessoas alcançáveis ≥</label></td>
+                <td class="kv-val"><input type="number" id="kpi-k" value="1000000" step="any" min="0" /></td></tr>
+            <tr><td class="kv-key"><label for="kpi-ej" data-i18n="kpi.ej">E₂ (kJ)</label></td>
+                <td class="kv-val"><input type="number" id="kpi-ej" value="600" step="any" min="0" /></td></tr>
+            <tr><td class="kv-key"><label for="kpi-j" data-i18n="kpi.j">% da população ≥</label></td>
+                <td class="kv-val"><input type="number" id="kpi-j" value="80" step="any" min="0" max="100" /></td></tr>
+            <tr><td class="kv-key"><label for="kpi-pop" id="kpi-pop-label" data-i18n="kpi.pop">população total M</label></td>
+                <td class="kv-val"><input type="number" id="kpi-pop" value="" step="any" min="0" placeholder="—" /></td></tr>
+          </table>
+          <div class="meta" id="kpi-out1" style="margin-top: 6px;">—</div>
+          <div class="meta" id="kpi-out2">—</div>
+          <div class="meta" id="kpi-meta" style="color: var(--muted);"></div>
+          <div class="meta" id="kpi-warn" style="color: #ffb86b; display: none;"></div>
+          <button type="button" class="secondary" id="kpi-export-csv" data-i18n="btn.kpi_csv" style="margin-top: 4px;">Export per-reference CSV</button>
+          <button type="button" class="secondary" id="kpi-export-matrix" data-i18n="btn.kpi_matrix_csv" style="margin-top: 4px;">Export matrix CSV</button>
+        </details>
       </details>
 
       </div><!-- /.panel-cols -->

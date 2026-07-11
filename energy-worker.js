@@ -381,6 +381,13 @@ function densityField(opts) {
     // so it returns an estimate in under a few seconds. Zero-cost (one
     // short-circuited compare per pop) when 0 — the normal compute path.
     maxSettled = 0,
+    // Optional accessibility sampling: flat cell indices (Int32Array, −1 =
+    // out-of-grid) of ALL K original refs. When set, each ref's energy field
+    // is sampled at these cells right before the per-ref scratch reset,
+    // filling one row of the K×|refCells| pairwise matrix (Infinity where
+    // unreached / ref skipped). MUST stay null on the calibration probe: a
+    // maxSettled-truncated search would record non-optimal finite energies.
+    refCells = null,
   } = opts;
   const N = H * W;
   const diag = Math.hypot(dx, dy);
@@ -402,6 +409,13 @@ function densityField(opts) {
   const density = new Float32Array(N);
   const energySum = new Float64Array(N);
   const energyCount = new Int32Array(N);
+  // Pairwise accessibility matrix: row k = ref k's energy sampled at every
+  // refCells entry (row-major, slice-rows × KC). Rows of refs this loop
+  // skips (off-grid / off-mask) stay all-Infinity — indices are NEVER
+  // compacted, so pooled slices and the Rust backend agree per original
+  // ref index.
+  const KC = refCells ? refCells.length : 0;
+  const matrix = refCells ? new Float32Array(refPoints.length * KC).fill(Infinity) : null;
 
   const E = new Float32Array(N).fill(Infinity);
   const settled = new Uint8Array(N);
@@ -528,6 +542,12 @@ function densityField(opts) {
       if (onExplored) onExplored(len, lastStopG);
       for (let j = 0; j < len; j++) passes[order[j]] = 1;
       for (let j = len - 1; j >= 0; j--) { const idx = order[j]; const p = parents[idx]; if (p >= 0) passes[p] += passes[idx]; }
+      // Accessibility row: sample this ref's field at every ref cell BEFORE
+      // the reset below wipes E. Untouched cells read Infinity.
+      if (matrix) for (let j = 0; j < KC; j++) {
+        const cj = refCells[j];
+        if (cj >= 0) matrix[k * KC + j] = E[cj];
+      }
       for (let j = 0; j < len; j++) {
         const idx = order[j];
         density[idx] += passes[idx] / N;
@@ -551,12 +571,22 @@ function densityField(opts) {
         if (bi < Infinity && !(eMaxTotalCap > 0 && fi + bi > eMaxTotalCap)) { energySum[idx] += Math.fround(fi + bi); energyCount[idx] += 1; }
       }
       for (let j = 0; j < lb; j++) density[order2[j]] += passes2[order2[j]] / N;
+      // Accessibility row (round): the masked round-trip total — same
+      // predicate + f32 rounding as the energySum accumulation above.
+      if (matrix) for (let j = 0; j < KC; j++) {
+        const cj = refCells[j];
+        if (cj < 0) continue;
+        const fi = E[cj], bi = E2[cj];
+        if (fi < Infinity && bi < Infinity && !(eMaxTotalCap > 0 && fi + bi > eMaxTotalCap)) {
+          matrix[k * KC + j] = Math.fround(fi + bi);
+        }
+      }
       for (let j = 0; j < lf; j++) { const idx = order[j]; E[idx] = Infinity; settled[idx] = 0; parents[idx] = -1; passes[idx] = 0; }
       for (let j = 0; j < lb; j++) { const idx = order2[j]; E2[idx] = Infinity; settled2[idx] = 0; parents2[idx] = -1; passes2[idx] = 0; }
     }
     if (onProgress) onProgress((k + 1) / K);
   }
-  return { density, energySum, energyCount };
+  return { density, energySum, energyCount, matrix };
 }
 
 // ------- A* with iterative-penalization for top-N routes -------
@@ -1356,6 +1386,8 @@ self.onmessage = (ev) => {
     interpSmoothing = 0,                                  // number of 3×3 smoothing passes
     maximize = false,                                     // reverse the optimisation: prefer expensive edges
     maximizeLength = 0,                                   // >0 → layered-DP max-cost path of exactly L edges
+    wantMatrix = false,                                   // density only: pairwise ref↔ref energy matrix
+    matrixCells = null,                                   // Int32Array of ALL K refs' flat cells (−1 = off-grid)
   } = msg;
 
   const wantPath = goalR >= 0 && goalC >= 0;
@@ -1420,6 +1452,7 @@ self.onmessage = (ev) => {
 
   let energy;
   let passes = null;
+  let matrixOut = null;     // density accessibility matrix (non-partial path)
   let path = null;          // single best path (top-N supersedes this with `routes`)
   let pathEnergy = null;
   let pathLengthCells = null;
@@ -1453,12 +1486,16 @@ self.onmessage = (ev) => {
       // over explored cells only (see densityField). The `density` it
       // returns already carries the first /N (matching the old per-ref
       // path); the second /N + avgE happen below.
-      const { density, energySum, energyCount } = densityField({
+      const { density, energySum, energyCount, matrix } = densityField({
         height, mask: effMask, H, W,
         refPoints, dmode,
         cost, dx, dy,
         eMax: eMaxEff, maximize, maxEdgeCost, eMaxTotalCap,
         portalAdj,
+        // Accessibility matrix: never under maximize (inverted costs would
+        // yield meaningless "energies"); the probe path (kind: "probe")
+        // never reaches this branch, so refCells stays probe-clean.
+        refCells: (wantMatrix && !maximize && matrixCells) ? matrixCells : null,
         onProgress: (frac) => postMessage({ kind: "progress", progress: frac }),
       });
 
@@ -1468,14 +1505,17 @@ self.onmessage = (ev) => {
       // transferred — this worker is done with them.
       if (densityPartial) {
         const t1 = performance.now();
+        const transfer = [density.buffer, energySum.buffer, energyCount.buffer];
+        if (matrix) transfer.push(matrix.buffer);
         postMessage(
           {
             kind: "done",
             partial: true,
             density, energySum, energyCount,
+            matrix: matrix || null,
             elapsedMs: t1 - t0,
           },
-          [density.buffer, energySum.buffer, energyCount.buffer],
+          transfer,
         );
         return;
       }
@@ -1491,6 +1531,7 @@ self.onmessage = (ev) => {
 
       passes = density;
       energy = avgE;
+      matrixOut = matrix || null;
     } else if (mode === "from") {
       const r = dijkstra({
         height, mask: effMask, H, W,
@@ -1729,8 +1770,10 @@ self.onmessage = (ev) => {
       routes,                // null or array of route objects
       elapsedMs: t1 - t0,
     };
+    if (matrixOut) out.matrix = matrixOut;
     const transfer = [energy.buffer];
     if (passes) transfer.push(passes.buffer);
+    if (matrixOut) transfer.push(matrixOut.buffer);
     postMessage(out, transfer);
   } catch (err) {
     postMessage({ kind: "error", message: err.message });

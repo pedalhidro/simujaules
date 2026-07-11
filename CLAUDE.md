@@ -132,6 +132,26 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   (`subtree_passes_f64`) and shipped as f64 on the wire — the JS single-source
   branch returns Float64Array (counts exceed 2^24 on big DEMs); `/density`'s
   wire format is unchanged.
+- The ACCESSIBILITY MATRIX (pairwise ref↔ref energies powering the "3B.
+  Acessibilidade" KPIs) is a `/density`-parity surface: `densityField`'s
+  optional `refCells` sampling (JS) and `compute_density`'s `want_matrix`
+  (Rust) must stay bit-parity — matrix entries are raw per-ref f32 energy
+  samples with no cross-slice accumulation, so `test-backend.mjs`'s `+matrix`
+  cases assert `maxΔ === 0`. Rows are keyed by the ORIGINAL ref index on both
+  engines (a skipped off-grid/off-mask ref keeps an all-Infinity row; Rust
+  carries `orig_k` through its compacted ref filter — the `+droppedRef` cases
+  pin this). Round entries reuse the exact `accumulate_round` predicate +
+  f32 rounding. NEVER pass `refCells` on the probe path (`maxSettled`
+  truncation would record non-optimal finite energies) or under maximize
+  (both engines must omit the matrix — test-asserted). App-side, the cached
+  matrix lives in `state.kpi` (NOT `state.lastResult` — style re-renders must
+  not touch it), is invalidated by `kpiInvalidate()` on any ref/grid/network
+  change, and KPI threshold edits re-evaluate the cache only — they must
+  never trigger a recompute. KPIs are exact only for thresholds ≤ the run's
+  `eMax` (0 = ∞); beyond that the matrix is budget-truncated and the UI
+  warns "lower bound". `state.refPopM` (census in-extent population, set ONLY
+  by `placeCensusRefPoints` after its placement loop) is the M behind
+  "K people" thresholds; every ref-set mutation nulls it.
 - Multi-reference density does NOT go through `dijkstra()`: it uses the
   dedicated `densityField()` engine (one reused scratch set, targeted
   reset/accumulate over only the explored cells, and an exact monotone

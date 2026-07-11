@@ -359,5 +359,112 @@ for (const dmode of ["from", "round"]) {
   assert(changed > 0, `portals change the density field (${changed} cells differ)`);
 }
 
+// ---- 4. accessibility matrix (wantMatrix pairwise ref↔ref energies) ----
+// mrefs adds a ref on cell 0, which the fixture masks (i % 997) — the engines
+// must keep its ORIGINAL index and leave its row (and, being unreachable, its
+// column) all-Infinity, never compact it away (the Rust backend filters refs;
+// index parity across engines depends on this rule).
+const mrefs = [...refs, [0, 0]];
+const MK = mrefs.length;
+const DROPPED = MK - 1;
+const mCells = Int32Array.from(mrefs, ([r, c]) => r * W + c);
+const mmsg = (over) => msg({
+  wantDensity: true, refPoints: mrefs, goalR: -1, goalC: -1,
+  wantMatrix: true, matrixCells: new Int32Array(mCells), ...over,
+});
+// Raw row semantics per mode: `from` row i = e(i→j); `to` row i = e(j→i);
+// `round` row i = masked round-trip total (fround(f+b), Infinity if either
+// leg unreached or the total cap masks it). Recomputed here from the
+// single-source dijkstra() fields — settled energies are heap-order-
+// independent, so equality is EXACT (===), not approximate.
+for (const dmode of ["from", "to", "round"]) {
+  console.log(`matrix mode=${dmode}: dims, dropped ref, brute-force vs single-source`);
+  const single = run(mmsg({ densityMode: dmode, mode: dmode }));
+  const mat = single.matrix;
+  assert(mat instanceof Float32Array && mat.length === MK * MK,
+    `matrix is Float32Array of K² = ${MK * MK}`);
+  let diagOk = true, dropRowInf = true, dropColInf = true;
+  for (let i = 0; i < MK; i++) {
+    if (i !== DROPPED && mat[i * MK + i] !== 0) diagOk = false;
+    if (mat[DROPPED * MK + i] !== Infinity) dropRowInf = false;
+    if (i !== DROPPED && mat[i * MK + DROPPED] !== Infinity) dropColInf = false;
+  }
+  assert(diagOk, "diagonal is 0 for live refs");
+  assert(dropRowInf, "dropped ref's row is all-Infinity (original index kept)");
+  assert(dropColInf, "dropped ref's column is all-Infinity (masked cell unreachable)");
+  let exact = true;
+  for (let i = 0; i < MK - 1; i++) {
+    const [sr, sc] = mrefs[i];
+    const fields = {};
+    if (dmode !== "to") fields.f = run(msg({ mode: "from", seedR: sr, seedC: sc, goalR: -1, goalC: -1 })).energy;
+    if (dmode !== "from") fields.b = run(msg({ mode: "to", seedR: sr, seedC: sc, goalR: -1, goalC: -1 })).energy;
+    for (let j = 0; j < MK; j++) {
+      const cj = mCells[j];
+      let want;
+      if (dmode === "from") want = fields.f[cj];
+      else if (dmode === "to") want = fields.b[cj];
+      else {
+        const fi = fields.f[cj], bi = fields.b[cj];
+        want = (fi < Infinity && bi < Infinity) ? Math.fround(fi + bi) : Infinity;
+      }
+      if (mat[i * MK + j] !== want) exact = false;
+    }
+  }
+  assert(exact, "every live row equals the single-source field at the ref cells (exact)");
+}
+{
+  console.log("matrix: energy budget bounds");
+  const CAP = 15000;
+  const from = run(mmsg({ densityMode: "from", mode: "from", eMax: CAP })).matrix;
+  let over = 0;
+  for (const v of from) if (Number.isFinite(v) && v > CAP) over++;
+  assert(over === 0, "mode from: no finite entry exceeds eMax");
+  const CAPR = 6000;
+  const leg = run(mmsg({ densityMode: "round", mode: "round", eMax: CAPR, eMaxMode: "leg" })).matrix;
+  const tot = run(mmsg({ densityMode: "round", mode: "round", eMax: CAPR, eMaxMode: "total" })).matrix;
+  let legOver2x = 0, legBeyondCap = 0, totOver = 0, maskedOnly = true;
+  for (let i = 0; i < leg.length; i++) {
+    if (Number.isFinite(leg[i])) {
+      if (leg[i] > 2 * CAPR) legOver2x++;
+      if (leg[i] > CAPR) legBeyondCap++;
+    }
+    if (Number.isFinite(tot[i])) {
+      if (tot[i] > CAPR) totOver++;
+      if (tot[i] !== leg[i]) maskedOnly = false;
+    }
+  }
+  assert(legOver2x === 0, "round leg mode: totals bounded by 2·eMax");
+  assert(legBeyondCap > 0, `round leg mode: totals beyond eMax exist (${legBeyondCap} — the documented 2× reach)`);
+  assert(totOver === 0, "round total mode: no finite entry exceeds the cap");
+  assert(maskedOnly, "round total mode only masks (never alters) leg-mode entries");
+}
+for (const dmode of ["from", "round"]) {
+  console.log(`matrix mode=${dmode}: pooled slice rows ≡ single run`);
+  const single = run(mmsg({ densityMode: dmode, mode: dmode }));
+  const merged = new Float32Array(MK * MK).fill(Infinity);
+  const bounds = [[0, 3], [3, 5], [5, MK]];
+  for (const [lo, hi] of bounds) {
+    const part = run(mmsg({
+      refPoints: mrefs.slice(lo, hi),
+      densityMode: dmode, mode: dmode, densityPartial: true,
+    }));
+    assert(part.matrix instanceof Float32Array && part.matrix.length === (hi - lo) * MK,
+      `slice [${lo},${hi}) returned its rows`);
+    merged.set(part.matrix, lo * MK);
+  }
+  let identical = true;
+  for (let i = 0; i < MK * MK; i++) {
+    if (merged[i] !== single.matrix[i] && !(Number.isNaN(merged[i]) && Number.isNaN(single.matrix[i]))) identical = false;
+  }
+  assert(identical, "merged pooled matrix is byte-identical to the single run's");
+}
+{
+  console.log("matrix: absent when not requested / under maximize");
+  const plain = run(msg({ wantDensity: true, refPoints: mrefs, densityMode: "from", mode: "from", goalR: -1, goalC: -1 }));
+  assert(plain.matrix == null, "no matrix without wantMatrix");
+  const maxi = run(mmsg({ densityMode: "from", mode: "from", maximize: true }));
+  assert(maxi.matrix == null, "no matrix under maximize (inverted costs)");
+}
+
 console.log(failures === 0 ? "\nALL TESTS PASSED" : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -28,8 +28,15 @@
 //     request body:  [u32 json_len][json Params][f32 height × N][u8 mask × N]
 //                    [u8 network_mask × N  — only when has_network]
 //                    [bridge portals — only when n_portals > 0]
-//     response body: [u32 json_len][json {"elapsed_ms":…,"refs":…}]
+//     response body: [u32 json_len][json {"elapsed_ms":…,"refs":…[,"matrix":K]}]
 //                    [f64 passes × N][f32 energy × N]
+//                    [f32 matrix × K² — only when Params.want_matrix (and not
+//                    maximize): the pairwise accessibility matrix, row-major
+//                    over the ORIGINAL ref order (row i = ref i's energy
+//                    sampled at every ref cell; refs skipped as off-grid/
+//                    off-mask keep their index with an all-Infinity row —
+//                    exactly like the JS densityField's refCells sampling).
+//                    "matrix":K in the meta announces its presence.]
 //   POST /single    (single-source energy field: from/to/round, energy+passes)
 //     request body:  same framing as /density, driven by Params.src +
 //                    Params.want_passes instead of ref_points
@@ -119,6 +126,11 @@ struct Params {
     /// portalU (i32×P), portalV (i32×P), portalLenM (f64×P).
     #[serde(default)]
     n_portals: usize,
+    /// /density only: also return the pairwise ref↔ref accessibility matrix
+    /// (f32 × K², appended after the energy field; "matrix":K in the meta).
+    /// Ignored under maximize — mirrors the JS worker.
+    #[serde(default)]
+    want_matrix: bool,
 }
 
 struct Grid<'a> {
@@ -587,7 +599,12 @@ fn density_mem_budget_bytes() -> u64 {
     total.saturating_sub(3_000_000_000).max(2_000_000_000)
 }
 
-fn compute_density(g: &Grid, dem_mask: &[u8], p: &Params, portals: &PortalAdj) -> (Vec<f64>, Vec<f32>) {
+fn compute_density(
+    g: &Grid,
+    dem_mask: &[u8],
+    p: &Params,
+    portals: &PortalAdj,
+) -> (Vec<f64>, Vec<f32>, Option<Vec<f32>>) {
     let n = g.h * g.w;
 
     // Same MAX_EDGE_COST bound as the JS worker's maximize mode. JS-parity
@@ -612,11 +629,17 @@ fn compute_density(g: &Grid, dem_mask: &[u8], p: &Params, portals: &PortalAdj) -
         0.0
     };
 
-    // Off-grid / off-mask refs are skipped, like the JS worker.
-    let refs: Vec<(usize, usize)> = p
+    // Off-grid / off-mask refs are skipped, like the JS worker — but their
+    // ORIGINAL index rides along: the accessibility matrix keys rows by the
+    // original ref order (a skipped ref keeps its index as an all-Infinity
+    // row), so the JS worker and this port agree per index even when refs
+    // are dropped. Slice boundaries below still cover only live refs, so
+    // the f64 accumulation order (and its bit-parity) is unchanged.
+    let refs: Vec<(usize, usize, usize)> = p
         .ref_points
         .iter()
-        .filter(|rc| {
+        .enumerate()
+        .filter(|(_, rc)| {
             let (r, c) = (rc[0], rc[1]);
             r >= 0
                 && (r as usize) < g.h
@@ -624,8 +647,29 @@ fn compute_density(g: &Grid, dem_mask: &[u8], p: &Params, portals: &PortalAdj) -
                 && (c as usize) < g.w
                 && g.mask[r as usize * g.w + c as usize] != 0
         })
-        .map(|rc| (rc[0] as usize, rc[1] as usize))
+        .map(|(k, rc)| (k, rc[0] as usize, rc[1] as usize))
         .collect();
+
+    // Accessibility matrix sampling targets: every ORIGINAL ref's flat cell
+    // (−1 = off-grid), mirroring the JS worker's matrixCells. Off-mask cells
+    // stay valid targets — they just never settle, reading Infinity.
+    let want_matrix = p.want_matrix && !p.maximize;
+    let kk = p.ref_points.len();
+    let sample_cells: Vec<i64> = if want_matrix {
+        p.ref_points
+            .iter()
+            .map(|rc| {
+                let (r, c) = (rc[0], rc[1]);
+                if r >= 0 && (r as usize) < g.h && c >= 0 && (c as usize) < g.w {
+                    (r as usize * g.w + c as usize) as i64
+                } else {
+                    -1
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     let round = p.density_mode == "round";
     let reverse = p.density_mode == "to";
@@ -661,39 +705,85 @@ fn compute_density(g: &Grid, dem_mask: &[u8], p: &Params, portals: &PortalAdj) -
         per_slice as f64 / 1e9, density_mem_budget_bytes() as f64 / 1e9, n_slices,
     );
 
-    let accs: Vec<Acc> = (0..n_slices)
+    let results: Vec<(Acc, Vec<(usize, Vec<f32>)>)> = (0..n_slices)
         .into_par_iter()
         .map(|sl| {
             let lo = sl * refs.len() / n_slices;
             let hi = (sl + 1) * refs.len() / n_slices;
             let mut acc = Acc::new(n);
+            // Accessibility rows this slice produced, keyed by ORIGINAL ref
+            // index (disjoint across slices — scatter order is irrelevant).
+            let mut rows: Vec<(usize, Vec<f32>)> = Vec::new();
             if round {
                 // Forward/backward are independent — join them so round runs
                 // with fewer refs than cores still spread across the machine.
                 let mut s_f = Scratch::new(n);
                 let mut s_b = Scratch::new(n);
                 let mut include = vec![0u8; n];
-                for &(r, c) in &refs[lo..hi] {
+                for &(orig_k, r, c) in &refs[lo..hi] {
                     rayon::join(
                         || dijkstra_tree(g, r, c, p, false, max_edge_cost, portals, &mut s_f),
                         || dijkstra_tree(g, r, c, p, true, max_edge_cost, portals, &mut s_b),
                     );
+                    if want_matrix {
+                        // Masked round-trip total — same predicate + f32
+                        // rounding as accumulate_round / the JS worker.
+                        let mut row = vec![f32::INFINITY; kk];
+                        for (j, &cj) in sample_cells.iter().enumerate() {
+                            if cj < 0 {
+                                continue;
+                            }
+                            let fe = s_f.e[cj as usize];
+                            let be = s_b.e[cj as usize];
+                            if fe.is_finite() && be.is_finite() {
+                                let sum = fe as f64 + be as f64;
+                                if !(total_cap > 0.0 && sum > total_cap) {
+                                    row[j] = sum as f32;
+                                }
+                            }
+                        }
+                        rows.push((orig_k, row));
+                    }
                     acc.accumulate_round(&mut s_f, &mut s_b, &mut include, total_cap);
                 }
             } else {
                 let mut s = Scratch::new(n);
-                for &(r, c) in &refs[lo..hi] {
+                for &(orig_k, r, c) in &refs[lo..hi] {
                     dijkstra_tree(g, r, c, p, reverse, max_edge_cost, portals, &mut s);
+                    if want_matrix {
+                        let mut row = vec![f32::INFINITY; kk];
+                        for (j, &cj) in sample_cells.iter().enumerate() {
+                            if cj >= 0 {
+                                row[j] = s.e[cj as usize];
+                            }
+                        }
+                        rows.push((orig_k, row));
+                    }
                     subtree_passes(&mut s, None);
                     acc.accumulate(&s);
                 }
             }
-            acc
+            (acc, rows)
         })
         .collect();
 
-    // Sequential slice-order merge — deterministic across runs.
-    let acc = accs.into_iter().reduce(Acc::merge).unwrap_or_else(|| Acc::new(n));
+    // Sequential slice-order merge — deterministic across runs. Matrix rows
+    // scatter into their original-index slots (rows of refs the filter
+    // dropped stay all-Infinity, matching the JS worker).
+    let mut matrix = if want_matrix { Some(vec![f32::INFINITY; kk * kk]) } else { None };
+    let mut acc_opt: Option<Acc> = None;
+    for (a, rows) in results {
+        if let Some(m) = matrix.as_mut() {
+            for (orig_k, row) in rows {
+                m[orig_k * kk..(orig_k + 1) * kk].copy_from_slice(&row);
+            }
+        }
+        acc_opt = Some(match acc_opt {
+            Some(prev) => prev.merge(a),
+            None => a,
+        });
+    }
+    let acc = acc_opt.unwrap_or_else(|| Acc::new(n));
 
     let mut density = acc.density;
     for v in density.iter_mut() {
@@ -708,7 +798,7 @@ fn compute_density(g: &Grid, dem_mask: &[u8], p: &Params, portals: &PortalAdj) -
             }
         })
         .collect();
-    (density, energy)
+    (density, energy, matrix)
 }
 
 /// Single-source energy field — port of energy-worker.js's from/to/round
@@ -993,12 +1083,20 @@ fn handle_density(mut req: tiny_http::Request) {
         dy: params.dy,
     };
     // dem_mask rides along for maximize's height range (raw-mask JS parity).
-    let (density, energy) = compute_density(&grid, &dem_mask, &params, &portals);
+    let (density, energy, matrix) = compute_density(&grid, &dem_mask, &params, &portals);
 
+    // "matrix":K announces the appended f32×K² accessibility matrix — its
+    // absence tells a newer app this binary predates the feature (the app
+    // then degrades to "KPI unavailable" instead of misreading the payload).
+    let matrix_field = match &matrix {
+        Some(_) => format!(r#","matrix":{}"#, params.ref_points.len()),
+        None => String::new(),
+    };
     let mut meta = format!(
-        r#"{{"elapsed_ms":{:.1},"refs":{}}}"#,
+        r#"{{"elapsed_ms":{:.1},"refs":{}{}}}"#,
         t0.elapsed().as_secs_f64() * 1000.0,
-        params.ref_points.len()
+        params.ref_points.len(),
+        matrix_field
     );
     // Pad the JSON (trailing spaces are valid) so the binary payload starts
     // 8-byte aligned — the app can then create Float64/Float32 views
@@ -1007,11 +1105,15 @@ fn handle_density(mut req: tiny_http::Request) {
     while (4 + meta.len()) % 8 != 0 {
         meta.push(' ');
     }
-    let mut out = Vec::with_capacity(4 + meta.len() + 8 * n + 4 * n);
+    let matrix_len = matrix.as_ref().map_or(0, |m| m.len());
+    let mut out = Vec::with_capacity(4 + meta.len() + 8 * n + 4 * n + 4 * matrix_len);
     out.extend_from_slice(&(meta.len() as u32).to_le_bytes());
     out.extend_from_slice(meta.as_bytes());
     out.extend_from_slice(bytemuck::cast_slice(&density));
     out.extend_from_slice(bytemuck::cast_slice(&energy));
+    if let Some(m) = &matrix {
+        out.extend_from_slice(bytemuck::cast_slice(m));
+    }
 
     eprintln!(
         "[density] {}×{} grid, {} refs, mode={}, {:.0} ms",

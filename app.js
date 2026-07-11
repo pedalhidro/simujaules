@@ -216,6 +216,27 @@ const STRINGS = {
   "stats.route_tooltip": { pt: "rota {0} · E {1} · {2} km", en: "route {0} · E {1} · {2} km" },
   "marker.src":          { pt: "Origem", en: "Source" },
   "marker.dst":          { pt: "Destino", en: "Destination" },
+  // ---- Accessibility KPIs (pairwise ref↔ref matrix, density runs) --------
+  "group.kpi":           { pt: "3B. Acessibilidade (KPIs 300 kJ)", en: "3B. Accessibility (300 kJ KPIs)" },
+  "kpi.intro":           { pt: "Cada referência representa uma fração igual da população amostrada. Os KPIs leem a matriz de energia par-a-par do último cálculo de densidade — editar os limiares reavalia na hora, sem recalcular.", en: "Each reference stands for an equal share of the sampled population. The KPIs read the last density run's pairwise energy matrix — editing the thresholds re-evaluates instantly, no recompute." },
+  "kpi.ek":              { pt: "E₁ (kJ)", en: "E₁ (kJ)" },
+  "kpi.k":               { pt: "pessoas alcançáveis ≥", en: "reachable people ≥" },
+  "kpi.ej":              { pt: "E₂ (kJ)", en: "E₂ (kJ)" },
+  "kpi.j":               { pt: "% da população ≥", en: "% of population ≥" },
+  "kpi.pop":             { pt: "população total M", en: "total population M" },
+  "kpi.pop_census":      { pt: "população total M (do censo)", en: "total population M (from census)" },
+  "kpi.out1":            { pt: "KPI 1 — <span class=\"v\">{0}%</span> da população alcança ≥ {1} pessoas com ≤ {2} kJ", en: "KPI 1 — <span class=\"v\">{0}%</span> of the population can access ≥ {1} people within ≤ {2} kJ" },
+  "kpi.out1_need_pop":   { pt: "KPI 1 — informe a população total M (amostragem não-censitária)", en: "KPI 1 — enter the total population M (non-census sampling)" },
+  "kpi.out2":            { pt: "KPI 2 — <span class=\"v\">{0}%</span> da população alcança ≥ {1}% da população com ≤ {2} kJ", en: "KPI 2 — <span class=\"v\">{0}%</span> of the population can access ≥ {1}% of the population within ≤ {2} kJ" },
+  "kpi.meta":            { pt: "{0} referências · modo {1} · orçamento do cálculo: {2}", en: "{0} references · mode {1} · run budget: {2}" },
+  "kpi.meta_no_budget":  { pt: "∞ (sem orçamento)", en: "∞ (no budget)" },
+  "kpi.warn_budget":     { pt: "Atenção: limiar acima do orçamento do cálculo ({0} kJ) — além dele a matriz é truncada, então os KPIs são um piso (subestimam). Recalcule com orçamento ≥ ao maior limiar para valores exatos.", en: "Warning: threshold above the run's energy budget ({0} kJ) — the matrix is truncated beyond it, so the KPIs are a lower bound (underestimate). Re-run with a budget ≥ the largest threshold for exact values." },
+  "kpi.backend_no_matrix": { pt: "Backend nativo desatualizado — sem matriz de acessibilidade nesta resposta. Atualize o backend ou use o cálculo no navegador.", en: "Native backend outdated — no accessibility matrix in this response. Update the backend or compute in the browser." },
+  "kpi.refs_changed":    { pt: "As referências mudaram desde o cálculo — os marcadores não foram recoloridos (os KPIs abaixo valem para as referências do cálculo).", en: "References changed since the run — markers were not recolored (the KPIs below refer to the run's references)." },
+  "kpi.marker_tooltip":  { pt: "ref {0} · alcança {1} pessoas (≤ {2} kJ)", en: "ref {0} · reaches {1} people (≤ {2} kJ)" },
+  "kpi.marker_tooltip_frac": { pt: "ref {0} · alcança {1}% das referências (≤ {2} kJ)", en: "ref {0} · reaches {1}% of references (≤ {2} kJ)" },
+  "btn.kpi_csv":         { pt: "Exportar CSV por referência", en: "Export per-reference CSV" },
+  "btn.kpi_matrix_csv":  { pt: "Exportar matriz CSV", en: "Export matrix CSV" },
   "net.interp":          { pt: "Interpolar entre células fora da rede", en: "Interpolate across non-network cells" },
   "net.max_distance":    { pt: "distância máx (células)", en: "max distance (cells)" },
   "net.smoothing":       { pt: "suavizações", en: "smoothing iters" },
@@ -1987,6 +2008,18 @@ const state = {
   // Multi-reference density: list of [r, c] pixel coords plus their map markers.
   refPoints: [],
   refMarkers: [],
+  // Total in-extent population the CURRENT refs proxy (Σ setor pop × in-bbox
+  // area fraction, from the census sampler). Each census ref is an equal-share
+  // proxy of refPopM/K. Nulled on ANY ref-set change (manual click, clear,
+  // non-census placement, file load) — only a fresh census placement sets it.
+  refPopM: null,
+  // Accessibility KPI cache from the last density run that carried the
+  // pairwise ref↔ref energy matrix. { mat (Float32 K×K, OUTBOUND rows:
+  // mat[i*K+j] = energy for ref i's trip to ref j under the run's mode),
+  // K, refs: [{r,c,lat,lng}] (snapshot at run start), popM, eMax, eMaxMode,
+  // mode, unavailable } — see installKpiResult / kpiInvalidate. NOT part of
+  // state.lastResult: style re-renders must never touch it.
+  kpi: null,
   // Position in the quasi-random (Sobol/Halton) sequence used by "Place
   // random". Persists across clicks so each batch continues the sequence;
   // reset whenever the refs are cleared or the DEM changes.
@@ -2791,6 +2824,8 @@ async function loadDemFromArrayBuffer(buf, label, gen) {
   state.refMarkers = [];
   state.refPoints = [];
   state.qmcIndex = 0;
+  state.refPopM = null;
+  kpiInvalidate();
   state.src = null;
   state.dst = null;
   state.lastResult = null;
@@ -3527,6 +3562,7 @@ async function loadVectorNetwork(file) {
     document.getElementById("vec-meta").removeAttribute("data-i18n");
     status.textContent = t("status.network_loaded");
     state.lastResult = null; // previous compute used the un-constrained mask
+    kpiInvalidate();         // …including the accessibility matrix
     cancelActiveCompute();   // …and so would an in-flight one
     state.networkLines = collected;
     state.networkLinesMeta = null; // .gpkg graph-mode bridge flattening not wired (tags live per-feature, not per-kept-line)
@@ -3582,6 +3618,7 @@ function installNetworkFromLines(lines, srsId, sourceLabel, meta = null) {
   document.getElementById("vec-meta").removeAttribute("data-i18n");
   status.textContent = t("status.network_loaded");
   state.lastResult = null;
+  kpiInvalidate();
   cancelActiveCompute();
   // Keep geometry for the optional vector rendering, same cap as the gpkg path.
   // Keep per-way meta (bridge/tunnel/layer) aligned with the kept lines for
@@ -3868,6 +3905,7 @@ function updateBridgeMeta() {
 function markBridgesDirty(reprobe = false) {
   cancelActiveCompute();
   state.lastResult = null;
+  kpiInvalidate(); // portal edges change ref↔ref energies
   state.bridgesToken++;
   applyBridgeOverlay();
   if (reprobe && state.dem) {
@@ -4227,6 +4265,7 @@ function clearVectorNetwork() {
 function markImpassableDirty(reprobe = false) {
   cancelActiveCompute();      // an in-flight run used the previous grid
   state.lastResult = null;    // stale render
+  kpiInvalidate();            // grid changes void the accessibility matrix
   state.impassableToken++;    // rebuild the cached network graph (heights/validity changed)
   state.networkGraph = null; state.networkGraphToken = null;
   applyImpassableOverlay();
@@ -5555,10 +5594,10 @@ document.getElementById("clear-points").addEventListener("click", () => {
 // Source / destination / reference points all share a white-disc-with-
 // black-border style. Tiny label text inside (`src` / `dst` / a 1-based
 // order number for refs).
-function makeLabelIcon(label, size, fontSize) {
+function makeLabelIcon(label, size, fontSize, bg = "#fff") {
   const html = `<div style="
     width:${size}px;height:${size}px;
-    background:#fff;border:2px solid #000;border-radius:50%;
+    background:${bg};border:2px solid #000;border-radius:50%;
     display:flex;align-items:center;justify-content:center;
     font-family:ui-monospace,monospace;font-weight:700;color:#000;
     font-size:${fontSize}px;line-height:1;box-sizing:border-box;
@@ -5574,7 +5613,7 @@ function makeLabelIcon(label, size, fontSize) {
 const ICON_SRCDST_SIZE = 28, ICON_SRCDST_FONT = 9;
 const ICON_REF_SIZE    = 20, ICON_REF_FONT    = 10;
 const makeSrcDstIcon = (label) => makeLabelIcon(label, ICON_SRCDST_SIZE, ICON_SRCDST_FONT);
-const makeRefIcon    = (idx)   => makeLabelIcon(String(idx), ICON_REF_SIZE, ICON_REF_FONT);
+const makeRefIcon    = (idx, bg) => makeLabelIcon(String(idx), ICON_REF_SIZE, ICON_REF_FONT, bg);
 
 // ------- Multi-reference density helpers -------
 // FIFO buffer: state.refPoints / state.refMarkers are kept in arrival order.
@@ -5584,6 +5623,11 @@ function addRefPoint(rc) {
   if (!state.dem) return;
   const [r, c] = rc;
   if (!effectivePassableAt(r * state.dem.W + c)) return; // nodata or blocked (barrier mask)
+  // Any ref-set change voids the census population proxy and the cached
+  // accessibility matrix (its rows are keyed to the refs it ran with).
+  // placeCensusRefPoints re-assigns refPopM AFTER its addRefPoint loop.
+  state.refPopM = null;
+  kpiInvalidate();
   state.refPoints.push([r, c]);
   const { originX, originY, dx, dy } = state.dem;
   const latlng = L.latLng(originY - (r + 0.5) * dy, originX + (c + 0.5) * dx);
@@ -5600,6 +5644,10 @@ function addRefPoint(rc) {
 
 function enforceRefCap() {
   const cap = Math.max(1, parseInt(document.getElementById("n-refs")?.value, 10) || 10);
+  if (state.refPoints.length > cap) {
+    state.refPopM = null; // trimmed refs no longer match the census sample
+    kpiInvalidate();
+  }
   while (state.refPoints.length > cap) {
     state.refPoints.shift();
     const oldest = state.refMarkers.shift();
@@ -5620,7 +5668,29 @@ function clearRefPoints() {
   state.refMarkers = [];
   state.refPoints = [];
   state.qmcIndex = 0;
+  state.refPopM = null;
+  kpiInvalidate();
   syncRefDisplay();
+}
+
+// Drop the cached accessibility matrix + KPI block and restore the default
+// ref-marker icons/tooltips. Called on ANY change that would desynchronise
+// the cache from what's on screen: ref add/clear/trim, DEM load (via
+// clearRefPoints in resetForNewDem), network load/clear, or a new result
+// without a matrix. Safe to call repeatedly / before the UI exists.
+function kpiInvalidate() {
+  if (!state.kpi) return;
+  state.kpi = null;
+  const group = document.getElementById("kpi-group");
+  if (group) group.style.display = "none";
+  // Undo the accessibility recoloring (markers may have been trimmed since).
+  for (let i = 0; i < state.refMarkers.length; i++) {
+    const marker = state.refMarkers[i];
+    const rc = state.refPoints[i];
+    if (!marker || !rc) continue;
+    marker.setIcon(makeRefIcon(i + 1));
+    marker.unbindTooltip().bindTooltip(`ref ${i + 1} · r=${rc[0]}, c=${rc[1]}`);
+  }
 }
 
 // ---- Quasi-Monte-Carlo point sets for reference placement ----------------
@@ -5892,6 +5962,11 @@ async function placeCensusRefPoints(want) {
     clearRefPoints();             // census REPLACES the current set (like file load)
     for (const rc of valid) addRefPoint(rc);
     const placed = state.refPoints.length;
+    // Population proxy for the accessibility KPIs: the refs were drawn
+    // population-weighted from setores totalling totalW in-extent people, so
+    // each placed ref represents refPopM/placed of them. Assigned AFTER the
+    // addRefPoint loop (addRefPoint nulls it on every ref-set change).
+    state.refPopM = placed > 0 ? totalW : null;
     status.textContent = skipped
       ? t("census.placed.skipped", placed, skipped)
       : t("census.placed", placed);
@@ -6276,6 +6351,26 @@ runBtn.addEventListener("click", async () => {
     return { height, mask, networkMask, transfer };
   };
 
+  // ---- Accessibility KPI inputs (density only) -----------------------------
+  // The density engines sample each ref's energy field at every ref cell,
+  // returning the pairwise K×K matrix the KPI block evaluates. Suppressed
+  // under maximize (inverted costs) and graph mode (raster refs only).
+  const wantMatrix = wantDensity && !maximize && !graphModeActive();
+  const matrixCells = wantMatrix
+    ? Int32Array.from(state.refPoints, ([r, c]) => r * W + c)
+    : null;
+  // Snapshot the refs (+ lat/lng for the CSV export) and the census
+  // population proxy NOW — the user can edit refs while the run is in
+  // flight, and the matrix rows are keyed to the refs it ran with.
+  const kpiSnapshot = wantMatrix ? {
+    refs: state.refPoints.map(([r, c]) => {
+      const ll = pixelToLatLng(r, c);
+      return { r, c, lat: ll ? ll.lat : null, lng: ll ? ll.lng : null };
+    }),
+    popM: state.refPopM,
+    eMax, eMaxMode, mode: densityMode,
+  } : null;
+
   const portals = buildPortals();
   const baseMsg = {
     kind: "run",
@@ -6393,7 +6488,7 @@ runBtn.addEventListener("click", async () => {
     }
   });
 
-  const finishDensityOutputs = (energy, density, alt) => {
+  const finishDensityOutputs = (energy, density, alt, src) => {
     // Split the two phases so the online correction learns them independently
     // (interp often dominates a network-constrained run).
     const computeMs = performance.now() - state.computeStartedAt;
@@ -6404,6 +6499,10 @@ runBtn.addEventListener("click", async () => {
       computeMs, interpMs: interpMs || 0,
       energyAlt: alt?.energyAlt || null,
       passesAlt: alt?.passesAlt || null,
+      // Accessibility matrix + the refs/population snapshot it was run with.
+      matrix: src?.matrix || null,
+      matrixOutdated: !!src?.matrixOutdated,
+      kpi: kpiSnapshot,
     });
     if (wantNetworkInterp && constrainNet) {
       const t = performance.now();
@@ -6434,11 +6533,15 @@ runBtn.addEventListener("click", async () => {
   // useNetwork toggles the network constraint per scenario, which is what
   // the constrained-vs-unconstrained comparison varies. Progress maps into
   // [progressBase, progressBase + progressScale].
-  const computeDensityField = ({ useNetwork, progressBase = 0, progressScale = 1 }) =>
+  const computeDensityField = ({ useNetwork, progressBase = 0, progressScale = 1, wantMatrix: sliceMatrix = false }) =>
     new Promise((resolve) => {
       const density = new Float64Array(N);
       const energySum = new Float64Array(N);
       const energyCount = new Int32Array(N);
+      // Pairwise accessibility matrix, assembled from each slice's rows at
+      // its ref offset (rows are disjoint — merge order is irrelevant,
+      // unlike the f64 accumulators above).
+      const matrix = (sliceMatrix && matrixCells) ? new Float32Array(K * K).fill(Infinity) : null;
       const workerFrac = new Float64Array(poolN);
       const sliceLen = new Float64Array(poolN);
       let remaining = poolN;
@@ -6462,6 +6565,7 @@ runBtn.addEventListener("click", async () => {
             for (let i = 0; i < N; i++) density[i] += m.density[i];
             for (let i = 0; i < N; i++) energySum[i] += m.energySum[i];
             for (let i = 0; i < N; i++) energyCount[i] += m.energyCount[i];
+            if (matrix && m.matrix) matrix.set(m.matrix, lo * K);
             workerFrac[slot] = 1;
             poolProgress();
             // This slice's worker is done — terminate it now rather than
@@ -6480,7 +6584,7 @@ runBtn.addEventListener("click", async () => {
               for (let i = 0; i < N; i++) {
                 energy[i] = energyCount[i] > 0 ? energySum[i] / energyCount[i] : Infinity;
               }
-              resolve({ energy, passes: density });
+              resolve({ energy, passes: density, matrix });
             }
           } else if (m.kind === "error") {
             computeFailed(m.message);
@@ -6495,6 +6599,11 @@ runBtn.addEventListener("click", async () => {
             height, mask, networkMask,
             refPoints: state.refPoints.slice(lo, hi),
             densityPartial: true,
+            // Accessibility matrix: each slice samples its refs' fields at
+            // ALL K ref cells (matrixCells is structured-cloned, shared
+            // read-only across the pool — like the portal arrays).
+            wantMatrix: !!matrix,
+            matrixCells: matrix ? matrixCells : null,
             // Interp (if any) runs after the merge, never per-slice.
             wantNetworkInterp: false,
           },
@@ -6530,7 +6639,7 @@ runBtn.addEventListener("click", async () => {
   // which runs the per-ref Dijkstras on all cores. Any failure — server not
   // running, version mismatch, network error — falls back to the in-browser
   // pool. Protocol documented in backend/src/main.rs.
-  const startDensityBackend = async (baseUrl, { useNetwork }) => {
+  const startDensityBackend = async (baseUrl, { useNetwork, wantMatrix: sliceMatrix = false }) => {
     progressBar.style.width = "10%"; // no streaming progress from the backend
     // Liveness ticker: large runs take a while server-side and fetch gives
     // no progress events — an elapsed counter shows the app isn't hung.
@@ -6554,6 +6663,11 @@ runBtn.addEventListener("click", async () => {
         // order: portalU (i32×P), portalV (i32×P), portalLenM (f64×P),
         // portalHU (f64×P), portalHV (f64×P). HU/HV are deck-end ele (NaN=use DEM).
         nPortals: portals ? portals.n : 0,
+        // Accessibility matrix: the backend samples ref cells itself from
+        // refPoints (no matrixCells on the wire) and appends f32×K² after
+        // the energy field, announcing it with "matrix":K in the meta. An
+        // older binary ignores the flag — detected below via the meta.
+        wantMatrix: !!sliceMatrix,
       };
       const json = new TextEncoder().encode(JSON.stringify(params));
       const head = new Uint8Array(4);
@@ -6577,7 +6691,15 @@ runBtn.addEventListener("click", async () => {
       try {
         const dv = new DataView(buf);
         const jlen = dv.getUint32(0, true);
-        const expect = 4 + jlen + 8 * N + 4 * N;
+        // Meta JSON (padded with trailing spaces — legal JSON whitespace).
+        // "matrix":K announces the appended f32×K² accessibility matrix; an
+        // older backend that predates the field simply omits it.
+        let respMeta = {};
+        try {
+          respMeta = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, jlen)));
+        } catch { /* tolerate unparseable meta — fall through to length check */ }
+        const mk = respMeta.matrix | 0;
+        const expect = 4 + jlen + 8 * N + 4 * N + 4 * mk * mk;
         if (buf.byteLength !== expect) {
           throw new Error(`backend response ${buf.byteLength} B, expected ${expect} B`);
         }
@@ -6594,8 +6716,15 @@ runBtn.addEventListener("click", async () => {
         // it to workers, and a view would drag the whole response buffer —
         // density included — along and detach it.
         const energy = new Float32Array(buf.slice(off, off + 4 * N));
+        off += 4 * N;
+        // Slice-copied like the fields above (a view would pin the whole
+        // response). mk===0 with sliceMatrix requested ⇒ the backend binary
+        // predates the matrix — degrade to "KPI unavailable", never fail
+        // (and never fall back to the browser: the fields are good).
+        const matrix = mk > 0 ? new Float32Array(buf.slice(off, off + 4 * mk * mk)) : null;
+        if (sliceMatrix && !matrix) console.warn("[backend] no accessibility matrix in response — backend predates the feature");
         progressBar.style.width = "100%";
-        return { energy, passes: density };
+        return { energy, passes: density, matrix, matrixOutdated: !!(sliceMatrix && !matrix) };
       } catch (err) {
         console.error("[backend] response handling failed:", err);
         computeFailed(`backend response handling failed: ${err.message}`);
@@ -6856,7 +6985,9 @@ runBtn.addEventListener("click", async () => {
   // RAW constrained field (pre-interp); the energy difference is therefore
   // naturally confined to network cells.
   const startDensityCompare = async () => {
-    const A = await densityField({ useNetwork: true, progressBase: 0, progressScale: 0.5 });
+    // The accessibility matrix rides on scenario A (the constrained one —
+    // the realistic access); B is the counterfactual and skips it.
+    const A = await densityField({ useNetwork: true, progressBase: 0, progressScale: 0.5, wantMatrix });
     if (gen !== state.computeGen) return;
     const B = await densityField({ useNetwork: false, progressBase: 0.5, progressScale: 0.5 });
     if (gen !== state.computeGen) return;
@@ -6875,7 +7006,7 @@ runBtn.addEventListener("click", async () => {
     finishDensityOutputs(A.energy, A.passes, {
       energyAlt: { unconstrained: B.energy, difference: diffE },
       passesAlt: { unconstrained: B.passes },
-    });
+    }, A);
   };
 
   // Full-DEM UNCONSTRAINED raster energy field for graph-mode compare (no network
@@ -7085,9 +7216,9 @@ runBtn.addEventListener("click", async () => {
       startDensityCompare();
     } else if (wantDensity) {
       (async () => {
-        const r = await densityField({ useNetwork: constrainNet });
+        const r = await densityField({ useNetwork: constrainNet, wantMatrix });
         if (gen !== state.computeGen) return;
-        finishDensityOutputs(r.energy, r.passes);
+        finishDensityOutputs(r.energy, r.passes, null, r);
       })();
     } else if (compareOn) {
       startComparePair();
@@ -7188,7 +7319,7 @@ runBtn.addEventListener("click", async () => {
 });
 
 // ------- Render -------
-function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs, energyAlt, passesAlt, pathAlt, pathAltEnergy, pathAltLengthM, runMode }) {
+function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs, energyAlt, passesAlt, pathAlt, pathAltEnergy, pathAltLengthM, runMode, matrix, matrixOutdated, kpi }) {
   // A grid result supersedes any graph-mode overlay.
   removeGraphLayers();
   state.lastGraphResult = null;
@@ -7273,7 +7404,240 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
   }
   resultMeta.innerHTML = meta.join("<br/>");
   resultMeta.removeAttribute("data-i18n"); // live stats — don't let a lang toggle reset to "—"
+
+  // Accessibility KPIs: install (or clear) the pairwise-matrix cache OUTSIDE
+  // state.lastResult — style re-renders must never touch it.
+  installKpiResult(matrix || null, kpi || null, !!matrixOutdated);
 }
+
+// ---- Accessibility KPIs (300 kJ initiative) --------------------------------
+// state.kpi caches the pairwise matrix from the last density run in OUTBOUND
+// row form: mat[i*K + j] = energy of ref i's trip to ref j under the run's
+// mode ("from": i→j; raw "to" rows hold e(j→i) and are transposed once at
+// install; "round": the masked round-trip total). count_i(E) =
+// |{j : mat[i*K+j] ≤ E}| — self included, a ref always reaches its own share.
+// With census sampling every ref proxies popM/K people, so
+//   KPI 1 = % of refs with (popM/K)·count_i(E₁) ≥ K_people   (needs M)
+//   KPI 2 = % of refs with count_i(E₂)/K ≥ J/100             (M-free)
+// and "% of refs" reads as "% of population" because the sampling itself is
+// population-weighted. A threshold is EXACT iff the run had no budget or the
+// threshold ≤ eMax; beyond that the matrix is budget-truncated and the KPIs
+// are lower bounds (the block warns). Threshold edits re-evaluate the cached
+// matrix only — like the style knobs, they must never trigger a recompute.
+
+function installKpiResult(matrix, snap, outdated) {
+  if (!matrix || !snap) {
+    if (outdated && snap) {
+      // The native backend predates the matrix: keep the block visible with
+      // the hint instead of silently hiding the feature.
+      state.kpi = {
+        unavailable: true, mat: null, K: snap.refs.length, refs: snap.refs,
+        popM: snap.popM, eMax: snap.eMax, eMaxMode: snap.eMaxMode, mode: snap.mode,
+        refsMatch: false,
+      };
+      renderKpiBlock();
+      return;
+    }
+    kpiInvalidate();
+    return;
+  }
+  const K = snap.refs.length;
+  let mat = matrix;
+  if (snap.mode === "to") {
+    mat = new Float32Array(K * K);
+    for (let i = 0; i < K; i++)
+      for (let j = 0; j < K; j++) mat[i * K + j] = matrix[j * K + i];
+  }
+  // Marker recoloring is only valid while the on-map refs still ARE the
+  // run's refs — a mid-run ref edit already invalidated once, but the
+  // arriving result re-installs against its own snapshot.
+  const refsMatch = state.refPoints.length === K &&
+    state.refPoints.every(([r, c], i) => snap.refs[i].r === r && snap.refs[i].c === c);
+  state.kpi = {
+    mat, K, refs: snap.refs, popM: snap.popM,
+    eMax: snap.eMax, eMaxMode: snap.eMaxMode, mode: snap.mode, refsMatch,
+  };
+  // Prefill M from the census proxy; editable (non-census sampling needs a
+  // hand-entered M for KPI 1 — KPI 2 works without one).
+  const popInput = document.getElementById("kpi-pop");
+  if (popInput) popInput.value = snap.popM != null ? String(Math.round(snap.popM)) : "";
+  const popLabel = document.getElementById("kpi-pop-label");
+  if (popLabel) {
+    popLabel.setAttribute("data-i18n", snap.popM != null ? "kpi.pop_census" : "kpi.pop");
+    popLabel.textContent = t(snap.popM != null ? "kpi.pop_census" : "kpi.pop");
+  }
+  renderKpiBlock();
+}
+
+// count_i(E) over the outbound matrix — one O(K²) pass per threshold.
+function kpiCounts(mat, K, E) {
+  const counts = new Int32Array(K);
+  for (let i = 0; i < K; i++) {
+    let n = 0;
+    const row = i * K;
+    for (let j = 0; j < K; j++) if (mat[row + j] <= E) n++;
+    counts[i] = n;
+  }
+  return counts;
+}
+
+// Current KPI inputs (initiative defaults live in index.html), resolved M
+// (census prefill or hand-entered), and both per-ref count vectors. Shared
+// by the renderer and the CSV exports so they can never disagree.
+function kpiEval() {
+  const kpi = state.kpi;
+  if (!kpi || kpi.unavailable) return null;
+  const num = (id, dflt) => {
+    const v = parseFloat(document.getElementById(id)?.value);
+    return Number.isFinite(v) && v >= 0 ? v : dflt;
+  };
+  const eK = num("kpi-ek", 200);
+  const kPeople = num("kpi-k", 1_000_000);
+  const eJ = num("kpi-ej", 600);
+  const jPct = Math.min(100, num("kpi-j", 80));
+  const popRaw = parseFloat(document.getElementById("kpi-pop")?.value);
+  const popM = Number.isFinite(popRaw) && popRaw > 0 ? popRaw : null;
+  const { mat, K } = kpi;
+  const c1 = kpiCounts(mat, K, eK);
+  const c2 = kpiCounts(mat, K, eJ);
+  let pass1 = 0, pass2 = 0;
+  const perRef = popM != null ? popM / K : 0;
+  for (let i = 0; i < K; i++) {
+    if (popM != null && perRef * c1[i] >= kPeople) pass1++;
+    if (c2[i] / K >= jPct / 100 - 1e-12) pass2++;
+  }
+  return { eK, kPeople, eJ, jPct, popM, c1, c2, pass1, pass2, K };
+}
+
+function renderKpiBlock() {
+  const group = document.getElementById("kpi-group");
+  if (!group) return;
+  const kpi = state.kpi;
+  if (!kpi) { group.style.display = "none"; return; }
+  group.style.display = "";
+  const out1 = document.getElementById("kpi-out1");
+  const out2 = document.getElementById("kpi-out2");
+  const metaEl = document.getElementById("kpi-meta");
+  const warnEl = document.getElementById("kpi-warn");
+  if (kpi.unavailable) {
+    if (out1) out1.textContent = "—";
+    if (out2) out2.textContent = "—";
+    if (metaEl) metaEl.textContent = "";
+    if (warnEl) { warnEl.textContent = t("kpi.backend_no_matrix"); warnEl.style.display = ""; }
+    return;
+  }
+  const ev = kpiEval();
+  if (!ev) return;
+  const pct = (n) => (100 * n / ev.K).toFixed(1);
+  if (out1) {
+    out1.innerHTML = ev.popM != null
+      ? t("kpi.out1", pct(ev.pass1), Math.round(ev.kPeople).toLocaleString(), ev.eK)
+      : t("kpi.out1_need_pop");
+  }
+  if (out2) out2.innerHTML = t("kpi.out2", pct(ev.pass2), ev.jPct, ev.eJ);
+  if (metaEl) {
+    const budget = kpi.eMax > 0 ? `${kpi.eMax} kJ${kpi.mode === "round" ? ` (${kpi.eMaxMode})` : ""}` : t("kpi.meta_no_budget");
+    let s = t("kpi.meta", kpi.K, kpi.mode, budget);
+    if (!kpi.refsMatch) s += `<br/>${t("kpi.refs_changed")}`;
+    metaEl.innerHTML = s;
+  }
+  if (warnEl) {
+    const over = kpi.eMax > 0 && (ev.eK > kpi.eMax || ev.eJ > kpi.eMax);
+    warnEl.textContent = over ? t("kpi.warn_budget", kpi.eMax) : "";
+    warnEl.style.display = over ? "" : "none";
+  }
+  kpiRecolorMarkers(ev);
+}
+
+// Color each ref marker by its accessible population, on a red→yellow→green
+// ramp anchored at the KPI-1 threshold (yellow = exactly the target; without
+// an M, anchored at the KPI-2 J% target instead). Tooltips carry the number.
+function kpiLerpHex(a, b, f) {
+  const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
+  const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
+  return "#" + pa.map((v, i) => Math.round(v + (pb[i] - v) * f).toString(16).padStart(2, "0")).join("");
+}
+function kpiRecolorMarkers(ev) {
+  const kpi = state.kpi;
+  if (!kpi || !kpi.refsMatch) return;
+  for (let i = 0; i < kpi.K && i < state.refMarkers.length; i++) {
+    const marker = state.refMarkers[i];
+    if (!marker) continue;
+    // v = attainment vs the anchor target (1 = exactly on target), clamped 2×.
+    const v = ev.popM != null
+      ? Math.min(2, (ev.popM / kpi.K) * ev.c1[i] / Math.max(1, ev.kPeople))
+      : Math.min(2, (ev.c1[i] / kpi.K) / Math.max(1e-9, ev.jPct / 100));
+    const color = v <= 1 ? kpiLerpHex("#d73027", "#fee08b", v) : kpiLerpHex("#fee08b", "#1a9850", v - 1);
+    marker.setIcon(makeRefIcon(i + 1, color));
+    const tip = ev.popM != null
+      ? t("kpi.marker_tooltip", i + 1, Math.round((ev.popM / kpi.K) * ev.c1[i]).toLocaleString(), ev.eK)
+      : t("kpi.marker_tooltip_frac", i + 1, (100 * ev.c1[i] / kpi.K).toFixed(1), ev.eK);
+    marker.unbindTooltip().bindTooltip(tip);
+  }
+}
+
+// ---- KPI CSV exports (blob-download, mirrors exportRefPoints) --------------
+function kpiDownload(name, text, type = "text/csv") {
+  const blob = new Blob([text], { type });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function kpiExportRefsCsv() {
+  const kpi = state.kpi;
+  const ev = kpiEval();
+  if (!kpi || !ev) return;
+  const num = (v) => (v == null ? "" : v);
+  const lines = [
+    `# simujaules accessibility — per-reference table`,
+    `# K=${kpi.K} mode=${kpi.mode} eMax_kJ=${kpi.eMax}${kpi.mode === "round" ? ` eMaxMode=${kpi.eMaxMode}` : ""} M=${num(ev.popM)} E1_kJ=${ev.eK} K_people=${ev.kPeople} E2_kJ=${ev.eJ} J_pct=${ev.jPct}`,
+    `index,row,col,lat,lng,count_E1,acc_pop_E1,frac_refs_E1,kpi1_pass,count_E2,frac_refs_E2,kpi2_pass`,
+  ];
+  const perRef = ev.popM != null ? ev.popM / kpi.K : null;
+  for (let i = 0; i < kpi.K; i++) {
+    const rf = kpi.refs[i];
+    lines.push([
+      i + 1, rf.r, rf.c,
+      rf.lat != null ? rf.lat.toFixed(6) : "", rf.lng != null ? rf.lng.toFixed(6) : "",
+      ev.c1[i],
+      perRef != null ? Math.round(perRef * ev.c1[i]) : "",
+      (ev.c1[i] / kpi.K).toFixed(4),
+      perRef != null ? (perRef * ev.c1[i] >= ev.kPeople ? 1 : 0) : "",
+      ev.c2[i],
+      (ev.c2[i] / kpi.K).toFixed(4),
+      ev.c2[i] / kpi.K >= ev.jPct / 100 - 1e-12 ? 1 : 0,
+    ].join(","));
+  }
+  kpiDownload("simujaules-access-refs.csv", lines.join("\n") + "\n");
+}
+function kpiExportMatrixCsv() {
+  const kpi = state.kpi;
+  if (!kpi || kpi.unavailable) return;
+  const { mat, K } = kpi;
+  const lines = [
+    `# simujaules accessibility — outbound pairwise energy (kJ); empty = unreachable within the run budget`,
+    "from\\to," + Array.from({ length: K }, (_, j) => j + 1).join(","),
+  ];
+  const row = new Array(K + 1);
+  for (let i = 0; i < K; i++) {
+    row[0] = i + 1;
+    for (let j = 0; j < K; j++) {
+      const v = mat[i * K + j];
+      row[j + 1] = Number.isFinite(v) ? v.toFixed(3) : "";
+    }
+    lines.push(row.join(","));
+  }
+  kpiDownload("simujaules-access-matrix.csv", lines.join("\n") + "\n");
+}
+
+// Threshold edits re-evaluate the cached matrix live — never a recompute.
+for (const id of ["kpi-ek", "kpi-k", "kpi-ej", "kpi-j", "kpi-pop"]) {
+  document.getElementById(id)?.addEventListener("input", () => { if (state.kpi) renderKpiBlock(); });
+}
+document.getElementById("kpi-export-csv")?.addEventListener("click", kpiExportRefsCsv);
+document.getElementById("kpi-export-matrix")?.addEventListener("click", kpiExportMatrixCsv);
 
 // Re-render the cached energy + passes overlays with the currently-selected
 // colormap. Called from renderResult (after a compute), from the colormap

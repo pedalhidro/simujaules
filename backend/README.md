@@ -72,7 +72,11 @@ RAYON_NUM_THREADS=4 cargo run --release     # also bounds parallelism directly
 Little-endian binary framing, see `src/main.rs` header comment:
 
 - `POST /density` — `[u32 json_len][json params][f32 height×N][u8 mask×N][u8 network×N?][portals?]`
-  → `[u32 json_len][json {elapsed_ms, refs}][f64 passes×N][f32 energy×N]`
+  → `[u32 json_len][json {elapsed_ms, refs[, matrix]}][f64 passes×N][f32 energy×N][f32 matrix×K²?]`
+  (`matrix` only when `params.want_matrix` and not maximize: the pairwise
+  ref↔ref accessibility energies, row-major over the ORIGINAL ref order —
+  skipped refs keep an all-Infinity row; `"matrix":K` in the meta announces
+  it, so an app talking to an older binary degrades to "KPI unavailable")
 - `POST /single` — same request framing (driven by `src` + `want_passes`
   instead of `ref_points`; `maximize` is rejected with a 400 — browser-only)
   → `[u32 json_len][json {elapsed_ms, passes}][f32 energy×N][f64 passes×N?]`
