@@ -309,24 +309,62 @@ spending selectively, or changing the discretization class:
    where the grid bias is already small — so the option is dominated.
    (This also retracts §9's earlier composition claim of "sq32 accuracy at
    sq16 cost": with (2) dead, (1) alone caps the in-paradigm gain.)
-3. **Post-hoc path smoothing (string pulling)** for point-to-point outputs:
-   line-of-sight shortcutting of the returned path with profile-integrated
-   re-costing, O(path length) — effectively free, so k ≫ 1 for routes and
-   (route-by-route) for the K×K accessibility matrix. Does NOT fix fields
-   (density/passes/energy rasters), which are the product's main surface.
-4. **Change the discretization class**: the continuum problem is an
-   anisotropic Eikonal PDE; ordered-upwind / interpolated-update solvers
-   (OUM, Field-D*-style) eliminate heading error entirely, leaving O(h)
-   interpolation error — k decouples from headings altogether. But the
-   anisotropy ratio here is what drives OUM's stencil cost
-   (β/(aRoll+aAero) ≈ 53 flat-to-climb), the methods are approximate
-   (no exact-graph passes counts, no budget-pruning equivalence, no
-   JS↔Rust bit-parity story), and it is a research-grade rewrite. File
-   under "if the grid bias ever becomes the binding constraint".
+3. **Post-hoc path smoothing (string pulling) — tried (2026-07-11): recovers
+   the zigzag, not the route** (`docs/grid-pull.mjs`). Windowed DP over the
+   8-grid path's nodes (any pair within 64 nodes joinable by a straight
+   segment, profile-integrated costing, masked cells block), iterated over
+   the surviving breakpoints so the effective shortcut range grows
+   geometrically. On 90 paths (3 sources × 3 rings 1.2/2.0/2.8 km × 16
+   headings, 5 m condition): raw path bias vs sq128 med 9.6 % / p90 25.5 %
+   → pulled **5.4 % / 16.1 %** — **44 % of the median bias recovered at
+   ~60 ms/path**. Iterating adds nothing: the residual is CORRIDOR LOCK-IN
+   — the polyline can only visit points of the original path, and the
+   route-choice component of the bias (finer headings finding different
+   terrain lines) is unrecoverable post hoc. Economics: excellent for the
+   displayed route / top-N (60 ms ≪ any field upgrade; result stays an
+   upper bound and is its own integrated cost — no viewing≡routing
+   conflict); useless for fields; for the K×K accessibility matrix it
+   LOSES to a sq16 field per ref row for K ≳ 12 (44 % recovery at
+   (K−1)·60 ms vs ~55 % recovery at +0.7 s/row) — so it is a
+   route-display tool, not a field fix.
+4. **Anisotropic Eikonal — evaluated (2026-07-11): the heading bias
+   genuinely vanishes, but a SIGNED interpolation bias replaces it**
+   (`docs/grid-eik.mjs`). Implemented a semi-Lagrangian fast-sweeping
+   solver: each cell updates from a foot point anywhere on its radius-1
+   ring (64 samples, u and h bilinear at the foot ⇒ effectively continuous
+   headings); Gauss-Seidel sweeps handle the strong anisotropy
+   (β/(aRoll+aAero) ≈ 53) via iteration count instead of causal-ordering
+   machinery. Results: on FLAT terrain it nails the analytic answer to
+   0.18 % mean / 0.39 % max (vs sq8's 3.9 %) in 2 sweep-groups — heading
+   bias eliminated, exactly as theory promises. On real terrain, however,
+   it lands BELOW the converged sq128 reference — **−1.3/−1.5 % median at
+   5 m; −4 to −12 % at 30 m** (12–17 sweep-groups; 15–22 s at 360 k cells
+   vs sq128's 7 s, sq32's ~1 s) — the true continuum is only ~0.2 % below
+   sq128, so this is error, and its resolution signature identifies it:
+   bilinear foot heights SMOOTH within-cell relief, undercharging climbs —
+   the semi-Lagrangian sibling of the naive-long-edge artifact, scaling
+   with per-cell relief. Verdict: at the app's resolutions the ladder
+   dominates it (sq32: +1.6–2 % guaranteed-sign error at a fraction of the
+   cost, vs ±1.4 % signed at 5 m and outright worse at 30 m), and the
+   integration blockers are structural — no discrete predecessor tree
+   (passes counts), no budget early-exit (sweeps touch the whole grid), no
+   bit-parity story (iterative, order-dependent convergence), and the
+   upper-bound/floor guarantee is lost in BOTH directions. Scientifically
+   validated, practically dominated for this product.
 
 A statistical field deflation is NOT on this list as an accuracy
 optimization — §10 measures why (dispersion survives; one-sidedness dies);
 it is a reporting-layer option only.
+
+**§9 bottom line after testing all four candidates (2026-07-11):** nothing
+beats k ≈ 1 for FIELDS. Slope-adaptivity is dead on this terrain (2);
+string pulling is a route-display tool (3); the Eikonal route trades the
+heading bias for a signed interpolation bias that is worse at 30 m and
+merely sq32-class at 5 m, minus every guarantee the product relies on (4).
+The efficient frontier for the app remains: uniform sq16/sq32 fields with
+profile-integrated (optionally prefix-summed, (1)) long edges for accuracy,
+plus string pulling for the displayed route, plus §10's threshold-layer
+correction where a centered aggregate is preferred over a floor.
 
 ## 10. Parametric correction: how far does a shared constant go?
 
@@ -396,6 +434,10 @@ node grid-correct.mjs --sources 3 --crop 500,1200,900,900            # §10, 5 m
 node grid-correct.mjs --sources 6 --crop 500,1200,1500,1500 --decimate 6  # §10, 30 m
 node grid-adaptive.mjs --sources 3 --crop 500,1200,900,900           # §9.2, 5 m (~2 min)
 node grid-adaptive.mjs --sources 6 --crop 500,1200,1500,1500 --decimate 6 # §9.2, 30 m
+node grid-pull.mjs --sources 3 --crop 500,1200,900,900               # §9.3 string pulling
+node grid-eik.mjs --sources 1 --crop 800,1400,400,400 --flatcheck    # §9.4 flat validation
+node grid-eik.mjs --sources 2 --crop 700,1300,600,600                # §9.4, 5 m
+node grid-eik.mjs --sources 3 --crop 500,1200,1500,1500 --decimate 6 # §9.4, 30 m
 ```
 
 Every run self-validates its 8-move engine bit-identical against
