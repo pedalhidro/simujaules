@@ -170,10 +170,43 @@ square-8:
 | 5 m | −21 % | −7.6 % | 0 | +7.2 % | +10.7 % | +16.1 % | **+19.0 %** |
 | 30 m | −23 % | −9.7 % | 0 | +6.0 % | +9.6 % | +13.2 % | **+14.9 %** |
 
-### 5.5 Runtime (harness, 810 k cells, per source)
+### 5.5 Runtime and the cost–accuracy scaling law (measured)
 
-sq8 ≈ 0.7 s; sq16 profile ≈ 2 s (~2.5–3×); sq32 ≈ 4 s; sq64 ≈ 12 s;
-sq128 ≈ 20 s. Memory unchanged (same per-cell arrays).
+Per-mode wall time (harness, 900×900 = 810 k cells, one source, this
+machine): sq4 0.30 s · sq8 0.47 s · sq16 1.13 s · sq32 2.71 s · sq64 7.22 s
+· sq128 18.1 s · hex6 0.57 s · hex12 1.34 s · sq16-naive 0.91 s ·
+sq32-naive 1.74 s. Memory unchanged (same per-cell arrays).
+
+Pairing those times with the ladder medians gives the cost–accuracy
+exponent k, defined by error ∝ time^(−k) per step:
+
+| step | time × | 5 m err ÷ | k (5 m) | 30 m err ÷ | k (30 m) | flat err ÷ | k (flat) |
+|---|---|---|---|---|---|---|---|
+| sq8 → sq16 | 2.40 | 2.19 | 0.90 | 3.0 | 1.25 | 4.75 | 1.78 |
+| sq16 → sq32 | 2.40 | 2.76 | 1.16 | 3.0 | 1.25 | 4.8 | 1.79 |
+| sq32 → sq64 | 2.66 | 3.50 | 1.28 | 6.4 | 1.90 | 5.0 | 1.64 |
+| **overall 8 → 64** | **15.4** | **21.2** | **1.12** | 57.9 | 1.49 | 114 | 1.73 |
+
+Three readings. (a) On the rough 5 m DTM, **error × time ≈ constant**
+(k ≈ 1.1): each ladder step buys almost exactly its cost's worth — "3× less
+error for 3× more time" is the honest summary of the tested range. (b) The
+exponent is terrain-dependent and k ≈ 1 is the WORST case: the
+contour-oscillation error term decays only ~linearly in the heading gap
+(gap halves per level ⇒ error ÷~2) while pure geometry decays quadratically
+(÷4; flat column, k ≈ 1.7, near the theoretical ln4/ln2.5 ≈ 1.5 plus
+sub-quadratic cost growth). As the terrain term is exhausted, each column's
+later steps accelerate toward the flat rate (5 m: ÷2.2 → ÷2.8 → ÷3.5).
+(c) The hex points sit strictly off the square Pareto frontier (hex12:
+1.34 s for 7.9 % vs sq16's 1.13 s for 5.8 %) — the square ladder is the
+efficient family, not just the convenient one.
+
+Because k ≈ 1, the tradeoff curve itself has NO knee on rough terrain — the
+stopping rule cannot come from the scaling law and must come from external
+error floors (§8.2). Why k → 1 is natural for this paradigm: cost per level
+doubles with the edge count (×~2.4 with sub-sampling), while the dominant
+terrain error term halves with the heading gap — "more headings" alone can
+never beat error·cost ≈ const in the terrain-dominated regime. Prospects
+for k < 1 are in §9.
 
 ## 6. Mechanism: why terrain doubles the geometric penalty
 
@@ -219,7 +252,8 @@ flat), and is largest in high-relief subareas (p90 47 % at 5 m).
    The 300 kJ-KPI counting is therefore a **conservative floor**
    (accessible area within a median budget undercounted ~15–19 %). The bias
    direction never flips under the current engine — a safety property worth
-   keeping deliberately.
+   keeping deliberately (a shared-constant correction can center the
+   aggregate at the cost of exactly that property — §10).
 2. If tightening is wanted, **square-16 with profile-integrated knight
    moves** is the sweet spot: recovers ≈ ⅔ of the bias at ~2.5–3× relax
    cost, stays O(1)-local, keeps the upper-bound property. Square-32 gets
@@ -237,7 +271,100 @@ flat), and is largest in high-relief subareas (p90 47 % at 5 m).
    heuristic (a 16-heading octile-style lower bound). Until then, the honest
    framing above costs nothing.
 
-## 9. Pre-registered predictions for a 16-move engine (if built)
+## 9. Beating k = 1 — candidate optimizations
+
+Since "more headings" alone is pinned at error·cost ≈ const on rough
+terrain (§5.5), sub-linear cost per unit accuracy requires reusing work,
+spending selectively, or changing the discretization class:
+
+1. **O(1) long edges via directional prefix sums** (best in-paradigm move).
+   Along a fixed heading (dr,dc), successive long edges lie on shared
+   lattice lines, so the profile integral is a running sum: precompute, per
+   heading family and travel direction, cumulative sub-step cost along each
+   digital line — an edge then costs `S[end] − S[start]`, O(1). This
+   removes the sub-sampling multiplier entirely (a large share of the
+   measured long-edge cost), pushing per-level cost growth toward the bare
+   edge-count ×2 and k toward ~1.3–1.4 overall, with identical results to
+   the profile integration (same sum, so exactness, upper-boundedness,
+   O(1)-locality and Rust portability all survive). Price: +4 B/cell per
+   heading×direction array (16 arrays for sq16) — fine on small DEMs,
+   material on the 135 M-cell target.
+2. **Slope-adaptive neighborhoods.** The terrain error term lives where
+   paths cross slopes; flat-area jaggedness only costs the small
+   (aRoll+aAero) octile term. Relax long moves only from cells whose local
+   gradient exceeds a threshold: cost grows with the sloped fraction of the
+   DEM (typically well under half) while capturing most of the error
+   reduction — single-step k ≈ 1.5–2. Any edge subset keeps the result a
+   valid upper bound (it just lands between sq8 and sq16). Composes with
+   (1); together they plausibly buy sq32-class accuracy (~2 % median
+   residual — below the model-error floor) at roughly sq16-class cost.
+3. **Post-hoc path smoothing (string pulling)** for point-to-point outputs:
+   line-of-sight shortcutting of the returned path with profile-integrated
+   re-costing, O(path length) — effectively free, so k ≫ 1 for routes and
+   (route-by-route) for the K×K accessibility matrix. Does NOT fix fields
+   (density/passes/energy rasters), which are the product's main surface.
+4. **Change the discretization class**: the continuum problem is an
+   anisotropic Eikonal PDE; ordered-upwind / interpolated-update solvers
+   (OUM, Field-D*-style) eliminate heading error entirely, leaving O(h)
+   interpolation error — k decouples from headings altogether. But the
+   anisotropy ratio here is what drives OUM's stencil cost
+   (β/(aRoll+aAero) ≈ 53 flat-to-climb), the methods are approximate
+   (no exact-graph passes counts, no budget-pruning equivalence, no
+   JS↔Rust bit-parity story), and it is a research-grade rewrite. File
+   under "if the grid bias ever becomes the binding constraint".
+
+A statistical field deflation is NOT on this list as an accuracy
+optimization — §10 measures why (dispersion survives; one-sidedness dies);
+it is a reporting-layer option only.
+
+## 10. Parametric correction: how far does a shared constant go?
+
+Question (Danilo): can the overestimate be absorbed into the parameters —
+e.g. inflate the energy budget, or deflate reported energies by a shared
+calibration constant? Measured with `docs/grid-correct.mjs` (sq8 vs sq128
+fields, same conditions):
+
+| | 5 m (3 sources) | 30 m (6 sources) |
+|---|---|---|
+| shared constant c* (mean of per-source median ratios) | 1.115 | 1.090 |
+| per-source c spread | 1.074 – 1.184 | 1.053 – 1.150 |
+| \|error\| raw, med / p90 / p99 | 9.3 % / 24 % / 48 % | 8.1 % / 18 % / 31 % |
+| \|error\| after ÷c*, med / p90 / p99 | **4.1 % / 11 % / 33 %** | **2.6 % / 8 % / 20 %** |
+| targets flipped to UNDER-estimates | 63 % | 60 % |
+| 2-param fit (+ kJ/m hilliness covariate), R² | 0.16 | 0.20 |
+| \|error\| after 2-param, med / p90 / p99 | 4.6 % / 11 % / 25 % | 2.7 % / 7 % / 17 % |
+| reach-matching budget inflation c_b (range across sources/budgets) | 1.06 – 1.22 | 1.05 – 1.15 |
+
+Findings:
+
+- **A shared constant removes the center, and only the center**: median
+  |error| halves-to-thirds, but the p90 tail stays ~8–11 % and extreme
+  corridors 20–33 % — the bias is route-structured (which slopes a pair's
+  optimal path crosses), and a scalar cannot see that. The obvious
+  covariate (energy per metre = hilliness+detour proxy) explains only
+  R² ≈ 0.16–0.20 and buys ~nothing at the median: there is no cheap
+  2-parameter fix either.
+- **The constant is not universal.** It shifts with resolution (1.115 vs
+  1.090), varies ±5 pp across source neighborhoods within ONE city crop,
+  and will move with the cost bundle (it scales with climb-dominance) and
+  geography. "Shared" must mean *calibrated per DEM + parameter set*, not
+  a hard-coded number. A cheap in-app calibration exists: run 2–3 refs at
+  sq32-profile in the background (~3 s each at 810 k cells) and take
+  c ≈ med(E8/E32)·1.02 — the same machinery as this harness.
+- **The correction has a real price: one-sidedness.** Raw grid energies
+  are guaranteed upper bounds (KPIs are floors); after ÷c* ~60 % of pairs
+  become underestimates with ±4 % (med) / ±10 % (p90) pair-level noise.
+  For population-aggregated KPIs the pair noise largely averages out — the
+  aggregate becomes approximately centered instead of conservative — but
+  any "≥ threshold" claim loses its floor semantics.
+- **Where it belongs if adopted**: at the threshold/budget layer (inflate
+  eMax and the KPI thresholds E₁/E₂ by c — equivalent to deflating
+  energies, but keeps a single energy number everywhere, consistent with
+  the "viewing energy ≡ routing energy" product rule; a second corrected
+  per-cell energy is explicitly NOT allowed by that rule). Honest labeling:
+  "grid-corrected estimate (centered)" vs the default "grid-native floor".
+
+## 11. Pre-registered predictions for a 16-move engine (if built)
 
 To be checked by re-running this harness's acceptance criteria against the
 real engine: (a) field-median energy drops 5–8 % on the 5 m DTM, 3–5 % at
@@ -245,7 +372,7 @@ real engine: (a) field-median energy drops 5–8 % on the 5 m DTM, 3–5 % at
 grows ≤ 3×; (d) passes corridors sharpen along contour lines (visual);
 (e) bit-parity JS↔Rust preserved including the profile sub-sampling order.
 
-## 10. Reproduction
+## 12. Reproduction
 
 ```sh
 cd docs
@@ -254,6 +381,8 @@ curl -O https://simujaules.pedalhidrografi.co/dem/sampa_centro.tif   # 34 MB
 node grid-sens.mjs --sources 4 --crop 500,1200,900,900               # 5 m ladder (~3 min)
 node grid-sens.mjs --sources 6 --crop 500,1200,1500,1500 --decimate 6  # 30 m (~1 min)
 node grid-sens.mjs --sources 2 --crop 700,1300,700,700 --flat        # flat control
+node grid-correct.mjs --sources 3 --crop 500,1200,900,900            # §10, 5 m (~2 min)
+node grid-correct.mjs --sources 6 --crop 500,1200,1500,1500 --decimate 6  # §10, 30 m
 ```
 
 Every run self-validates its 8-move engine bit-identical against
