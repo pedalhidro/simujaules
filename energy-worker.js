@@ -190,20 +190,19 @@ function dijkstra(opts) {
     // these to keep the overall compute monotonic 0→1 across N refs.
     progressBase = 0,
     progressScale = 1,
+    // Optional move set from buildMoves() (4–128 directions). null = the
+    // classic 8 (bit-parity default). Long moves are profile-integrated.
+    moves = null,
   } = opts;
 
   const N = H * W;
-  const diag = Math.hypot(dx, dy);
 
-  // 8-neighbor offsets and their ground distances. Typed arrays (not JS
-  // arrays) so the relax loop reads unboxed values, plus precomputed
-  // flat-index deltas: interior cells (~99% of the grid) skip the per-
-  // neighbor row/col bounds arithmetic entirely.
-  const drs = new Int32Array([-1, -1, -1, 0, 0, 1, 1, 1]);
-  const dcs = new Int32Array([-1, 0, 1, -1, 1, -1, 0, 1]);
-  const dists = new Float64Array([diag, dy, diag, dx, dx, diag, dy, diag]);
-  const dIdx = new Int32Array(8);
-  for (let k = 0; k < 8; k++) dIdx[k] = drs[k] * W + dcs[k];
+  // Move offsets and their ground distances. Typed arrays (not JS arrays)
+  // so the relax loop reads unboxed values, plus precomputed flat-index
+  // deltas: interior cells (~99% of the grid) skip the per-neighbor
+  // row/col bounds arithmetic entirely.
+  const mv = moves || buildMoves(8, W, dx, dy);
+  const { K: MK, drs, dcs, dists, dIdx, subN, isLong, maxR } = mv;
 
   const E = new Float32Array(N);
   E.fill(Infinity);
@@ -213,6 +212,10 @@ function dijkstra(opts) {
   // wantPasses/wantTree need parent links for the subtree walk.
   const keepParents = trackParents || wantPasses || wantTree;
   const parents = keepParents ? new Int32Array(N).fill(-1) : null;
+  // Which parent links used a LONG move (passes stamping over swept cells;
+  // portals and unit moves never stamp). Only needed when both long moves
+  // and a passes walk are in play.
+  const parentLong = (keepParents && mv.hasLong) ? new Uint8Array(N) : null;
   // `settled` filters stale heap entries. Using a boolean per-cell flag
   // instead of `g > E[idx]` because E is f32 and heap priorities are f64
   // (JS Number) — the precision mismatch would let multiple non-stale
@@ -248,9 +251,9 @@ function dijkstra(opts) {
     const r = (idx / W) | 0;
     const c = idx - r * W;
     const hHere = height[idx];
-    const inner = r > 0 && r < H - 1 && c > 0 && c < W - 1;
+    const inner = r >= maxR && r < H - maxR && c >= maxR && c < W - maxR;
 
-    for (let k = 0; k < 8; k++) {
+    for (let k = 0; k < MK; k++) {
       let nIdx;
       if (inner) {
         nIdx = idx + dIdx[k];
@@ -269,11 +272,17 @@ function dijkstra(opts) {
       // contribution during the passes-count reverse walk.
       if (settled[nIdx]) continue;
 
-      const hNbr = height[nIdx];
-      const dh = reverse ? hHere - hNbr : hNbr - hHere;
-      const dist = dists[k];
-
-      let edge = v2Edge(dist, dh, cost);
+      let edge;
+      if (isLong[k]) {
+        // Long move: profile-integrated (maximize never has long moves —
+        // the run handler forces nDirs = 8 under maximize).
+        edge = longEdgeCost(height, mask, H, W, r, c, drs[k], dcs[k], dists[k], subN[k], reverse, cost);
+        if (edge === Infinity) continue;
+      } else {
+        const hNbr = height[nIdx];
+        const dh = reverse ? hHere - hNbr : hNbr - hHere;
+        edge = v2Edge(dists[k], dh, cost);
+      }
 
       // Reverse the optimisation by inverting against the global cap.
       if (maximize) {
@@ -288,7 +297,10 @@ function dijkstra(opts) {
       if (eMax > 0 && tentative > eMax) continue;
       if (tentative < E[nIdx]) {
         E[nIdx] = tentative;
-        if (parents) parents[nIdx] = idx;
+        if (parents) {
+          parents[nIdx] = idx;
+          if (parentLong) parentLong[nIdx] = isLong[k];
+        }
         heapPush(heap, tentative, nIdx);
       }
     }
@@ -309,7 +321,10 @@ function dijkstra(opts) {
           if (eMax > 0 && tentative > eMax) continue;
           if (tentative < E[nIdx]) {
             E[nIdx] = tentative;
-            if (parents) parents[nIdx] = idx;
+            if (parents) {
+              parents[nIdx] = idx;
+              if (parentLong) parentLong[nIdx] = 0; // portal, not a long grid move
+            }
             heapPush(heap, tentative, nIdx);
           }
         }
@@ -320,13 +335,17 @@ function dijkstra(opts) {
   const passes = (wantPasses && order)
     ? subtreePasses(parents, order, orderLen, N, null)
     : null;
+  if (passes) stampLongPasses(passes, parents, parentLong, order, orderLen, mv.sweepByDelta, settled);
 
   return {
     E,
     parents: (trackParents || wantTree) ? parents : null,
+    parentLong: (trackParents || wantTree) ? parentLong : null,
     passes,
     order: wantTree ? order : null,
+    settled: wantTree ? settled : null,
     orderLen,
+    moves: mv,
   };
 }
 
@@ -350,6 +369,197 @@ function subtreePasses(parents, order, orderLen, N, include) {
     if (p >= 0) passes[p] += passes[idx];
   }
   return passes;
+}
+
+// ------- Move sets (grid neighborhoods, 4–128 directions) -------
+// The move-directions option (docs/grid-connectivity-sensitivity-2026-07-11.md):
+// richer heading sets shrink the 8-grid's optimal-energy overestimate
+// (~⅔ gone at 16 directions on the measured terrain). Levels follow the
+// Farey/Stern–Brocot ladder — each level inserts the mediant between
+// adjacent heading vectors: 8 → 16 (adds the knight moves) → 32 → 64 → 128.
+// nDirs=4 is the von-Neumann baseline. THE FIRST 8 MOVES OF EVERY SET ≥ 8
+// ARE THE CLASSIC 8 IN THE CLASSIC ORDER, so nDirs=8 (the default) performs
+// exactly today's operations in today's order — bit-parity with the Rust
+// backend depends on that. Long moves (max(|dr|,|dc|) > 1) are
+// PROFILE-INTEGRATED: bilinear height samples every ~1 cell along the
+// segment, v2Edge per sub-step — a long move costed from its endpoints' Δh
+// alone would flatten the relief it crosses and UNDER-estimate (measured:
+// the naive variant flips the error sign at 30 m). nDirs ≠ 8 is
+// browser-only (app.js never routes such runs to the Rust backend).
+function buildMoves(nDirs, W, dx, dy) {
+  let vecs;
+  if (nDirs === 4) {
+    vecs = [[-1, 0], [0, -1], [0, 1], [1, 0]];
+  } else {
+    // classic 8 first, classic order (the bit-parity anchor for nDirs = 8)
+    vecs = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+    const level = { 16: 1, 32: 2, 64: 3, 128: 4 }[nDirs] || 0;
+    if (level > 0) {
+      let oct = [[1, 0], [1, 1]];
+      for (let l = 0; l < level; l++) {
+        const next = [];
+        for (let i = 0; i < oct.length - 1; i++) {
+          next.push(oct[i], [oct[i][0] + oct[i + 1][0], oct[i][1] + oct[i + 1][1]]);
+        }
+        next.push(oct[oct.length - 1]);
+        oct = next;
+      }
+      const seen = new Set(vecs.map(([a, b]) => `${a},${b}`));
+      for (const [a, b] of oct) {
+        for (const [dr, dc] of [[a, b], [b, a]]) {
+          for (const sr of [1, -1]) {
+            for (const sc of [1, -1]) {
+              const vr = dr * sr || 0, vc = dc * sc || 0;
+              const key = `${vr},${vc}`;
+              if (!seen.has(key)) { seen.add(key); vecs.push([vr, vc]); }
+            }
+          }
+        }
+      }
+    }
+  }
+  const K = vecs.length;
+  const diag = Math.hypot(dx, dy);
+  const drs = new Int32Array(K), dcs = new Int32Array(K), dIdx = new Int32Array(K);
+  const dists = new Float64Array(K), subN = new Int32Array(K);
+  const isLong = new Uint8Array(K);
+  const sweepByDelta = new Map(); // parent-edge delta → swept intermediate cell deltas
+  let maxR = 1;
+  for (let k = 0; k < K; k++) {
+    const [dr, dc] = vecs[k];
+    drs[k] = dr; dcs[k] = dc;
+    dIdx[k] = dr * W + dc;
+    // Unit moves reuse the EXACT legacy expressions (dx / dy / hypot(dx,dy))
+    // — the nDirs=8 default must stay bit-identical to the historical engine.
+    dists[k] = (dr === 0) ? dx * Math.abs(dc)
+             : (dc === 0) ? dy * Math.abs(dr)
+             : (Math.abs(dr) === 1 && Math.abs(dc) === 1) ? diag
+             : Math.hypot(dr * dy, dc * dx);
+    const m = Math.max(Math.abs(dr), Math.abs(dc));
+    if (m > 1) {
+      isLong[k] = 1;
+      subN[k] = 2 * m;
+      maxR = Math.max(maxR, m);
+      // supercover-ish template of intermediate cells (relative to the edge
+      // START) — used for passes stamping over the cells a long move crosses
+      const cells = [];
+      for (let s = 1; s < subN[k]; s++) {
+        const rr = Math.round(dr * s / subN[k]), cc = Math.round(dc * s / subN[k]);
+        if ((rr || cc) && !(rr === dr && cc === dc)) cells.push(rr * W + cc);
+      }
+      sweepByDelta.set(dIdx[k], Int32Array.from([...new Set(cells)]));
+    }
+  }
+  return { nDirs, K, drs, dcs, dIdx, dists, subN, isLong, maxR, sweepByDelta, hasLong: maxR > 1 };
+}
+
+// Profile-integrated cost of one long move (r,c) → (r+dr, c+dc): bilinear
+// height samples every ~1 cell, v2Edge per sub-segment. `flip` negates each
+// sub-step's dh — travel in the reverse direction (mode "to" / round's bwd
+// leg), matching the unit-edge `reverse` dh flip. Any sample whose bilinear
+// support touches an unpassable cell (nodata heights are garbage) blocks the
+// move (returns Infinity) — the long-move analog of the unit mask check.
+function longEdgeCost(height, mask, H, W, r, c, dr, dc, distM, n, flip, cost) {
+  const sub = distM / n;
+  let e = 0, hPrev = height[r * W + c];
+  for (let s = 1; s <= n; s++) {
+    let hs;
+    if (s === n) {
+      hs = height[(r + dr) * W + (c + dc)];
+    } else {
+      const fr = r + dr * s / n, fc = c + dc * s / n;
+      const r1 = Math.min(H - 2, Math.max(0, Math.floor(fr)));
+      const c1 = Math.min(W - 2, Math.max(0, Math.floor(fc)));
+      const b0 = r1 * W + c1;
+      if (!mask[b0] || !mask[b0 + 1] || !mask[b0 + W] || !mask[b0 + W + 1]) return Infinity;
+      const tr = fr - r1, tc = fc - c1;
+      hs = height[b0] * (1 - tr) * (1 - tc) + height[b0 + 1] * (1 - tr) * tc +
+           height[b0 + W] * tr * (1 - tc) + height[b0 + W + 1] * tr * tc;
+    }
+    e += v2Edge(sub, flip ? hPrev - hs : hs - hPrev, cost);
+    hPrev = hs;
+  }
+  return e;
+}
+
+// Long moves carry flow OVER their intermediate cells without stepping
+// through them — without this, passes corridors turn gappy wherever a long
+// move wins. Stamp each used long edge's flow (the child's subtree count)
+// onto the cells its segment sweeps. `parentLong` marks which parent links
+// used a long move (portals and unit moves must NOT stamp — a portal deck
+// deliberately skips the cells under it). Flows are read BEFORE any stamp
+// is applied: a swept cell's own subtree count must not contaminate other
+// edges' flows. Stamps land only on cells SETTLED by this search — an
+// unsettled intermediate (over-budget under eMax) must not receive passes:
+// it is outside `order`, so the density accumulate/reset loops would never
+// visit it (the count would leak into the next ref's field).
+function stampLongPasses(passes, parents, parentLong, order, orderLen, sweepByDelta, settledArr) {
+  if (!sweepByDelta || sweepByDelta.size === 0 || !parentLong) return;
+  const si = [], sv = [];
+  for (let j = 0; j < orderLen; j++) {
+    const idx = order[j];
+    if (!parentLong[idx]) continue;
+    const p = parents[idx];
+    if (p < 0) continue;
+    const sw = sweepByDelta.get(idx - p);
+    if (!sw) continue;
+    const flow = passes[idx];
+    if (!(flow > 0)) continue;
+    for (let s = 0; s < sw.length; s++) {
+      const cell = p + sw[s];
+      if (settledArr && !settledArr[cell]) continue;
+      si.push(cell); sv.push(flow);
+    }
+  }
+  for (let i = 0; i < si.length; i++) passes[si[i]] += sv[i];
+}
+
+// ------- String pulling (post-hoc route shortcutting) -------
+// Shorten a computed grid path by joining node pairs with straight segments
+// costed by the SAME profile integration long moves use (longEdgeCost, so a
+// segment through nodata is blocked and the polyline's energy is its own
+// per-sub-step v2Edge sum — viewing ≡ routing holds for the pulled line).
+// Windowed DP (any pair ≤ 64 nodes apart), iterated over the surviving
+// breakpoints so the effective shortcut range grows geometrically; stops
+// when a round improves < 0.1 %. Measured (docs/grid-pull.mjs): recovers
+// ~44 % of the 8-grid's median route-energy overestimate at ~tens of ms per
+// path — the residual is corridor lock-in (the polyline can only visit the
+// original path's cells), which no post-hoc pass can recover. `flip` = mode
+// "to" (travel dst→seed: every sub-step dh negates, like the engines'
+// `reverse`). Returns { path, energy } or null when no improvement.
+function stringPullPath(height, mask, H, W, dx, dy, cost, path, flip) {
+  const seg = (a, b) => {
+    const ar = (a / W) | 0, ac = a - ar * W;
+    const br = (b / W) | 0, bc = b - br * W;
+    const dr = br - ar, dc = bc - ac;
+    const m = Math.max(Math.abs(dr), Math.abs(dc));
+    if (m === 0) return 0;
+    const distM = Math.hypot(dr * dy, dc * dx);
+    return longEdgeCost(height, mask, H, W, ar, ac, dr, dc, distM, Math.max(1, 2 * m), flip, cost);
+  };
+  let nodes = path, best = Infinity;
+  for (let round = 0; round < 4; round++) {
+    const L = nodes.length;
+    const dp = new Float64Array(L).fill(Infinity);
+    const from = new Int32Array(L).fill(-1);
+    dp[0] = 0;
+    for (let j = 1; j < L; j++) {
+      for (let i = Math.max(0, j - 64); i < j; i++) {
+        if (dp[i] === Infinity) continue;
+        const cand = dp[i] + seg(nodes[i], nodes[j]);
+        if (cand < dp[j]) { dp[j] = cand; from[j] = i; }
+      }
+    }
+    if (!(dp[L - 1] < best * 0.999)) { best = Math.min(best, dp[L - 1]); break; }
+    best = dp[L - 1];
+    const kept = [];
+    for (let j = L - 1; ; j = from[j]) { kept.push(nodes[j]); if (j === 0) break; }
+    kept.reverse();
+    nodes = kept;
+    if (nodes.length < 3) break;
+  }
+  if (!Number.isFinite(best)) return null;
+  return { path: nodes, energy: best };
 }
 
 // ------- Multi-reference density (optimised, scratch-reused) -------
@@ -388,14 +598,47 @@ function densityField(opts) {
     // unreached / ref skipped). MUST stay null on the calibration probe: a
     // maxSettled-truncated search would record non-optimal finite energies.
     refCells = null,
+    // Optional move set from buildMoves() (4–128 directions). null = the
+    // classic 8 (bit-parity default; the probe always runs with null).
+    moves = null,
   } = opts;
   const N = H * W;
-  const diag = Math.hypot(dx, dy);
-  const drs = new Int32Array([-1, -1, -1, 0, 0, 1, 1, 1]);
-  const dcs = new Int32Array([-1, 0, 1, -1, 1, -1, 0, 1]);
-  const dists = new Float64Array([diag, dy, diag, dx, dx, diag, dy, diag]);
-  const dIdx = new Int32Array(8);
-  for (let k = 0; k < 8; k++) dIdx[k] = drs[k] * W + dcs[k];
+  const mv = moves || buildMoves(8, W, dx, dy);
+  const { K: MK, drs, dcs, dists, dIdx, subN, isLong, maxR } = mv;
+
+  // Long-edge cost TABLES, built lazily per travel direction: a density run
+  // executes K searches over ONE grid, so each long edge's profile integral
+  // is reused K times — precompute pays back after ~3 refs (measured in
+  // docs/grid-longedge.mjs; K=1 would lose, which is why single-source
+  // dijkstra() integrates on demand). f64 tables keep the values
+  // bit-identical to on-demand integration (same op order). Memory:
+  // 8 B/cell per long move per direction — densityPoolSize() budgets it.
+  const useTables = mv.hasLong && refPoints.length >= 3;
+  const tablesByRev = [null, null];
+  const longTables = (rev) => {
+    if (!useTables) return null;
+    const i = rev ? 1 : 0;
+    if (tablesByRev[i]) return tablesByRev[i];
+    const t = new Array(MK).fill(null);
+    for (let k = 0; k < MK; k++) {
+      if (!isLong[k]) continue;
+      const T = new Float64Array(N).fill(Infinity);
+      const dr = drs[k], dc = dcs[k];
+      const r0 = Math.max(0, -dr), r1 = H - Math.max(0, dr);
+      const c0 = Math.max(0, -dc), c1 = W - Math.max(0, dc);
+      for (let r = r0; r < r1; r++) {
+        const base = r * W;
+        for (let c = c0; c < c1; c++) {
+          const u = base + c;
+          if (!mask[u] || !mask[u + dIdx[k]]) continue;
+          T[u] = longEdgeCost(height, mask, H, W, r, c, dr, dc, dists[k], subN[k], rev, cost);
+        }
+      }
+      t[k] = T;
+    }
+    tablesByRev[i] = t;
+    return t;
+  };
 
   // `density` and the `passes` scratch are Float32 (not Float64): subtree
   // counts are exact integers up to 2^24, and density values are exact
@@ -422,6 +665,7 @@ function densityField(opts) {
   const parents = new Int32Array(N).fill(-1);
   const order = new Int32Array(N);
   const passes = new Float32Array(N);
+  const pLong = mv.hasLong ? new Uint8Array(N) : null;
   // Round mode keeps a second search resident so both legs combine per ref.
   const round = dmode === "round";
   const E2 = round ? new Float32Array(N).fill(Infinity) : null;
@@ -429,6 +673,7 @@ function densityField(opts) {
   const parents2 = round ? new Int32Array(N).fill(-1) : null;
   const order2 = round ? new Int32Array(N) : null;
   const passes2 = round ? new Float32Array(N) : null;
+  const pLong2 = (round && mv.hasLong) ? new Uint8Array(N) : null;
 
   // Exact monotone radix heap on the f64 keys, reused across all searches.
   // Same structure as the Rust backend's: 65 buckets indexed by the highest
@@ -481,7 +726,9 @@ function densityField(opts) {
   let lastStopG = 0;
   // One budget-limited Dijkstra into the given scratch arrays; returns the
   // settle count (order length). reverse flips dh (energy TO the seed).
-  function search(seedR, seedC, reverse, Ea, settledA, parentsA, orderA) {
+  // pLongA (nullable) records which parent links used a long move; tbl
+  // (nullable) is longTables(reverse) for O(1) long-edge lookups.
+  function search(seedR, seedC, reverse, Ea, settledA, parentsA, orderA, pLongA, tbl) {
     let orderLen = 0; rClear();
     // Reset per search and record every settle: on a maxSettled break this is
     // the cap cell's energy, on clean exhaustion the frontier (last settled)
@@ -499,18 +746,29 @@ function densityField(opts) {
       lastStopG = g; // energy of the most-recently-settled cell (non-decreasing)
       if (maxSettled !== 0 && orderLen >= maxSettled) break;
       const r = (idx / W) | 0, c = idx - r * W, hHere = height[idx];
-      const inner = r > 0 && r < H - 1 && c > 0 && c < W - 1;
-      for (let k = 0; k < 8; k++) {
+      const inner = r >= maxR && r < H - maxR && c >= maxR && c < W - maxR;
+      for (let k = 0; k < MK; k++) {
         let nIdx;
         if (inner) nIdx = idx + dIdx[k];
         else { const nr = r + drs[k], nc = c + dcs[k]; if (nr < 0 || nr >= H || nc < 0 || nc >= W) continue; nIdx = nr * W + nc; }
         if (!mask[nIdx] || settledA[nIdx]) continue;
-        const dh = reverse ? hHere - height[nIdx] : height[nIdx] - hHere;
-        let edge = v2Edge(dists[k], dh, cost);
+        let edge;
+        if (isLong[k]) {
+          edge = tbl ? tbl[k][idx]
+               : longEdgeCost(height, mask, H, W, r, c, drs[k], dcs[k], dists[k], subN[k], reverse, cost);
+          if (edge === Infinity) continue;
+        } else {
+          const dh = reverse ? hHere - height[nIdx] : height[nIdx] - hHere;
+          edge = v2Edge(dists[k], dh, cost);
+        }
         if (maximize) { edge = maxEdgeCost - edge; if (edge < 0) edge = 0; }
         const t = g + edge;
         if (eMax > 0 && t > eMax) continue;
-        if (t < Ea[nIdx]) { Ea[nIdx] = t; parentsA[nIdx] = idx; rPush(t, nIdx); }
+        if (t < Ea[nIdx]) {
+          Ea[nIdx] = t; parentsA[nIdx] = idx;
+          if (pLongA) pLongA[nIdx] = isLong[k];
+          rPush(t, nIdx);
+        }
       }
       // Bridge portal edges (deck shortcuts). Portal-reached cells are settled
       // and added to `order`, so the targeted reset + subtree-passes walk below
@@ -524,7 +782,11 @@ function densityField(opts) {
           if (maximize) { edge = maxEdgeCost - edge; if (edge < 0) edge = 0; }
           const t = g + edge;
           if (eMax > 0 && t > eMax) continue;
-          if (t < Ea[nIdx]) { Ea[nIdx] = t; parentsA[nIdx] = idx; rPush(t, nIdx); }
+          if (t < Ea[nIdx]) {
+            Ea[nIdx] = t; parentsA[nIdx] = idx;
+            if (pLongA) pLongA[nIdx] = 0; // portal, not a long grid move
+            rPush(t, nIdx);
+          }
         }
       }
     }
@@ -538,10 +800,11 @@ function densityField(opts) {
     if (!mask[refR * W + refC]) continue;
 
     if (!round) {
-      const len = search(refR, refC, dmode === "to", E, settled, parents, order);
+      const len = search(refR, refC, dmode === "to", E, settled, parents, order, pLong, longTables(dmode === "to"));
       if (onExplored) onExplored(len, lastStopG);
       for (let j = 0; j < len; j++) passes[order[j]] = 1;
       for (let j = len - 1; j >= 0; j--) { const idx = order[j]; const p = parents[idx]; if (p >= 0) passes[p] += passes[idx]; }
+      stampLongPasses(passes, parents, pLong, order, len, mv.sweepByDelta, settled);
       // Accessibility row: sample this ref's field at every ref cell BEFORE
       // the reset below wipes E. Untouched cells read Infinity.
       if (matrix) for (let j = 0; j < KC; j++) {
@@ -553,17 +816,20 @@ function densityField(opts) {
         density[idx] += passes[idx] / N;
         energySum[idx] += E[idx]; energyCount[idx] += 1;
         E[idx] = Infinity; settled[idx] = 0; parents[idx] = -1; passes[idx] = 0;
+        if (pLong) pLong[idx] = 0;
       }
     } else {
-      const lf = search(refR, refC, false, E, settled, parents, order);
-      const lb = search(refR, refC, true, E2, settled2, parents2, order2);
+      const lf = search(refR, refC, false, E, settled, parents, order, pLong, longTables(false));
+      const lb = search(refR, refC, true, E2, settled2, parents2, order2, pLong2, longTables(true));
       if (onExplored) onExplored(lf + lb);
       // Filtered subtree passes: a destination counts only if BOTH legs
       // reach it (and the round trip is within the total cap, if set).
       for (let j = 0; j < lf; j++) { const idx = order[j]; const fi = E[idx], bi = E2[idx]; passes[idx] = (bi < Infinity && !(eMaxTotalCap > 0 && fi + bi > eMaxTotalCap)) ? 1 : 0; }
       for (let j = lf - 1; j >= 0; j--) { const idx = order[j]; const p = parents[idx]; if (p >= 0) passes[p] += passes[idx]; }
+      stampLongPasses(passes, parents, pLong, order, lf, mv.sweepByDelta, settled);
       for (let j = 0; j < lb; j++) { const idx = order2[j]; const fi = E[idx], bi = E2[idx]; passes2[idx] = (fi < Infinity && !(eMaxTotalCap > 0 && fi + bi > eMaxTotalCap)) ? 1 : 0; }
       for (let j = lb - 1; j >= 0; j--) { const idx = order2[j]; const p = parents2[idx]; if (p >= 0) passes2[p] += passes2[idx]; }
+      stampLongPasses(passes2, parents2, pLong2, order2, lb, mv.sweepByDelta, settled2);
       for (let j = 0; j < lf; j++) {
         const idx = order[j];
         density[idx] += passes[idx] / N;
@@ -581,8 +847,8 @@ function densityField(opts) {
           matrix[k * KC + j] = Math.fround(fi + bi);
         }
       }
-      for (let j = 0; j < lf; j++) { const idx = order[j]; E[idx] = Infinity; settled[idx] = 0; parents[idx] = -1; passes[idx] = 0; }
-      for (let j = 0; j < lb; j++) { const idx = order2[j]; E2[idx] = Infinity; settled2[idx] = 0; parents2[idx] = -1; passes2[idx] = 0; }
+      for (let j = 0; j < lf; j++) { const idx = order[j]; E[idx] = Infinity; settled[idx] = 0; parents[idx] = -1; passes[idx] = 0; if (pLong) pLong[idx] = 0; }
+      for (let j = 0; j < lb; j++) { const idx = order2[j]; E2[idx] = Infinity; settled2[idx] = 0; parents2[idx] = -1; passes2[idx] = 0; if (pLong2) pLong2[idx] = 0; }
     }
     if (onProgress) onProgress((k + 1) / K);
   }
@@ -1388,9 +1654,18 @@ self.onmessage = (ev) => {
     maximizeLength = 0,                                   // >0 → layered-DP max-cost path of exactly L edges
     wantMatrix = false,                                   // density only: pairwise ref↔ref energy matrix
     matrixCells = null,                                   // Int32Array of ALL K refs' flat cells (−1 = off-grid)
+    nDirs = 8,                                            // move directions: 4 | 8 | 16 | 32 | 64 | 128
+    stringPull = false,                                   // post-hoc shortcutting of the displayed route(s)
   } = msg;
 
   const wantPath = goalR >= 0 && goalC >= 0;
+  // Move set (docs/grid-connectivity-sensitivity-2026-07-11.md). Maximize
+  // forces the classic 8: the inversion bound (maxEdgeCost) is a
+  // single-grid-edge property, so a long move would invert to a clamped-0
+  // free shortcut — the same degeneracy that excludes portals there. The
+  // A* top-N / layered-DP paths always use the classic 8 regardless
+  // (admissible-heuristic scope); stringPull below smooths them post hoc.
+  const nDirsEff = (maximize || ![4, 8, 16, 32, 64, 128].includes(nDirs | 0)) ? 8 : (nDirs | 0);
   // Defense in depth: app.js already zeroes eMax before sending under
   // maximize (v49 fix for a prior finding — an unconverted kJ budget
   // pruned nearly everything on the inverted cost, silently emptying the
@@ -1450,6 +1725,8 @@ self.onmessage = (ev) => {
   // exclusion. Bridges + "maximize energy" isn't a meaningful combination anyway.
   const portalAdj = maximize ? null : buildPortalAdj(msg.portalU, msg.portalV, msg.portalLenM, msg.portalHU, msg.portalHV, height, effMask, cost);
 
+  const moves = buildMoves(nDirsEff, W, dx, dy);
+
   let energy;
   let passes = null;
   let matrixOut = null;     // density accessibility matrix (non-partial path)
@@ -1496,6 +1773,7 @@ self.onmessage = (ev) => {
         // yield meaningless "energies"); the probe path (kind: "probe")
         // never reaches this branch, so refCells stays probe-clean.
         refCells: (wantMatrix && !maximize && matrixCells) ? matrixCells : null,
+        moves,
         onProgress: (frac) => postMessage({ kind: "progress", progress: frac }),
       });
 
@@ -1539,7 +1817,7 @@ self.onmessage = (ev) => {
         cost, dx, dy,
         reverse: false, trackParents: wantPath,
         wantPasses, eMax: eMaxEff,
-        maximize, maxEdgeCost, portalAdj,
+        maximize, maxEdgeCost, portalAdj, moves,
       });
       energy = r.E;
       passes = r.passes;
@@ -1554,7 +1832,7 @@ self.onmessage = (ev) => {
         cost, dx, dy,
         reverse: true, trackParents: wantPath,
         wantPasses, eMax: eMaxEff,
-        maximize, maxEdgeCost, portalAdj,
+        maximize, maxEdgeCost, portalAdj, moves,
       });
       energy = r.E;
       passes = r.passes;
@@ -1573,7 +1851,7 @@ self.onmessage = (ev) => {
         cost, dx, dy,
         reverse: false, trackParents: wantPath,
         wantTree: wantPasses, eMax: eMaxEff,
-        maximize, maxEdgeCost, portalAdj,
+        maximize, maxEdgeCost, portalAdj, moves,
       });
       const b = dijkstra({
         height, mask: effMask, H, W,
@@ -1581,7 +1859,7 @@ self.onmessage = (ev) => {
         cost, dx, dy,
         reverse: true, trackParents: false,
         wantTree: wantPasses, eMax: eMaxEff,
-        maximize, maxEdgeCost, portalAdj,
+        maximize, maxEdgeCost, portalAdj, moves,
       });
       energy = new Float32Array(N);
       for (let i = 0; i < N; i++) {
@@ -1596,7 +1874,9 @@ self.onmessage = (ev) => {
         const include = new Uint8Array(N);
         for (let i = 0; i < N; i++) include[i] = Number.isFinite(energy[i]) ? 1 : 0;
         passes = subtreePasses(f.parents, f.order, f.orderLen, N, include);
+        stampLongPasses(passes, f.parents, f.parentLong, f.order, f.orderLen, moves.sweepByDelta, f.settled);
         const pb = subtreePasses(b.parents, b.order, b.orderLen, N, include);
+        stampLongPasses(pb, b.parents, b.parentLong, b.order, b.orderLen, moves.sweepByDelta, b.settled);
         for (let i = 0; i < N; i++) passes[i] += pb[i];
       }
       // For round trip, the "path" is ambiguous (outbound vs return differ).
@@ -1692,6 +1972,33 @@ self.onmessage = (ev) => {
       }
     }
 
+    // String pulling (optional): shorten the displayed route(s) post hoc.
+    // Round is excluded (its "path" is the outbound leg but its energy is
+    // the round-trip total — pulling one leg would desynchronise them);
+    // maximize is excluded (an inverted-cost path is not a v2Edge sum). A
+    // network-constrained run self-limits: segments leaving the network are
+    // mask-blocked, so pulling only straightens within corridors.
+    let stringPulled = false;
+    if (stringPull && !maximize && mode !== "round") {
+      const flip = mode === "to";
+      if (path && path.length > 2 && pathEnergy != null) {
+        const pulled = stringPullPath(height, effMask, H, W, dx, dy, cost, path, flip);
+        if (pulled && pulled.energy < pathEnergy) {
+          path = pulled.path; pathEnergy = pulled.energy; stringPulled = true;
+        }
+      }
+      if (routes) {
+        for (const rt of routes) {
+          if (!rt.path || rt.path.length <= 2) continue;
+          const pulled = stringPullPath(height, effMask, H, W, dx, dy, cost, rt.path, flip);
+          if (pulled && pulled.energy < rt.energy) {
+            rt.path = pulled.path; rt.energy = pulled.energy; rt.length = pathLength(pulled.path);
+            stringPulled = true;
+          }
+        }
+      }
+    }
+
     // Path length for the single non-top-N output
     if (path) pathLengthCells = pathLength(path);
 
@@ -1771,6 +2078,7 @@ self.onmessage = (ev) => {
       elapsedMs: t1 - t0,
     };
     if (matrixOut) out.matrix = matrixOut;
+    if (stringPulled) out.stringPulled = true;
     const transfer = [energy.buffer];
     if (passes) transfer.push(passes.buffer);
     if (matrixOut) transfer.push(matrixOut.buffer);

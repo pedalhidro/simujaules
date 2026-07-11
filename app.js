@@ -237,6 +237,15 @@ const STRINGS = {
   "kpi.marker_tooltip_frac": { pt: "ref {0} · alcança {1}% das referências (≤ {2} kJ)", en: "ref {0} · reaches {1}% of references (≤ {2} kJ)" },
   "btn.kpi_csv":         { pt: "Exportar CSV por referência", en: "Export per-reference CSV" },
   "btn.kpi_matrix_csv":  { pt: "Exportar matriz CSV", en: "Export matrix CSV" },
+  "kpi.corr":            { pt: "correção de grade ×c", en: "grid correction ×c" },
+  "kpi.corr.title":      { pt: "Infla os limiares E₁/E₂ por c para compensar a sobre-estimativa da grade de 8 direções (≈1,09–1,12 medido). 1,00 = desligada (piso conservador). Desnecessária com ≥16 direções.", en: "Inflates the E₁/E₂ thresholds by c to offset the 8-direction grid's overestimate (≈1.09–1.12 measured). 1.00 = off (conservative floor). Unnecessary with ≥16 directions." },
+  "kpi.corr_note":       { pt: "Correção de grade ×{0} aplicada aos limiares — estimativa centrada: a garantia de piso conservador NÃO vale mais.", en: "Grid correction ×{0} applied to the thresholds — centered estimate: the conservative-floor guarantee NO longer holds." },
+  // ---- Move directions + string pulling ----------------------------------
+  "param.ndirs":         { pt: "Direções de movimento", en: "Move directions" },
+  "param.ndirs.title":   { pt: "8 = grade clássica (padrão; único valor servido pelo backend nativo — os demais calculam no navegador). Mais direções reduzem a sobre-estimativa de energia por serrilhado das rotas (≈⅔ a menos com 16), a custo de cálculo proporcional.", en: "8 = the classic grid (default; the only value the native backend serves — others compute in-browser). More directions shrink the route-jaggedness energy overestimate (≈⅔ less at 16) at proportional compute cost." },
+  "param.string_pull":   { pt: "Suavizar rotas exibidas (string pulling)", en: "Smooth displayed routes (string pulling)" },
+  "param.string_pull.title": { pt: "Encurta pós-cálculo a rota exibida (e as top-N) ligando vértices por segmentos retos custeados pelo mesmo modelo — a energia mostrada é a soma integrada da própria linha. Ida-e-volta e maximizar ficam de fora.", en: "Post-hoc shortens the displayed route (and top-N) by joining vertices with straight segments costed by the same model — the shown energy is the line's own integrated sum. Round-trip and maximize are excluded." },
+  "stats.pulled":        { pt: "rota suavizada (string pulling) — energia = soma integrada da linha exibida", en: "route smoothed (string pulling) — energy = the displayed line's own integrated sum" },
   "net.interp":          { pt: "Interpolar entre células fora da rede", en: "Interpolate across non-network cells" },
   "net.max_distance":    { pt: "distância máx (células)", en: "max distance (cells)" },
   "net.smoothing":       { pt: "suavizações", en: "smoothing iters" },
@@ -6141,6 +6150,14 @@ runBtn.addEventListener("click", async () => {
   // Density follows the global Mode select instead of having its own
   // direction toggle.
   const densityMode  = mode;
+  // Move directions (grid neighborhood, docs/grid-connectivity-sensitivity):
+  // 8 = the classic engine and the ONLY value the native backend serves —
+  // any other value computes in-browser (gated below, like top-N/maximize).
+  // The worker forces 8 under maximize regardless (inversion degeneracy).
+  const nDirsRaw = parseInt(document.getElementById("n-dirs")?.value, 10);
+  const nDirs = [4, 8, 16, 32, 64, 128].includes(nDirsRaw) ? nDirsRaw : 8;
+  // String pulling: post-hoc shortcutting of the displayed route(s).
+  const stringPull = !!document.getElementById("string-pull")?.checked;
 
   if (wantTopN && !state.dst) {
     status.innerHTML = `<span style="color:#ff6b6b">${t("status.topn_needs_dst")}</span>`;
@@ -6391,6 +6408,8 @@ runBtn.addEventListener("click", async () => {
     interpSmoothing,
     maximize,
     maximizeLength,
+    nDirs,
+    stringPull,
     // Bridge portal edges (hybrid raster overlay). Small arrays — spread into
     // every worker message via baseMsg (structured-cloned, NOT transferred, so
     // the shared arrays survive across the density pool's workers). The native
@@ -6526,7 +6545,7 @@ runBtn.addEventListener("click", async () => {
   // main-thread DEM, and the OS. On huge DEMs this still yields 1 worker
   // (the honest ceiling: two won't fit), exactly the old behaviour.
   const K = wantDensity ? state.refPoints.length : 0;
-  const poolN = wantDensity ? densityPoolSize({ N, K, round: densityMode === "round" }) : 1;
+  const poolN = wantDensity ? densityPoolSize({ N, K, round: densityMode === "round", nDirs }) : 1;
 
   // Run one full density field over the worker pool and resolve with the
   // raw outputs (no interp, no UI finalisation — the callers compose those).
@@ -6819,7 +6838,9 @@ runBtn.addEventListener("click", async () => {
   // Backend with browser-pool fallback, per scenario. Resolves with raw
   // {energy, passes} like computeDensityField.
   const densityField = async (opts) => {
-    if (runUseBackend) {
+    // nDirs ≠ 8 is browser-only (the Rust backend serves the classic 8-move
+    // engine exactly) — same pattern as top-N/maximize staying in-browser.
+    if (runUseBackend && nDirs === 8) {
       try {
         return await startDensityBackend(computeDataUrl(), opts);
       } catch (err) {
@@ -6972,7 +6993,7 @@ runBtn.addEventListener("click", async () => {
   // path, "maximize", graph mode, AND a non-density compare (which routes to the
   // browser-only startComparePair) always run in-browser. Used to avoid booting a
   // cloud VM for a run that would compute in-browser anyway.
-  const willUseBackend = backendOn && !graphModeActive() &&
+  const willUseBackend = backendOn && !graphModeActive() && nDirs === 8 &&
     (wantDensity || (!compareOn && !wantTopN && !maximize && !state.dst));
   // Run-scoped engine override. Normally tracks backendOn, but a failed cloud
   // boot flips it to false so the density path (which reads it inside
@@ -7222,7 +7243,7 @@ runBtn.addEventListener("click", async () => {
       })();
     } else if (compareOn) {
       startComparePair();
-    } else if (useBackend && !wantTopN && !maximize && !state.dst) {
+    } else if (useBackend && !wantTopN && !maximize && !state.dst && nDirs === 8) {
       // Single-source energy field on the native backend (energy + optional
       // passes). Top-N / maximize / a destination path need the browser (the
       // backend produces no routes); any backend failure falls back too.
@@ -7319,7 +7340,7 @@ runBtn.addEventListener("click", async () => {
 });
 
 // ------- Render -------
-function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs, energyAlt, passesAlt, pathAlt, pathAltEnergy, pathAltLengthM, runMode, matrix, matrixOutdated, kpi }) {
+function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, elapsedMs, energyAlt, passesAlt, pathAlt, pathAltEnergy, pathAltLengthM, runMode, matrix, matrixOutdated, kpi, stringPulled }) {
   // A grid result supersedes any graph-mode overlay.
   removeGraphLayers();
   state.lastGraphResult = null;
@@ -7402,6 +7423,7 @@ function renderResult({ energy, passes, path, pathEnergy, pathLengthM, routes, e
   if (pathAlt && pathAlt.length && pathAltEnergy != null) {
     meta.push(t("route.terrain_meta", pathAltEnergy.toExponential(3), (pathAltLengthM / 1000).toFixed(2)));
   }
+  if (stringPulled) meta.push(t("stats.pulled"));
   resultMeta.innerHTML = meta.join("<br/>");
   resultMeta.removeAttribute("data-i18n"); // live stats — don't let a lang toggle reset to "—"
 
@@ -7497,16 +7519,22 @@ function kpiEval() {
   const jPct = Math.min(100, num("kpi-j", 80));
   const popRaw = parseFloat(document.getElementById("kpi-pop")?.value);
   const popM = Number.isFinite(popRaw) && popRaw > 0 ? popRaw : null;
+  // Grid-bias correction (research note §10): inflate the thresholds by c —
+  // equivalent to deflating the 8-grid's overestimated energies by a shared
+  // constant. 1 = off (the conservative-floor default). Counting only; the
+  // displayed threshold values stay what the user typed.
+  const corrRaw = parseFloat(document.getElementById("kpi-corr")?.value);
+  const corr = Number.isFinite(corrRaw) ? Math.min(1.5, Math.max(1, corrRaw)) : 1;
   const { mat, K } = kpi;
-  const c1 = kpiCounts(mat, K, eK);
-  const c2 = kpiCounts(mat, K, eJ);
+  const c1 = kpiCounts(mat, K, eK * corr);
+  const c2 = kpiCounts(mat, K, eJ * corr);
   let pass1 = 0, pass2 = 0;
   const perRef = popM != null ? popM / K : 0;
   for (let i = 0; i < K; i++) {
     if (popM != null && perRef * c1[i] >= kPeople) pass1++;
     if (c2[i] / K >= jPct / 100 - 1e-12) pass2++;
   }
-  return { eK, kPeople, eJ, jPct, popM, c1, c2, pass1, pass2, K };
+  return { eK, kPeople, eJ, jPct, popM, corr, c1, c2, pass1, pass2, K };
 }
 
 function renderKpiBlock() {
@@ -7542,9 +7570,13 @@ function renderKpiBlock() {
     metaEl.innerHTML = s;
   }
   if (warnEl) {
-    const over = kpi.eMax > 0 && (ev.eK > kpi.eMax || ev.eJ > kpi.eMax);
-    warnEl.textContent = over ? t("kpi.warn_budget", kpi.eMax) : "";
-    warnEl.style.display = over ? "" : "none";
+    const msgs = [];
+    if (kpi.eMax > 0 && (ev.eK * ev.corr > kpi.eMax || ev.eJ * ev.corr > kpi.eMax)) {
+      msgs.push(t("kpi.warn_budget", kpi.eMax));
+    }
+    if (ev.corr > 1) msgs.push(t("kpi.corr_note", ev.corr.toFixed(2)));
+    warnEl.textContent = msgs.join(" ");
+    warnEl.style.display = msgs.length ? "" : "none";
   }
   kpiRecolorMarkers(ev);
 }
@@ -7592,7 +7624,7 @@ function kpiExportRefsCsv() {
   const num = (v) => (v == null ? "" : v);
   const lines = [
     `# simujaules accessibility — per-reference table`,
-    `# K=${kpi.K} mode=${kpi.mode} eMax_kJ=${kpi.eMax}${kpi.mode === "round" ? ` eMaxMode=${kpi.eMaxMode}` : ""} M=${num(ev.popM)} E1_kJ=${ev.eK} K_people=${ev.kPeople} E2_kJ=${ev.eJ} J_pct=${ev.jPct}`,
+    `# K=${kpi.K} mode=${kpi.mode} eMax_kJ=${kpi.eMax}${kpi.mode === "round" ? ` eMaxMode=${kpi.eMaxMode}` : ""} M=${num(ev.popM)} E1_kJ=${ev.eK} K_people=${ev.kPeople} E2_kJ=${ev.eJ} J_pct=${ev.jPct} grid_corr=${ev.corr}`,
     `index,row,col,lat,lng,count_E1,acc_pop_E1,frac_refs_E1,kpi1_pass,count_E2,frac_refs_E2,kpi2_pass`,
   ];
   const perRef = ev.popM != null ? ev.popM / kpi.K : null;
@@ -7633,7 +7665,7 @@ function kpiExportMatrixCsv() {
 }
 
 // Threshold edits re-evaluate the cached matrix live — never a recompute.
-for (const id of ["kpi-ek", "kpi-k", "kpi-ej", "kpi-j", "kpi-pop"]) {
+for (const id of ["kpi-ek", "kpi-k", "kpi-ej", "kpi-j", "kpi-pop", "kpi-corr"]) {
   document.getElementById(id)?.addEventListener("input", () => { if (state.kpi) renderKpiBlock(); });
 }
 document.getElementById("kpi-export-csv")?.addEventListener("click", kpiExportRefsCsv);
@@ -8811,10 +8843,16 @@ function memBudgetBytes() {
 // energyCount 4 = 16) ≈ 38 B/cell, ~55 in round mode (a second search
 // resident). The optional #max-workers input lets a user on a big-RAM machine
 // (which deviceMemory can't see) force more, still clamped by K.
-function densityPoolSize({ N, K, round }) {
+function densityPoolSize({ N, K, round, nDirs = 8 }) {
   if (!K) return 1;
   const cores = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
-  const bytesPerWorker = (round ? 55 : 38) * N;
+  // nDirs > 8: densityField precomputes f64 long-edge cost tables per worker
+  // (8 B/cell per long move, both travel directions resident in round mode)
+  // — see energy-worker.js longTables. Budget them or a 16-direction run on
+  // a big DEM OOMs the pool that 38 B/cell would have allowed.
+  const nLong = { 16: 8, 32: 24, 64: 56, 128: 120 }[nDirs] || 0;
+  const tableBytes = 8 * nLong * (round ? 2 : 1);
+  const bytesPerWorker = ((round ? 55 : 38) + tableBytes) * N;
   const memCap = Math.max(1, Math.floor(memBudgetBytes() / bytesPerWorker));
   const userMax = parseInt(document.getElementById("max-workers")?.value, 10);
   const overrideN = Number.isFinite(userMax) && userMax > 0 ? userMax : 0;
@@ -9281,6 +9319,15 @@ function exploredCells(cal, N, eMax, alpha) {
 // Pre-flight compute-time prediction in ms (raw, before the network-interp
 // term). Shared by the live estimate and the online-correction update so they
 // can't drift. `applyCorr` multiplies in the learned per-engine factor.
+// Move-directions cost multipliers vs the 8-move probe anchor (measured in
+// docs/grid-sens.mjs / docs/grid-longedge.mjs on the SP DTM; 64/128
+// extrapolated from edge-count scaling). Density runs amortize precomputed
+// long-edge tables across their refs, so they use the cheaper lookup-search
+// factors; single-source runs integrate on demand. The per-engine online
+// correction (corrBrowser) absorbs the residual per-machine scale.
+const DIRS_COST_SINGLE  = { 4: 0.7, 8: 1, 16: 2.4, 32: 5.8, 64: 15, 128: 38 };
+const DIRS_COST_DENSITY = { 4: 0.7, 8: 1, 16: 1.5, 32: 2.7, 64: 8,  128: 18 };
+
 function predictComputeMs(cal, opts, applyCorr) {
   const { N, wantDensity, wantTopN, refs, eMax, mode, alpha, backend, graph } = opts;
 
@@ -9296,7 +9343,9 @@ function predictComputeMs(cal, opts, applyCorr) {
   }
 
   const explored = exploredCells(cal, N, eMax, alpha);
-  const perRef = cal.perRefProbe * Math.pow(explored / cal.Estar, RATE_EXP);
+  const dirsTable = wantDensity ? DIRS_COST_DENSITY : DIRS_COST_SINGLE;
+  const dirsFactor = dirsTable[opts.nDirs || 8] || 1;
+  const perRef = cal.perRefProbe * Math.pow(explored / cal.Estar, RATE_EXP) * dirsFactor;
   const dijk = mode === "round" ? 2 : 1;
 
   let ms, corr = 1;
@@ -9317,7 +9366,7 @@ function predictComputeMs(cal, opts, applyCorr) {
     } else {
       // Browser worker pool: per-ref work splits across poolN; each worker
       // pays its own alloc, overlapping in wall-clock (so allocMsN once).
-      const poolN = densityPoolSize({ N, K: refs, round: mode === "round" });
+      const poolN = densityPoolSize({ N, K: refs, round: mode === "round", nDirs: opts.nDirs || 8 });
       ms = cal.allocMsN + (refs / poolN) * perRef * dijk;
       corr = cal.corrBrowser || 1;
     }
@@ -9367,7 +9416,10 @@ function currentRunOpts(cal, N) {
     // costs), so the reach model must assume full grid there too.
     eMax: !document.getElementById("maximize")?.checked && Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0,
     mode, alpha,
-    backend: computeMode() !== "browser",
+    // nDirs ≠ 8 always computes in-browser (the backend serves the classic
+    // 8-move engine only) — the predictor must mirror the runner's gate.
+    nDirs: (() => { const v = parseInt(document.getElementById("n-dirs")?.value, 10); return [4, 8, 16, 32, 64, 128].includes(v) ? v : 8; })(),
+    backend: computeMode() !== "browser" && ((parseInt(document.getElementById("n-dirs")?.value, 10) || 8) === 8),
     graph,
     // Graph-mode compare also runs a full-DEM unconstrained raster scenario.
     graphCompare: graph && !!document.getElementById("vec-compare")?.checked,
@@ -10383,6 +10435,9 @@ function buildMetadata(result, withOutputs = true) {
     refSource:     document.getElementById("ref-sampling")?.value || "random",
     maximize:      !!document.getElementById("maximize")?.checked,
     maximizeLength: parseInt(document.getElementById("maximize-length")?.value, 10) || 0,
+    nDirs:         parseInt(document.getElementById("n-dirs")?.value, 10) || 8,
+    stringPull:    !!document.getElementById("string-pull")?.checked,
+    kpiCorr:       parseFloat(document.getElementById("kpi-corr")?.value) || 1,
     // refPoints carries the actual placed points so reload can re-stamp
     // the green markers exactly where they were.
     refPoints:     Array.isArray(state.refPoints) ? state.refPoints.slice() : [],
@@ -10991,6 +11046,10 @@ function applyMetadataToUI(md, bin = {}) {
   check("want-density", p.wantDensity);
   check("maximize", p.maximize);
   set("maximize-length", p.maximizeLength);
+  // v57 additions — old bundles carry none of these; leave the UI alone then.
+  if ([4, 8, 16, 32, 64, 128].includes(p.nDirs)) set("n-dirs", p.nDirs);
+  if (p.stringPull != null) check("string-pull", p.stringPull);
+  if (Number.isFinite(p.kpiCorr)) set("kpi-corr", Math.min(1.5, Math.max(1, p.kpiCorr)));
   set("n-refs", p.nRefs);
   // Legacy bundles may carry the pre-rename "click" value (or any other
   // stale string) — only accept values the current #ref-sampling select

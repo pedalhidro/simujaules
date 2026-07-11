@@ -466,5 +466,92 @@ for (const dmode of ["from", "round"]) {
   assert(maxi.matrix == null, "no matrix under maximize (inverted costs)");
 }
 
+// ---- 5. move directions (nDirs 4–128) + string pulling ----
+// Richer heading ladders (docs/grid-connectivity-sensitivity-2026-07-11.md):
+// long moves are profile-integrated, passes are stamped over swept cells,
+// and the edge sets NEST — so fields must nest too: E16 ≤ E8 ≤ E4 pointwise.
+{
+  console.log("move directions: field nesting E16 ≤ E8 ≤ E4, stamped passes");
+  const e4 = run(msg({ wantPasses: true, goalR: -1, goalC: -1, nDirs: 4 }));
+  const e8 = run(msg({ wantPasses: true, goalR: -1, goalC: -1 }));
+  const e16 = run(msg({ wantPasses: true, goalR: -1, goalC: -1, nDirs: 16 }));
+  let viol = 0, cheaper16 = 0, cheaper8 = 0, zeroPass = 0;
+  for (let i = 0; i < N; i++) {
+    const a4 = e4.energy[i], a8 = e8.energy[i], a16 = e16.energy[i];
+    if (Number.isFinite(a8) && Number.isFinite(a16)) {
+      if (a16 > a8 + 1e-4) viol++;
+      if (a16 < a8 - 1e-6) cheaper16++;
+    }
+    if (Number.isFinite(a4) && Number.isFinite(a8)) {
+      if (a8 > a4 + 1e-4) viol++;
+      if (a8 < a4 - 1e-6) cheaper8++;
+    }
+    if (Number.isFinite(a16) && !(e16.passes[i] >= 1)) zeroPass++;
+  }
+  assert(viol === 0, "nesting holds everywhere (E16 ≤ E8 ≤ E4)");
+  assert(cheaper16 > 1000 && cheaper8 > 1000,
+    `richer headings strictly cheaper somewhere (16<8 on ${cheaper16}, 8<4 on ${cheaper8} cells)`);
+  assert(zeroPass === 0, "no settled cell has zero passes (long-edge stamping keeps corridors)");
+}
+{
+  console.log("move directions: flat-grid analytic check (16-dir knight heading exact)");
+  // Flat DEM: cost is (aRoll+aAero)·distance. A target on an exact (1,2)
+  // heading is reached by repeating that knight move — the 16-dir field
+  // must equal the straight-line cost there (the 8-dir field cannot).
+  const flat = new Float32Array(N).fill(750);
+  const S = 60, steps = 40; // target at (S+40, S+80)
+  const goal = (S + steps) * W + (S + 2 * steps);
+  const m16 = run({ ...base, seedR: S, seedC: S, goalR: -1, goalC: -1, mode: "from",
+    height: new Float32Array(flat), mask: new Uint8Array(mask).fill(1), nDirs: 16 });
+  const rate = base.cost.aRoll + base.cost.aAero;
+  const want = rate * Math.hypot(steps * 30, 2 * steps * 30);
+  const got = m16.energy[goal];
+  assert(Math.abs(got - want) / want < 1e-4,
+    `flat 16-dir energy on the knight heading = analytic (${got.toFixed(2)} vs ${want.toFixed(2)})`);
+}
+{
+  console.log("move directions: pooled density ≡ single at nDirs=16 (+matrix), maximize forces 8");
+  const single = run(mmsg({ densityMode: "from", mode: "from", nDirs: 16 }));
+  const density = new Float64Array(N);
+  const merged = new Float32Array(MK * MK).fill(Infinity);
+  for (const [lo, hi] of [[0, 3], [3, 5], [5, MK]]) {
+    const part = run(mmsg({ refPoints: mrefs.slice(lo, hi), densityMode: "from", mode: "from", densityPartial: true, nDirs: 16 }));
+    for (let i = 0; i < N; i++) density[i] += part.density[i];
+    merged.set(part.matrix, lo * MK);
+  }
+  for (let i = 0; i < N; i++) density[i] /= N;
+  let maxD = 0, matSame = true;
+  for (let i = 0; i < N; i++) maxD = Math.max(maxD, Math.abs(density[i] - single.passes[i]));
+  for (let i = 0; i < MK * MK; i++) if (merged[i] !== single.matrix[i]) matSame = false;
+  assert(maxD === 0, `pooled nDirs=16 density identical (max|Δ| = ${maxD.toExponential(1)})`);
+  assert(matSame, "pooled nDirs=16 matrix byte-identical (tables ≡ on-demand integration)");
+  const mx8 = run(msg({ goalR: -1, goalC: -1, maximize: true }));
+  const mx16 = run(msg({ goalR: -1, goalC: -1, maximize: true, nDirs: 16 }));
+  let mxSame = true;
+  for (let i = 0; i < N; i++) if (mx8.energy[i] !== mx16.energy[i]) mxSame = false;
+  assert(mxSame, "maximize forces nDirs=8 (fields bitwise identical)");
+}
+{
+  console.log("string pulling: cheaper, subsequence, endpoints, round/maximize excluded");
+  const raw = run(msg({}));
+  const pulled = run(msg({ stringPull: true }));
+  assert(pulled.stringPulled === true, "pulled flag set");
+  assert(pulled.pathEnergy < raw.pathEnergy, `pulled energy below raw (${pulled.pathEnergy.toFixed(1)} < ${raw.pathEnergy.toFixed(1)})`);
+  const rawSet = new Set(raw.path);
+  assert(pulled.path.every((i) => rawSet.has(i)), "pulled path is a subsequence of the raw path");
+  assert(pulled.path[0] === raw.path[0] && pulled.path.at(-1) === raw.path.at(-1), "endpoints preserved");
+  const to = run(msg({ mode: "to", stringPull: true }));
+  const toRaw = run(msg({ mode: "to" }));
+  assert(to.pathEnergy <= toRaw.pathEnergy, "mode-to pulling never worsens");
+  const tn = run(msg({ wantTopN: true, nRoutes: 3, penalty: 2, stringPull: true }));
+  const tnRaw = run(msg({ wantTopN: true, nRoutes: 3, penalty: 2 }));
+  assert(tn.routes.length === 3 && tn.routes.every((r, i) => r.energy <= tnRaw.routes[i].energy + 1e-9),
+    "top-N routes each pulled to ≤ their raw energy");
+  const rd = run(msg({ mode: "round", stringPull: true }));
+  const rdRaw = run(msg({ mode: "round" }));
+  assert(rd.stringPulled === undefined && rd.pathEnergy === rdRaw.pathEnergy,
+    "round mode excluded from pulling (outbound path, round-trip energy)");
+}
+
 console.log(failures === 0 ? "\nALL TESTS PASSED" : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

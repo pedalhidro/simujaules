@@ -152,6 +152,44 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   warns "lower bound". `state.refPopM` (census in-extent population, set ONLY
   by `placeCensusRefPoints` after its placement loop) is the M behind
   "K people" thresholds; every ref-set mutation nulls it.
+- MOVE DIRECTIONS (`#n-dirs`, 4–128, default 8) generalize both engines'
+  neighborhoods via the Farey ladder (`buildMoves`). Invariants: (a) the
+  first 8 moves of every set ≥ 8 are the CLASSIC 8 in the CLASSIC order —
+  nDirs=8 must stay bit-identical to the historical engine (the Rust-parity
+  anchor); (b) nDirs ≠ 8 is BROWSER-ONLY — app.js gates the backend off
+  (like top-N/maximize), the Rust port serves the 8-move engine unchanged;
+  (c) long moves are PROFILE-INTEGRATED (`longEdgeCost`: bilinear heights
+  every ~1 cell, v2Edge per sub-step, mask-blocked) — NEVER cost a long
+  move from its endpoints' Δh alone, that flattens the relief it crosses
+  and flips the error sign (measured, research note §5.3); (d)
+  `densityField` precomputes per-direction long-edge TABLES when a slice
+  has ≥ 3 refs (amortized win; K=1 loses) — tables must stay bit-identical
+  to on-demand integration (same op order; test-asserted), and their memory
+  (8 B/cell per long move per direction) is budgeted by `densityPoolSize`'s
+  nDirs argument (runner + estimator share it — must not drift, same rule
+  as always); (e) passes are STAMPED over the swept cells of used long
+  edges (`stampLongPasses`, settled-only, flows read pre-stamp) so
+  corridors stay continuous — portals never stamp (a deck deliberately
+  skips the cells under it); (f) maximize, the calibration probe, A* top-N
+  and the layered DP always run the classic 8 (inversion degeneracy /
+  anchor stability / admissible-heuristic scope); the estimator scales by
+  `DIRS_COST_SINGLE`/`DIRS_COST_DENSITY`.
+- STRING PULLING (`#string-pull`) post-hoc shortens the displayed route(s)
+  (single path + top-N; round and maximize excluded) by windowed DP over
+  the path's own nodes with profile-integrated straight segments. Viewing ≡
+  routing holds by construction: the energy shown for a pulled line is that
+  polyline's own per-sub-step v2Edge sum, and the drawn line IS the
+  polyline (kept nodes joined straight). Mask-blocked segments make it
+  self-limiting under a network constraint. It never worsens (only accepted
+  when strictly cheaper) and cannot change fields — display layer only.
+- The KPI GRID CORRECTION (`#kpi-corr`, default 1.00 = off) inflates the
+  two accessibility thresholds by c before counting (≡ deflating the
+  8-grid's overestimated energies, research note §10). It lives at the
+  KPI/threshold layer ONLY — never add a corrected per-cell energy number
+  (viewing ≡ routing forbids it). c > 1 surfaces the "centered estimate —
+  floor guarantee lost" warning; the measured c* is ~1.09–1.12 on the SP
+  DTM and is DEM/parameter-specific, and the correction is pointless when
+  the run used ≥ 16 move directions.
 - Multi-reference density does NOT go through `dijkstra()`: it uses the
   dedicated `densityField()` engine (one reused scratch set, targeted
   reset/accumulate over only the explored cells, and an exact monotone

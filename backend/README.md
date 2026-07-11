@@ -82,6 +82,10 @@ Little-endian binary framing, see `src/main.rs` header comment:
   → `[u32 json_len][json {elapsed_ms, passes}][f32 energy×N][f64 passes×N?]`
 - `GET /health` — `{"ok":true,"version":…,"cores":…,"mem_budget_bytes":…}`
 
+> **Move directions:** this backend serves the CLASSIC 8-move engine only.
+> The app's `#n-dirs` option (4–128 directions, v57) is browser-only — app.js
+> never routes a non-8 run here, same pattern as top-N/maximize.
+
 The cost model and passes/density math are a port of `energy-worker.js`
 (`dijkstra()` with `wantPasses`, and the from/to/round single-source branch);
 keep the two in sync. `test-backend.mjs` in this directory checks both

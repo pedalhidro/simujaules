@@ -1092,9 +1092,17 @@
           <input type="checkbox" id="want-topn" />
           <span data-i18n="param.want_topn">Compute top-N routes</span>
         </label>
-        <label style="display: flex; align-items: center; gap: 6px; margin-top: 3px; margin-bottom: 8px;">
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 3px;">
           <input type="checkbox" id="want-density" />
           <span data-i18n="param.want_density">Compute multi-reference density</span>
+        </label>
+        <!-- String pulling: post-hoc shortcutting of the displayed route(s)
+             (single best path + top-N). Browser-side path polish only — the
+             energy shown for a pulled line is its own profile-integrated sum,
+             so viewing ≡ routing still holds. Round/maximize are excluded. -->
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 3px; margin-bottom: 8px;">
+          <input type="checkbox" id="string-pull" />
+          <span data-i18n="param.string_pull" data-i18n-title="param.string_pull.title">Suavizar rotas exibidas (string pulling)</span>
         </label>
         <!-- Mode + cost coefficients + budget as a 2-col label|input table. The
              "applies to" row shows only in round-trip mode — toggled via
@@ -1105,6 +1113,20 @@
                 <option value="from"  data-i18n="mode.from">From source</option>
                 <option value="to"    data-i18n="mode.to">To source point</option>
                 <option value="round" data-i18n="mode.round">Round trip</option>
+              </select></td></tr>
+          <!-- Move directions (grid neighborhood). 8 = the classic engine
+               (default; the only value the native backend serves — other
+               values compute in-browser). Richer ladders shrink the
+               grid-jaggedness energy overestimate at proportional compute
+               cost (docs/grid-connectivity-sensitivity-2026-07-11.md). -->
+          <tr><td class="kv-key"><label for="n-dirs" data-i18n="param.ndirs">Direções de movimento</label></td>
+              <td class="kv-val"><select id="n-dirs" data-i18n-title="param.ndirs.title">
+                <option value="4">4</option>
+                <option value="8" selected>8</option>
+                <option value="16">16</option>
+                <option value="32">32</option>
+                <option value="64">64</option>
+                <option value="128">128</option>
               </select></td></tr>
           <tr><td class="kv-key"><label for="mass" data-i18n="param.mass">Mass (kg)</label></td>
               <td class="kv-val"><input type="number" id="mass" value="75" step="1" min="1" /></td></tr>
@@ -1264,6 +1286,14 @@
                 <td class="kv-val"><input type="number" id="kpi-j" value="80" step="any" min="0" max="100" /></td></tr>
             <tr><td class="kv-key"><label for="kpi-pop" id="kpi-pop-label" data-i18n="kpi.pop">população total M</label></td>
                 <td class="kv-val"><input type="number" id="kpi-pop" value="" step="any" min="0" placeholder="—" /></td></tr>
+            <!-- Grid-bias correction (docs/grid-connectivity-sensitivity §10):
+                 inflates the two thresholds by c (equivalent to deflating the
+                 grid's overestimated energies). 1.00 = off (the default,
+                 conservative-floor semantics). Measured c* ≈ 1.09–1.12 on the
+                 SP DTM at 8 directions; unnecessary when the run already used
+                 ≥16 move directions. -->
+            <tr><td class="kv-key"><label for="kpi-corr" data-i18n="kpi.corr">correção de grade ×c</label></td>
+                <td class="kv-val"><input type="number" id="kpi-corr" value="1.00" step="0.01" min="1" max="1.5" data-i18n-title="kpi.corr.title" /></td></tr>
           </table>
           <div class="meta" id="kpi-out1" style="margin-top: 6px;">—</div>
           <div class="meta" id="kpi-out2">—</div>
