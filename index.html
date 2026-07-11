@@ -1703,6 +1703,30 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v57</strong> — 2026-07-11<br/>
+              <strong>Direções de movimento, string pulling e correção de
+              grade</strong> — a nota de pesquisa de conectividade da grade
+              virou opção. Novo seletor <strong>"Direções de
+              movimento"</strong> (4/8/16/32/64/128; padrão 8 = motor
+              clássico, bit-idêntico): mais direções (escada de Farey, com
+              movimentos longos integrados ao perfil do terreno) reduzem a
+              sobre-estimativa de energia ótima causada pelo serrilhado das
+              rotas (≈⅔ a menos com 16 direções, medido no MDT de SP), a
+              custo de cálculo proporcional. Cálculos de densidade amortizam
+              tabelas de custo pré-computadas por worker; as passagens são
+              carimbadas nas células que os movimentos longos atravessam
+              (corredores contínuos). Valores ≠ 8 calculam no navegador — o
+              backend nativo segue servindo o motor de 8 movimentos. Nova
+              opção <strong>"string pulling"</strong>: encurta pós-cálculo a
+              rota exibida e as top-N (ida-e-volta e maximizar ficam de
+              fora) — a energia mostrada é a soma integrada da própria linha
+              exibida. Novo campo <strong>"correção de grade ×c"</strong> no
+              bloco de acessibilidade: infla os limiares E₁/E₂ (equivale a
+              deflacionar as energias sobre-estimadas da grade; c* ≈
+              1,09–1,12 medido em 8 direções), com aviso explícito de que a
+              garantia de piso conservador deixa de valer; desnecessária com
+              ≥ 16 direções. As três opções persistem nos bundles; a
+              estimativa de tempo acompanha o número de direções.</p>
               <p><strong>v56</strong> — 2026-07-11<br/>
               <strong>KPIs de acessibilidade — iniciativa "cidade 300 kJ"</strong>.
               Cálculos de densidade agora também amostram o campo de energia de

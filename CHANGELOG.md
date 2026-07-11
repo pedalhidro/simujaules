@@ -9,6 +9,35 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v57 — 2026-07-11
+
+**Move directions, string pulling, KPI grid correction** — the
+grid-connectivity research note
+(`docs/grid-connectivity-sensitivity-2026-07-11.md`) shipped as options.
+New **"Direções de movimento"** select (4/8/16/32/64/128; default 8 = the
+classic engine, bit-identical): richer Farey heading ladders with
+profile-integrated long moves cut the route-jaggedness optimal-energy
+overestimate (measured ≈⅔ less at 16 directions on the SP DTM) at
+proportional compute cost. Density runs amortize precomputed long-edge cost
+tables per worker (bit-identical to on-demand integration; memory budgeted
+by the pool sizer), and passes are stamped over the cells long moves sweep,
+so corridors stay continuous. Non-8 values compute in-browser — the native
+backend keeps serving the classic 8-move engine (same pattern as
+top-N/maximize). New **"string pulling"** checkbox post-hoc shortens the
+displayed route and top-N alternatives (windowed DP over the path's own
+nodes, profile-integrated straight segments; round/maximize excluded;
+recovers ~44 % of the median route-energy overestimate at ~tens of ms) —
+the energy shown for a pulled line is that polyline's own integrated sum,
+so viewing ≡ routing holds. New KPI **"correção de grade ×c"** input
+inflates the two accessibility thresholds (≡ deflating the grid's
+overestimated energies; measured c* ≈ 1.09–1.12 at 8 directions) with an
+explicit "centered estimate — floor guarantee lost" warning; unnecessary at
+≥ 16 directions. All three options persist in bundles; the time estimate
+scales with the chosen direction count. New worker-suite sections pin the
+nesting (E16 ≤ E8 ≤ E4), a flat-grid analytic heading check, pooled ≡
+single at 16 directions (tables ≡ on-demand), maximize forcing 8, and the
+string-pulling contract.
+
 ## v56 — 2026-07-11
 
 **Accessibility KPIs — "300 kJ city" initiative.** Density runs now also

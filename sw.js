@@ -495,7 +495,23 @@
 //              meta; bit-parity with the JS worker, enforced by new +matrix
 //              cases incl. a dropped-ref index regression). Warns when a
 //              threshold exceeds the run's energy budget (lower bound).
-const VERSION  = "v56";
+//   v56 → v57: Move directions + string pulling + KPI grid correction (the
+//              grid-connectivity research note shipped as options). New
+//              "Direções de movimento" select (4/8/16/32/64/128, default 8 =
+//              the classic engine, bit-identical): richer Farey heading
+//              ladders with profile-integrated long moves cut the route-
+//              jaggedness energy overestimate (~⅔ less at 16 directions);
+//              density runs amortize precomputed long-edge tables per
+//              worker; passes are stamped over swept cells so corridors
+//              stay continuous. nDirs ≠ 8 computes in-browser (the native
+//              backend keeps the 8-move engine). New "string pulling"
+//              checkbox post-hoc shortens the displayed route(s) (single +
+//              top-N; round/maximize excluded) — the shown energy is the
+//              pulled polyline's own integrated sum. New KPI "correção de
+//              grade ×c" input inflates the accessibility thresholds
+//              (centered estimate vs conservative floor, with a warning).
+//              All three persist in bundles.
+const VERSION  = "v57";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
