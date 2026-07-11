@@ -277,19 +277,29 @@ Since "more headings" alone is pinned at error·cost ≈ const on rough
 terrain (§5.5), sub-linear cost per unit accuracy requires reusing work,
 spending selectively, or changing the discretization class:
 
-1. **O(1) long edges via directional prefix sums** (the remaining
-   in-paradigm lever). Along a fixed heading (dr,dc), successive long edges
-   lie on shared lattice lines, so the profile integral is a running sum:
-   precompute, per heading family and travel direction, cumulative sub-step
-   cost along each digital line — an edge then costs `S[end] − S[start]`,
-   O(1), with results identical to the profile integration (same sum, so
-   exactness, upper-boundedness, O(1)-locality and Rust portability all
-   survive). Measured upside (naive-vs-profile timing = the sub-step
-   share): 20 % of sq16's total time, 36 % of sq32's, growing with the
-   rung — so it lifts the 8→16 step's k from 0.90 to ≈ 1.2 and helps the
-   higher rungs more. Modest, not transformative. Price: +4 B/cell per
-   heading×direction array (16 arrays for sq16) — fine on small DEMs,
-   material on the 135 M-cell target.
+1. **Precomputed long-edge tables — tried (2026-07-11): the one candidate
+   that WORKS, for density runs** (`docs/grid-longedge.mjs`). Store every
+   long move's profile integral in a per-directed-heading table once, then
+   relax by table lookup. Structural fact the harness confirms: a single
+   Dijkstra integrates each directed edge EXACTLY ONCE (settled-guard ⇒
+   one out-edge scan per cell), so for one search precompute cannot win —
+   measured: K=1 loses outright (sq16: 1.53 s vs 0.92 s on-demand). The
+   win is AMORTIZED across searches sharing the grid — precisely the
+   density pool's shape. Measured (900×900, 6 sources): precompute 0.87 s
+   (sq16) / 2.89 s (sq32); per-search time drops 0.92 → 0.66 s (sq16,
+   −28 %) and 2.34 → 1.20 s (sq32, −49 %) — MORE than the sub-step share,
+   because lookup also skips the sweep-passability checks and bilinear
+   reads; break-even at ~3 searches; results **bit-identical** to
+   on-demand integration (max|Δ| = 0 — same op order), so exactness,
+   upper-boundedness and the parity story fully survive. Amortized against
+   the sq8 baseline this rewrites the ladder economics for density/KPI
+   runs: sq16 at ×1.40 cost for ÷2.19 error → **k ≈ 2.3**; sq32 at ×2.55
+   for ÷6.05 → **k ≈ 1.9**. The binding constraint is MEMORY: f64 tables
+   are 64 B/cell (sq16) / 192 B/cell (sq32) — 52/156 MB on this crop, but
+   ~4.3 GB (sq16 f32) on the 135 M-cell target, so the big DEM would need
+   per-slice recompute or overlap with the existing memory budget
+   machinery. Single-source runs keep on-demand integration (k ≈ 1 stands
+   there).
 2. **Slope-adaptive neighborhoods — tried (2026-07-11) and REFUTED on this
    terrain** (`docs/grid-adaptive.mjs`). Design: unit moves everywhere;
    long moves relaxed only when either endpoint's local grade (max |dh|/d
@@ -356,15 +366,20 @@ A statistical field deflation is NOT on this list as an accuracy
 optimization — §10 measures why (dispersion survives; one-sidedness dies);
 it is a reporting-layer option only.
 
-**§9 bottom line after testing all four candidates (2026-07-11):** nothing
-beats k ≈ 1 for FIELDS. Slope-adaptivity is dead on this terrain (2);
-string pulling is a route-display tool (3); the Eikonal route trades the
-heading bias for a signed interpolation bias that is worse at 30 m and
-merely sq32-class at 5 m, minus every guarantee the product relies on (4).
-The efficient frontier for the app remains: uniform sq16/sq32 fields with
-profile-integrated (optionally prefix-summed, (1)) long edges for accuracy,
-plus string pulling for the displayed route, plus §10's threshold-layer
-correction where a centered aggregate is preferred over a floor.
+**§9 bottom line after testing all four candidates (2026-07-11):** exactly
+one candidate beats k ≈ 1, and only in the density regime: precomputed
+long-edge tables (1) give amortized **k ≈ 2.3 (sq16) / 1.9 (sq32)** across
+searches sharing the grid, bit-exact, with memory as the binding
+constraint — single-source runs stay at k ≈ 1. Slope-adaptivity is dead on
+this terrain (2); string pulling is a route-display tool (3); the Eikonal
+route trades the heading bias for a signed interpolation bias that is
+worse at 30 m and merely sq32-class at 5 m, minus every guarantee the
+product relies on (4). The efficient frontier for the app: for
+density/KPI runs, sq16 (or sq32) with precomputed long-edge tables —
+~×1.4 (×2.6) wall time for ⅔ (5/6) of the bias removed; for single-source
+runs, on-demand profile integration at the honest k ≈ 1 deal; string
+pulling for the displayed route; §10's threshold-layer correction where a
+centered aggregate is preferred over a floor.
 
 ## 10. Parametric correction: how far does a shared constant go?
 
@@ -438,6 +453,7 @@ node grid-pull.mjs --sources 3 --crop 500,1200,900,900               # §9.3 str
 node grid-eik.mjs --sources 1 --crop 800,1400,400,400 --flatcheck    # §9.4 flat validation
 node grid-eik.mjs --sources 2 --crop 700,1300,600,600                # §9.4, 5 m
 node grid-eik.mjs --sources 3 --crop 500,1200,1500,1500 --decimate 6 # §9.4, 30 m
+node grid-longedge.mjs --sources 8 --crop 500,1200,900,900           # §9.1 long-edge tables
 ```
 
 Every run self-validates its 8-move engine bit-identical against
