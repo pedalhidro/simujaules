@@ -277,27 +277,38 @@ Since "more headings" alone is pinned at error·cost ≈ const on rough
 terrain (§5.5), sub-linear cost per unit accuracy requires reusing work,
 spending selectively, or changing the discretization class:
 
-1. **O(1) long edges via directional prefix sums** (best in-paradigm move).
-   Along a fixed heading (dr,dc), successive long edges lie on shared
-   lattice lines, so the profile integral is a running sum: precompute, per
-   heading family and travel direction, cumulative sub-step cost along each
-   digital line — an edge then costs `S[end] − S[start]`, O(1). This
-   removes the sub-sampling multiplier entirely (a large share of the
-   measured long-edge cost), pushing per-level cost growth toward the bare
-   edge-count ×2 and k toward ~1.3–1.4 overall, with identical results to
-   the profile integration (same sum, so exactness, upper-boundedness,
-   O(1)-locality and Rust portability all survive). Price: +4 B/cell per
+1. **O(1) long edges via directional prefix sums** (the remaining
+   in-paradigm lever). Along a fixed heading (dr,dc), successive long edges
+   lie on shared lattice lines, so the profile integral is a running sum:
+   precompute, per heading family and travel direction, cumulative sub-step
+   cost along each digital line — an edge then costs `S[end] − S[start]`,
+   O(1), with results identical to the profile integration (same sum, so
+   exactness, upper-boundedness, O(1)-locality and Rust portability all
+   survive). Measured upside (naive-vs-profile timing = the sub-step
+   share): 20 % of sq16's total time, 36 % of sq32's, growing with the
+   rung — so it lifts the 8→16 step's k from 0.90 to ≈ 1.2 and helps the
+   higher rungs more. Modest, not transformative. Price: +4 B/cell per
    heading×direction array (16 arrays for sq16) — fine on small DEMs,
    material on the 135 M-cell target.
-2. **Slope-adaptive neighborhoods.** The terrain error term lives where
-   paths cross slopes; flat-area jaggedness only costs the small
-   (aRoll+aAero) octile term. Relax long moves only from cells whose local
-   gradient exceeds a threshold: cost grows with the sloped fraction of the
-   DEM (typically well under half) while capturing most of the error
-   reduction — single-step k ≈ 1.5–2. Any edge subset keeps the result a
-   valid upper bound (it just lands between sq8 and sq16). Composes with
-   (1); together they plausibly buy sq32-class accuracy (~2 % median
-   residual — below the model-error floor) at roughly sq16-class cost.
+2. **Slope-adaptive neighborhoods — tried (2026-07-11) and REFUTED on this
+   terrain** (`docs/grid-adaptive.mjs`). Design: unit moves everywhere;
+   long moves relaxed only when either endpoint's local grade (max |dh|/d
+   over the 8 unit neighbors, flag dilated 1 cell) exceeds a threshold. The
+   gated edge set nests between sq8 and sq16/32, so results stay valid
+   upper bounds — the pointwise nesting E8 ≥ E_ad ≥ E_uniform held with 0
+   violations in every run. But the premise ("sloped fraction well under
+   half") is FALSE for this deployment: at the grade thresholds that
+   preserve accuracy, the steep-cell share is 91–98 % (5 m, σ=10 m
+   smoothed) and 96–100 % (30 m) — central São Paulo has essentially no
+   flat fraction at ≥ 0.5–1 % grade. Measured Pareto (5 m, 3 sources):
+   ad16@1 % = sq16's error at sq16's cost (k 0.99 vs uniform 1.01); at the
+   first threshold that prunes meaningfully (4 %, 65 % steep) the error
+   grows faster than the time falls (med 4.03 → 5.53 % for −7 % time,
+   k 0.69 — WORSE than uniform). Same picture at 30 m. Verdict: the gate
+   only pays on landscapes with genuinely large flat fractions — exactly
+   where the grid bias is already small — so the option is dominated.
+   (This also retracts §9's earlier composition claim of "sq32 accuracy at
+   sq16 cost": with (2) dead, (1) alone caps the in-paradigm gain.)
 3. **Post-hoc path smoothing (string pulling)** for point-to-point outputs:
    line-of-sight shortcutting of the returned path with profile-integrated
    re-costing, O(path length) — effectively free, so k ≫ 1 for routes and
@@ -383,6 +394,8 @@ node grid-sens.mjs --sources 6 --crop 500,1200,1500,1500 --decimate 6  # 30 m (~
 node grid-sens.mjs --sources 2 --crop 700,1300,700,700 --flat        # flat control
 node grid-correct.mjs --sources 3 --crop 500,1200,900,900            # §10, 5 m (~2 min)
 node grid-correct.mjs --sources 6 --crop 500,1200,1500,1500 --decimate 6  # §10, 30 m
+node grid-adaptive.mjs --sources 3 --crop 500,1200,900,900           # §9.2, 5 m (~2 min)
+node grid-adaptive.mjs --sources 6 --crop 500,1200,1500,1500 --decimate 6 # §9.2, 30 m
 ```
 
 Every run self-validates its 8-move engine bit-identical against
