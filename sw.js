@@ -479,7 +479,39 @@
 //              params, held-out error validated at med|Δ%| 3.7/2.7/4.9 with
 //              bias < ±1% (three riders) — meets the ±5%/±2% goal. New
 //              test-dem-smoothing.mjs locks the transform.
-const VERSION  = "v55";
+//   v55 → v56: Accessibility KPIs ("300 kJ city" initiative). Density runs now
+//              also sample each reference's energy field at every OTHER ref's
+//              cell — a pairwise K×K matrix at zero extra Dijkstra cost —
+//              powering a new "3B. Acessibilidade" results block: % of the
+//              population that can access ≥ K people within E₁ kJ (default
+//              1M / 200 kJ) and ≥ J% of the population within E₂ kJ (default
+//              80% / 600 kJ). Census sampling now records the in-extent
+//              population total M (each ref proxies M/K people); other
+//              sampling strategies take a hand-entered M (KPI 2 needs none).
+//              Threshold edits re-evaluate the cached matrix live (never a
+//              recompute); ref markers recolor red→yellow→green by attained
+//              access; per-ref + matrix CSV exports. Rust backend gains
+//              want_matrix on /density (f32×K² appended, "matrix":K in the
+//              meta; bit-parity with the JS worker, enforced by new +matrix
+//              cases incl. a dropped-ref index regression). Warns when a
+//              threshold exceeds the run's energy budget (lower bound).
+//   v56 → v57: Move directions + string pulling + KPI grid correction (the
+//              grid-connectivity research note shipped as options). New
+//              "Direções de movimento" select (4/8/16/32/64/128, default 8 =
+//              the classic engine, bit-identical): richer Farey heading
+//              ladders with profile-integrated long moves cut the route-
+//              jaggedness energy overestimate (~⅔ less at 16 directions);
+//              density runs amortize precomputed long-edge tables per
+//              worker; passes are stamped over swept cells so corridors
+//              stay continuous. nDirs ≠ 8 computes in-browser (the native
+//              backend keeps the 8-move engine). New "string pulling"
+//              checkbox post-hoc shortens the displayed route(s) (single +
+//              top-N; round/maximize excluded) — the shown energy is the
+//              pulled polyline's own integrated sum. New KPI "correção de
+//              grade ×c" input inflates the accessibility thresholds
+//              (centered estimate vs conservative floor, with a warning).
+//              All three persist in bundles.
+const VERSION  = "v57";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

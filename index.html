@@ -1092,9 +1092,17 @@
           <input type="checkbox" id="want-topn" />
           <span data-i18n="param.want_topn">Compute top-N routes</span>
         </label>
-        <label style="display: flex; align-items: center; gap: 6px; margin-top: 3px; margin-bottom: 8px;">
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 3px;">
           <input type="checkbox" id="want-density" />
           <span data-i18n="param.want_density">Compute multi-reference density</span>
+        </label>
+        <!-- String pulling: post-hoc shortcutting of the displayed route(s)
+             (single best path + top-N). Browser-side path polish only — the
+             energy shown for a pulled line is its own profile-integrated sum,
+             so viewing ≡ routing still holds. Round/maximize are excluded. -->
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 3px; margin-bottom: 8px;">
+          <input type="checkbox" id="string-pull" />
+          <span data-i18n="param.string_pull" data-i18n-title="param.string_pull.title">Suavizar rotas exibidas (string pulling)</span>
         </label>
         <!-- Mode + cost coefficients + budget as a 2-col label|input table. The
              "applies to" row shows only in round-trip mode — toggled via
@@ -1105,6 +1113,20 @@
                 <option value="from"  data-i18n="mode.from">From source</option>
                 <option value="to"    data-i18n="mode.to">To source point</option>
                 <option value="round" data-i18n="mode.round">Round trip</option>
+              </select></td></tr>
+          <!-- Move directions (grid neighborhood). 8 = the classic engine
+               (default; the only value the native backend serves — other
+               values compute in-browser). Richer ladders shrink the
+               grid-jaggedness energy overestimate at proportional compute
+               cost (docs/grid-connectivity-sensitivity-2026-07-11.md). -->
+          <tr><td class="kv-key"><label for="n-dirs" data-i18n="param.ndirs">Direções de movimento</label></td>
+              <td class="kv-val"><select id="n-dirs" data-i18n-title="param.ndirs.title">
+                <option value="4">4</option>
+                <option value="8" selected>8</option>
+                <option value="16">16</option>
+                <option value="32">32</option>
+                <option value="64">64</option>
+                <option value="128">128</option>
               </select></td></tr>
           <tr><td class="kv-key"><label for="mass" data-i18n="param.mass">Mass (kg)</label></td>
               <td class="kv-val"><input type="number" id="mass" value="75" step="1" min="1" /></td></tr>
@@ -1242,6 +1264,43 @@
         <details class="group" id="result-stats-group" open>
           <summary data-i18n="group.result_stats">3A. Estatísticas</summary>
           <div class="meta" id="result-meta" data-i18n="result.empty">—</div>
+        </details>
+
+        <!-- 3B. Accessibility KPIs — shown only after a density run that
+             carried the pairwise ref↔ref energy matrix (app.js installKpiResult).
+             The threshold inputs re-evaluate from the cached matrix live; they
+             never trigger a recompute (same rule as the style knobs). Defaults
+             are the 300 kJ initiative's targets: ≥1M people within 200 kJ and
+             ≥80% of the population within 600 kJ. -->
+        <details class="group" id="kpi-group" open style="display: none;">
+          <summary data-i18n="group.kpi">3B. Acessibilidade (KPIs 300 kJ)</summary>
+          <div class="meta" data-i18n="kpi.intro" style="margin-bottom: 6px;">—</div>
+          <table class="kv-table" role="presentation">
+            <tr><td class="kv-key"><label for="kpi-ek" data-i18n="kpi.ek">E₁ (kJ)</label></td>
+                <td class="kv-val"><input type="number" id="kpi-ek" value="200" step="any" min="0" /></td></tr>
+            <tr><td class="kv-key"><label for="kpi-k" data-i18n="kpi.k">pessoas alcançáveis ≥</label></td>
+                <td class="kv-val"><input type="number" id="kpi-k" value="1000000" step="any" min="0" /></td></tr>
+            <tr><td class="kv-key"><label for="kpi-ej" data-i18n="kpi.ej">E₂ (kJ)</label></td>
+                <td class="kv-val"><input type="number" id="kpi-ej" value="600" step="any" min="0" /></td></tr>
+            <tr><td class="kv-key"><label for="kpi-j" data-i18n="kpi.j">% da população ≥</label></td>
+                <td class="kv-val"><input type="number" id="kpi-j" value="80" step="any" min="0" max="100" /></td></tr>
+            <tr><td class="kv-key"><label for="kpi-pop" id="kpi-pop-label" data-i18n="kpi.pop">população total M</label></td>
+                <td class="kv-val"><input type="number" id="kpi-pop" value="" step="any" min="0" placeholder="—" /></td></tr>
+            <!-- Grid-bias correction (docs/grid-connectivity-sensitivity §10):
+                 inflates the two thresholds by c (equivalent to deflating the
+                 grid's overestimated energies). 1.00 = off (the default,
+                 conservative-floor semantics). Measured c* ≈ 1.09–1.12 on the
+                 SP DTM at 8 directions; unnecessary when the run already used
+                 ≥16 move directions. -->
+            <tr><td class="kv-key"><label for="kpi-corr" data-i18n="kpi.corr">correção de grade ×c</label></td>
+                <td class="kv-val"><input type="number" id="kpi-corr" value="1.00" step="0.01" min="1" max="1.5" data-i18n-title="kpi.corr.title" /></td></tr>
+          </table>
+          <div class="meta" id="kpi-out1" style="margin-top: 6px;">—</div>
+          <div class="meta" id="kpi-out2">—</div>
+          <div class="meta" id="kpi-meta" style="color: var(--muted);"></div>
+          <div class="meta" id="kpi-warn" style="color: #ffb86b; display: none;"></div>
+          <button type="button" class="secondary" id="kpi-export-csv" data-i18n="btn.kpi_csv" style="margin-top: 4px;">Export per-reference CSV</button>
+          <button type="button" class="secondary" id="kpi-export-matrix" data-i18n="btn.kpi_matrix_csv" style="margin-top: 4px;">Export matrix CSV</button>
         </details>
       </details>
 
@@ -1644,6 +1703,54 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v57</strong> — 2026-07-11<br/>
+              <strong>Direções de movimento, string pulling e correção de
+              grade</strong> — a nota de pesquisa de conectividade da grade
+              virou opção. Novo seletor <strong>"Direções de
+              movimento"</strong> (4/8/16/32/64/128; padrão 8 = motor
+              clássico, bit-idêntico): mais direções (escada de Farey, com
+              movimentos longos integrados ao perfil do terreno) reduzem a
+              sobre-estimativa de energia ótima causada pelo serrilhado das
+              rotas (≈⅔ a menos com 16 direções, medido no MDT de SP), a
+              custo de cálculo proporcional. Cálculos de densidade amortizam
+              tabelas de custo pré-computadas por worker; as passagens são
+              carimbadas nas células que os movimentos longos atravessam
+              (corredores contínuos). Valores ≠ 8 calculam no navegador — o
+              backend nativo segue servindo o motor de 8 movimentos. Nova
+              opção <strong>"string pulling"</strong>: encurta pós-cálculo a
+              rota exibida e as top-N (ida-e-volta e maximizar ficam de
+              fora) — a energia mostrada é a soma integrada da própria linha
+              exibida. Novo campo <strong>"correção de grade ×c"</strong> no
+              bloco de acessibilidade: infla os limiares E₁/E₂ (equivale a
+              deflacionar as energias sobre-estimadas da grade; c* ≈
+              1,09–1,12 medido em 8 direções), com aviso explícito de que a
+              garantia de piso conservador deixa de valer; desnecessária com
+              ≥ 16 direções. As três opções persistem nos bundles; a
+              estimativa de tempo acompanha o número de direções.</p>
+              <p><strong>v56</strong> — 2026-07-11<br/>
+              <strong>KPIs de acessibilidade — iniciativa "cidade 300 kJ"</strong>.
+              Cálculos de densidade agora também amostram o campo de energia de
+              cada referência na célula de todas as outras — uma matriz K×K
+              par-a-par sem custo extra de Dijkstra. Novo bloco
+              <strong>"3B. Acessibilidade"</strong> nos resultados avalia os dois
+              KPIs ao vivo a partir da matriz em cache: fração da população que
+              alcança ≥ K pessoas com ≤ E₁ kJ (padrão 1 milhão / 200 kJ) e
+              fração que alcança ≥ J% da população com ≤ E₂ kJ (padrão 80% /
+              600 kJ). A amostragem censitária (IBGE 2022) agora registra a
+              população total M da extensão — cada referência representa M/K
+              pessoas; outras estratégias aceitam um M digitado (o KPI 2
+              dispensa M). Editar os limiares reavalia na hora, sem recalcular;
+              os marcadores das referências são recoloridos
+              vermelho→amarelo→verde pelo acesso atingido; exportações CSV por
+              referência e da matriz completa. O backend Rust ganha
+              <code>want_matrix</code> no <code>/density</code> (f32×K² anexado,
+              <code>"matrix":K</code> no meta; paridade bit-a-bit com o worker
+              JS, garantida por novos casos <code>+matrix</code> no
+              <code>test-backend.mjs</code>, incluindo regressão de índice com
+              referência descartada — um binário antigo degrada para "KPI
+              indisponível", nunca uma matriz errada). O bloco avisa quando um
+              limiar excede o orçamento de energia do cálculo — ali a matriz é
+              truncada e os KPIs viram um piso.</p>
               <p><strong>v55</strong> — 2026-07-07<br/>
               <strong>Suavização do MDT + meta de precisão validada</strong>
               (<code>bicycling-energy-model</code> journal Entry 20). MDTs finos

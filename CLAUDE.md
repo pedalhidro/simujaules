@@ -132,6 +132,64 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   (`subtree_passes_f64`) and shipped as f64 on the wire — the JS single-source
   branch returns Float64Array (counts exceed 2^24 on big DEMs); `/density`'s
   wire format is unchanged.
+- The ACCESSIBILITY MATRIX (pairwise ref↔ref energies powering the "3B.
+  Acessibilidade" KPIs) is a `/density`-parity surface: `densityField`'s
+  optional `refCells` sampling (JS) and `compute_density`'s `want_matrix`
+  (Rust) must stay bit-parity — matrix entries are raw per-ref f32 energy
+  samples with no cross-slice accumulation, so `test-backend.mjs`'s `+matrix`
+  cases assert `maxΔ === 0`. Rows are keyed by the ORIGINAL ref index on both
+  engines (a skipped off-grid/off-mask ref keeps an all-Infinity row; Rust
+  carries `orig_k` through its compacted ref filter — the `+droppedRef` cases
+  pin this). Round entries reuse the exact `accumulate_round` predicate +
+  f32 rounding. NEVER pass `refCells` on the probe path (`maxSettled`
+  truncation would record non-optimal finite energies) or under maximize
+  (both engines must omit the matrix — test-asserted). App-side, the cached
+  matrix lives in `state.kpi` (NOT `state.lastResult` — style re-renders must
+  not touch it), is invalidated by `kpiInvalidate()` on any ref/grid/network
+  change, and KPI threshold edits re-evaluate the cache only — they must
+  never trigger a recompute. KPIs are exact only for thresholds ≤ the run's
+  `eMax` (0 = ∞); beyond that the matrix is budget-truncated and the UI
+  warns "lower bound". `state.refPopM` (census in-extent population, set ONLY
+  by `placeCensusRefPoints` after its placement loop) is the M behind
+  "K people" thresholds; every ref-set mutation nulls it.
+- MOVE DIRECTIONS (`#n-dirs`, 4–128, default 8) generalize both engines'
+  neighborhoods via the Farey ladder (`buildMoves`). Invariants: (a) the
+  first 8 moves of every set ≥ 8 are the CLASSIC 8 in the CLASSIC order —
+  nDirs=8 must stay bit-identical to the historical engine (the Rust-parity
+  anchor); (b) nDirs ≠ 8 is BROWSER-ONLY — app.js gates the backend off
+  (like top-N/maximize), the Rust port serves the 8-move engine unchanged;
+  (c) long moves are PROFILE-INTEGRATED (`longEdgeCost`: bilinear heights
+  every ~1 cell, v2Edge per sub-step, mask-blocked) — NEVER cost a long
+  move from its endpoints' Δh alone, that flattens the relief it crosses
+  and flips the error sign (measured, research note §5.3); (d)
+  `densityField` precomputes per-direction long-edge TABLES when a slice
+  has ≥ 3 refs (amortized win; K=1 loses) — tables must stay bit-identical
+  to on-demand integration (same op order; test-asserted), and their memory
+  (8 B/cell per long move per direction) is budgeted by `densityPoolSize`'s
+  nDirs argument (runner + estimator share it — must not drift, same rule
+  as always); (e) passes are STAMPED over the swept cells of used long
+  edges (`stampLongPasses`, settled-only, flows read pre-stamp) so
+  corridors stay continuous — portals never stamp (a deck deliberately
+  skips the cells under it); (f) maximize, the calibration probe, A* top-N
+  and the layered DP always run the classic 8 (inversion degeneracy /
+  anchor stability / admissible-heuristic scope); the estimator scales by
+  `DIRS_COST_SINGLE`/`DIRS_COST_DENSITY`.
+- STRING PULLING (`#string-pull`) post-hoc shortens the displayed route(s)
+  (single path + top-N; round and maximize excluded) by windowed DP over
+  the path's own nodes with profile-integrated straight segments. Viewing ≡
+  routing holds by construction: the energy shown for a pulled line is that
+  polyline's own per-sub-step v2Edge sum, and the drawn line IS the
+  polyline (kept nodes joined straight). Mask-blocked segments make it
+  self-limiting under a network constraint. It never worsens (only accepted
+  when strictly cheaper) and cannot change fields — display layer only.
+- The KPI GRID CORRECTION (`#kpi-corr`, default 1.00 = off) inflates the
+  two accessibility thresholds by c before counting (≡ deflating the
+  8-grid's overestimated energies, research note §10). It lives at the
+  KPI/threshold layer ONLY — never add a corrected per-cell energy number
+  (viewing ≡ routing forbids it). c > 1 surfaces the "centered estimate —
+  floor guarantee lost" warning; the measured c* is ~1.09–1.12 on the SP
+  DTM and is DEM/parameter-specific, and the correction is pointless when
+  the run used ≥ 16 move directions.
 - Multi-reference density does NOT go through `dijkstra()`: it uses the
   dedicated `densityField()` engine (one reused scratch set, targeted
   reset/accumulate over only the explored cells, and an exact monotone
@@ -235,6 +293,14 @@ node, so the copies must be kept in sync (like `backend/main.rs` mirrors
 `natural=coastline` lines (land-left/water-right), filled by a horizontal+vertical
 orientation SWEEP (sea/land set per span, never flood-filled — coastline gaps
 would otherwise leak the sea into all land).
+
+`docs/grid-*.mjs` are ANALYSIS harnesses, not tests (they need the
+`sampa_centro.tif` download + `census/node_modules`): they reproduce
+`docs/grid-connectivity-sensitivity-2026-07-11.md` — the research note
+behind the v57 move-directions/string-pulling/grid-correction options —
+and each self-validates its 8-move engine bit-identical against
+`energy-worker.js` before reporting, so they double as an independent
+cross-check when touching the engines.
 
 There is no CI; run them before committing engine changes. Style knob
 changes (colormap, ranges, gamma, blend) re-render cached arrays and must

@@ -72,11 +72,19 @@ RAYON_NUM_THREADS=4 cargo run --release     # also bounds parallelism directly
 Little-endian binary framing, see `src/main.rs` header comment:
 
 - `POST /density` — `[u32 json_len][json params][f32 height×N][u8 mask×N][u8 network×N?][portals?]`
-  → `[u32 json_len][json {elapsed_ms, refs}][f64 passes×N][f32 energy×N]`
+  → `[u32 json_len][json {elapsed_ms, refs[, matrix]}][f64 passes×N][f32 energy×N][f32 matrix×K²?]`
+  (`matrix` only when `params.want_matrix` and not maximize: the pairwise
+  ref↔ref accessibility energies, row-major over the ORIGINAL ref order —
+  skipped refs keep an all-Infinity row; `"matrix":K` in the meta announces
+  it, so an app talking to an older binary degrades to "KPI unavailable")
 - `POST /single` — same request framing (driven by `src` + `want_passes`
   instead of `ref_points`; `maximize` is rejected with a 400 — browser-only)
   → `[u32 json_len][json {elapsed_ms, passes}][f32 energy×N][f64 passes×N?]`
 - `GET /health` — `{"ok":true,"version":…,"cores":…,"mem_budget_bytes":…}`
+
+> **Move directions:** this backend serves the CLASSIC 8-move engine only.
+> The app's `#n-dirs` option (4–128 directions, v57) is browser-only — app.js
+> never routes a non-8 run here, same pattern as top-N/maximize.
 
 The cost model and passes/density math are a port of `energy-worker.js`
 (`dijkstra()` with `wantPasses`, and the from/to/round single-source branch);

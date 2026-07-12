@@ -109,15 +109,30 @@ cases.push({ dmode: "from", eMax: 20000, eMaxMode: "leg", portals: true, network
 // catches a backend deriving the maximize height range from the effective
 // (network-ANDed) mask instead of the raw DEM mask.
 cases.push({ dmode: "from", eMax: 0, eMaxMode: "leg", maximize: true, network: netMaskInner });
+// +matrix index-shift regression: an extra ref on the masked cell 0 — the
+// backend filters refs into a compacted list, so a matrix keyed by the
+// compacted index (instead of the ORIGINAL one) would shift every row after
+// the dropped ref. Both engines must return an all-Infinity row at its
+// original index. One case per mode (round exercises the two-leg sampling).
+for (const dmode of ["from", "to", "round"]) {
+  cases.push({ dmode, eMax: 20000, eMaxMode: "leg", droppedRef: true });
+}
 
-for (const { dmode, eMax, eMaxMode, portals = false, maximize = false, network = null } of cases) {
+// Every density case also requests the accessibility matrix (wantMatrix):
+// matrix entries are raw per-ref f32 energy samples — no cross-slice f64
+// accumulation — so unlike the mean-energy field they are BIT-parity
+// (maxΔ === 0) regardless of how either engine slices the refs. Under
+// maximize both engines must omit the matrix entirely.
+for (const { dmode, eMax, eMaxMode, portals = false, maximize = false, network = null, droppedRef = false } of cases) {
   {
+    const caseRefs = droppedRef ? [...refs, [0, 0]] : refs;
+    const K = caseRefs.length;
     const nPortals = portals ? portalU.length : 0;
     // backend
     const params = {
       h: H, w: W, dx: 30, dy: 30, cost, eMax, eMaxMode,
-      densityMode: dmode, refPoints: refs, hasNetwork: !!network, maximize,
-      nPortals,
+      densityMode: dmode, refPoints: caseRefs, hasNetwork: !!network, maximize,
+      nPortals, wantMatrix: true,
     };
     const json = new TextEncoder().encode(JSON.stringify(params));
     const head = new Uint8Array(4);
@@ -129,15 +144,24 @@ for (const { dmode, eMax, eMaxMode, portals = false, maximize = false, network =
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
     const buf = await resp.arrayBuffer();
     const jlen = new DataView(buf).getUint32(0, true);
+    // Meta JSON (padded with trailing spaces — legal JSON whitespace);
+    // "matrix":K announces the appended f32×K² block.
+    const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, jlen)));
+    const mk = meta.matrix | 0;
+    const expect = 4 + jlen + 8 * N + 4 * N + 4 * mk * mk;
+    if (buf.byteLength !== expect) throw new Error(`/density response ${buf.byteLength} B, expected ${expect} B`);
     let off = 4 + jlen;
     const density = new Float64Array(buf.slice(off, off + 8 * N)); off += 8 * N;
-    const energy = new Float32Array(buf.slice(off, off + 4 * N));
+    const energy = new Float32Array(buf.slice(off, off + 4 * N)); off += 4 * N;
+    const matrix = mk > 0 ? new Float32Array(buf.slice(off, off + 4 * mk * mk)) : null;
 
     // JS reference
     const ref = runWorker({
       kind: "run", H, W, dx: 30, dy: 30, cost, eMax, eMaxMode,
       seedR: -1, seedC: -1, goalR: -1, goalC: -1, mode: dmode,
-      wantDensity: true, refPoints: refs, densityMode: dmode, maximize,
+      wantDensity: true, refPoints: caseRefs, densityMode: dmode, maximize,
+      wantMatrix: true,
+      matrixCells: Int32Array.from(caseRefs, ([r, c]) => r * W + c),
       height: new Float32Array(height), mask: new Uint8Array(mask),
       networkMask: network ? new Uint8Array(network) : null,
       portalU: portals ? portalU : null,
@@ -154,12 +178,34 @@ for (const { dmode, eMax, eMaxMode, portals = false, maximize = false, network =
       if (Number.isFinite(a) !== Number.isFinite(b)) bad++;
       else if (Number.isFinite(a)) maxE = Math.max(maxE, Math.abs(a - b));
     }
-    const ok = maxD < 1e-15 && maxE < 1e-3 && bad === 0;
+    // Matrix parity: under maximize BOTH engines must omit it; otherwise
+    // bit-identical entries with an identical finite pattern.
+    let matOk, maxM = 0, badM = 0;
+    if (maximize) {
+      matOk = mk === 0 && matrix === null && ref.matrix == null;
+    } else {
+      matOk = mk === K && matrix !== null && ref.matrix instanceof Float32Array && ref.matrix.length === K * K;
+      if (matOk) {
+        for (let i = 0; i < K * K; i++) {
+          const a = matrix[i], b = ref.matrix[i];
+          if (Number.isFinite(a) !== Number.isFinite(b)) badM++;
+          else if (Number.isFinite(a)) maxM = Math.max(maxM, Math.abs(a - b));
+        }
+        matOk = maxM === 0 && badM === 0;
+        if (droppedRef) {
+          // The dropped ref's row must sit at its ORIGINAL index, all-Infinity.
+          for (let j = 0; j < K; j++) if (matrix[(K - 1) * K + j] !== Infinity) matOk = false;
+        }
+      }
+    }
+    const ok = maxD < 1e-15 && maxE < 1e-3 && bad === 0 && matOk;
     allOk = allOk && ok;
     console.log(
-      `mode=${dmode} eMax=${eMax}${eMaxMode === "total" ? " (total)" : ""}${portals ? " +portals" : ""}${network ? " +net" : ""}${maximize ? " (maximize)" : ""}: ` +
+      `mode=${dmode} eMax=${eMax}${eMaxMode === "total" ? " (total)" : ""}${portals ? " +portals" : ""}${network ? " +net" : ""}${maximize ? " (maximize)" : ""}${droppedRef ? " +droppedRef" : ""} +matrix: ` +
       `max|Δdensity|=${maxD.toExponential(2)}, ` +
-      `max|Δenergy|=${maxE.toExponential(2)}, finite-mismatch=${bad} ${ok ? "✓" : "✗"}`,
+      `max|Δenergy|=${maxE.toExponential(2)}, finite-mismatch=${bad}, ` +
+      (maximize ? `matrix-omitted=${matOk}` : `max|Δmatrix|=${maxM.toExponential(2)}, matrix-finite-mismatch=${badM}`) +
+      ` ${ok ? "✓" : "✗"}`,
     );
   }
 }
