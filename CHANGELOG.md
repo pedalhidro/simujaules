@@ -9,6 +9,29 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v59 — 2026-07-12
+
+**Cloud compute actually works — and you pick the machine.** The CSP now
+allowlists the orchestrator's real `*.run.app` host (cloud mode had been
+silently CSP-blocked from the deployed site since it shipped), the default
+orchestrator URL points at the live service, and a pasted URL without a
+scheme gets `https://` assumed instead of resolving against the page. New
+**"Máquina da nuvem"** selector (8/32/128 vCPUs, with per-hour reference
+prices; the VM runs as spot, typically 60–90% cheaper): the orchestrator
+validates the choice and applies it when creating/restarting the VM, along
+with a matching backend memory budget; the time estimate models the selected
+size (and its bandwidth-contention curve is now sub-linear — 128 vCPUs no
+longer estimate a nonsensical 1.4× over 8). Cloud runs now say
+**"Calculando na nuvem…"** (not "backend nativo"), and any fallback to
+browser workers states its reason in the status line. Orchestrator-side
+(no app deploy needed): DNS stop-placeholder moved to `127.0.0.1` so a
+stale-DNS browser fails fast instead of hanging 8 s per poll; CORS allowlists
+localhost origins on both planes (local development against the real cloud is
+a supported flow); the VM startup script `restart`s its services on reboot
+(an already-running Caddy used to keep serving the previous boot's config);
+and the VM is pinned to Ice Lake (the cached backend binary is
+`target-cpu=native` — a smaller machine on an older CPU SIGILLed mid-compute).
+
 ## v58 — 2026-07-11
 
 **Crop DEM to the current view.** New "Recortar DEM à janela atual" button in

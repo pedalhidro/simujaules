@@ -521,7 +521,17 @@
 //              in-memory export→reimport through the standard load path
 //              (mask/CRS/invalidation/smoothing-tag guard all inherited) and
 //              drop the source URL from bundle metadata.
-const VERSION  = "v58";
+//   v58 → v59: Cloud compute fixed end-to-end + machine selector. CSP
+//              allowlists the orchestrator's real *.run.app host (cloud mode
+//              was CSP-blocked from the deployed site); default orchestrator
+//              URL points at the live service; scheme-less URLs get https://
+//              assumed. "Máquina da nuvem" select (8/32/128 vCPUs, R$/h
+//              reference prices; spot billing is typically 60–90% below):
+//              applied on VM create/restart with a matching max-mem-gb, and
+//              the time estimate models the SELECTED size (sub-linear
+//              bandwidth-contention curve). Cloud runs say "Calculando na
+//              nuvem…"; fallbacks to browser workers state their reason.
+const VERSION  = "v59";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

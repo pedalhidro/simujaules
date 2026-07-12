@@ -35,7 +35,9 @@
                          rmsampa-v2 XYZ tiles host.
          connect-src  — 'self' + every fetch() target: Overpass, the census
                          .fgb bucket, the simujaules example DEM/vector/mask
-                         bucket, the Cloud orchestrator + its VM data-plane
+                         bucket, the Cloud orchestrator (both the orch.simujaules
+                         alias and the stable *.run.app service URL — the alias
+                         doesn't exist yet) + its VM data-plane
                          host, the FABDEM/tiles host, cdnjs (sql-wasm.wasm),
                          and http://127.0.0.1:*/http://localhost:* for the
                          optional native backend. NOTE: a user who points
@@ -62,7 +64,7 @@
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com;
     font-src 'self' https://fonts.gstatic.com;
     img-src 'self' data: blob: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://telhas.pedalhidrografi.co;
-    connect-src 'self' https://overpass-api.de https://storage.googleapis.com https://simujaules.pedalhidrografi.co https://orch.simujaules.pedalhidrografi.co https://compute.simujaules.pedalhidrografi.co https://telhas.pedalhidrografi.co https://cdnjs.cloudflare.com http://127.0.0.1:* http://localhost:*;
+    connect-src 'self' https://overpass-api.de https://storage.googleapis.com https://simujaules.pedalhidrografi.co https://orch.simujaules.pedalhidrografi.co https://simu-orchestrator-lrrinyjwxq-rj.a.run.app https://compute.simujaules.pedalhidrografi.co https://telhas.pedalhidrografi.co https://cdnjs.cloudflare.com http://127.0.0.1:* http://localhost:*;
     worker-src 'self';
     child-src 'self';
     object-src 'none';
@@ -1249,9 +1251,17 @@
         </div>
         <div id="cloud-extra" style="display: none;">
           <label data-i18n="param.orchestrator_url">Orchestrator URL</label>
-          <input type="text" id="orchestrator-url" value="https://orch.simujaules.pedalhidrografi.co" spellcheck="false" />
+          <!-- URL .run.app estável do serviço (determinística por projeto+serviço);
+               orch.simujaules.pedalhidrografi.co ainda NÃO existe (ver CSP). -->
+          <input type="text" id="orchestrator-url" value="https://simu-orchestrator-lrrinyjwxq-rj.a.run.app" spellcheck="false" />
           <label data-i18n="param.cloud_token" style="margin-top: 6px;">Cloud password</label>
           <input type="password" id="cloud-token" autocomplete="off" spellcheck="false" />
+          <label data-i18n="cloud.machine" style="margin-top: 6px;" title="Preços de referência on-demand em southamerica-east1 (jul/2026, ~R$5,50/US$). A VM roda em modo spot, tipicamente 60–90% mais barato; o valor varia. Aplicado ao criar/religar a VM — uma VM já ligada mantém o tamanho até o próximo stop.">Máquina da nuvem</label>
+          <select id="cloud-machine" title="Preços de referência on-demand em southamerica-east1 (jul/2026). A VM roda em modo spot, tipicamente 60–90% mais barato.">
+            <option value="n2-standard-8" selected data-i18n="cloud.m8">8 vCPUs · 32 GB — ~R$ 3/h</option>
+            <option value="n2-standard-32" data-i18n="cloud.m32">32 vCPUs · 128 GB — ~R$ 12/h</option>
+            <option value="n2-standard-128" data-i18n="cloud.m128">128 vCPUs · 512 GB — ~R$ 48/h</option>
+          </select>
           <label style="display: flex; align-items: center; gap: 6px; margin-top: 6px;">
             <input type="checkbox" id="cloud-keep-warm" />
             <span data-i18n="cloud.keep_warm">Manter VM ligada entre cálculos</span>
@@ -1713,6 +1723,20 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v59</strong> — 2026-07-12<br/>
+              <strong>Nuvem funcionando de verdade — e com escolha de máquina.</strong>
+              A CSP agora permite o host real do orquestrador (o modo Nuvem
+              estava silenciosamente bloqueado pela própria CSP desde que foi
+              lançado), a URL padrão aponta pro serviço vivo, e uma URL colada
+              sem esquema ganha <code>https://</code> automático. Novo seletor
+              <em>Máquina da nuvem</em> (8/32/128 vCPUs, com preço de
+              referência por hora — a VM roda em modo spot, tipicamente
+              60–90% mais barato): o tamanho é aplicado ao criar/religar a VM
+              e a estimativa de tempo modela o tamanho selecionado (curva de
+              contenção de banda agora sublinear — 128 vCPUs não estimam mais
+              um absurdo 1,4× sobre 8). Cálculos na nuvem dizem <em>"Calculando
+              na nuvem…"</em>, e qualquer retorno aos workers do navegador
+              agora diz o motivo na linha de status.</p>
               <p><strong>v58</strong> — 2026-07-11<br/>
               <strong>Recortar e reduzir resolução do DEM (1A).</strong>
               <em>Recortar à janela atual</em> recorta o DEM carregado para a

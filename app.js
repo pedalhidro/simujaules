@@ -107,7 +107,16 @@ const STRINGS = {
   "status.interpolating_energy":{ pt: "Interpolando o campo de energia…",            en: "Interpolating energy field…" },
   "status.backend_computing":   { pt: "Calculando no backend nativo…",              en: "Computing on native backend…" },
   "status.backend_computing_elapsed":{ pt: "Calculando no backend nativo… {0} decorridos", en: "Computing on native backend… {0} elapsed" },
-  "status.backend_fallback": { pt: "Backend nativo indisponível — usando workers do navegador…", en: "Native backend unavailable — using browser workers…" },
+  "cloud.machine":         { pt: "Máquina da nuvem", en: "Cloud machine" },
+  // Preços de referência ON-DEMAND em southamerica-east1 (jul/2026, ~R$5,50/US$;
+  // N vCPUs ≈ N·US$0,068/h). A VM roda SPOT (60–90% mais barato, flutua) — os
+  // rótulos são teto aproximado, não fatura. Recalcule se mover de região.
+  "cloud.m8":              { pt: "8 vCPUs · 32 GB — ~R$ 3/h",    en: "8 vCPUs · 32 GB — ~R$3/h (~US$0.55)" },
+  "cloud.m32":             { pt: "32 vCPUs · 128 GB — ~R$ 12/h", en: "32 vCPUs · 128 GB — ~R$12/h (~US$2.20)" },
+  "cloud.m128":            { pt: "128 vCPUs · 512 GB — ~R$ 48/h", en: "128 vCPUs · 512 GB — ~R$48/h (~US$8.70)" },
+  "status.cloud_computing":     { pt: "Calculando na nuvem…",                        en: "Computing in the cloud…" },
+  "status.cloud_computing_elapsed":{ pt: "Calculando na nuvem… {0} decorridos",      en: "Computing in the cloud… {0} elapsed" },
+  "status.backend_fallback": { pt: "Backend nativo indisponível — usando workers do navegador… (motivo: {0})", en: "Native backend unavailable — using browser workers… (reason: {0})" },
   "status.building_graph":   { pt: "Construindo o grafo da rede…",                   en: "Building network graph…" },
   "status.graph_done":       { pt: "Concluído em {0} ms (grafo: {1} nós, {2} arestas){3}.", en: "Done in {0} ms (graph: {1} nodes, {2} edges){3}." },
   "status.graph_route_note": { pt: " · {0} rota(s)",                                 en: " · {0} route(s)" },
@@ -347,7 +356,7 @@ const STRINGS = {
   "cloud.stop_skipped":    { pt: "VM da nuvem mantida ligada — outra sessão está usando.", en: "Cloud VM kept running — another session is using it." },
   "cloud.orch_unreachable":{ pt: "Orquestrador inacessível — usando workers do navegador…", en: "Orchestrator unreachable — using browser workers…" },
   "cloud.boot_failed":     { pt: "Falha ao iniciar a VM da nuvem — usando workers do navegador…", en: "Cloud VM failed to start — using browser workers…" },
-  "cloud.preempted":       { pt: "VM da nuvem interrompida — recalculando no navegador…", en: "Cloud VM dropped — recomputing in the browser…" },
+  "cloud.preempted":       { pt: "Nuvem indisponível — recalculando no navegador… (motivo: {0})", en: "Cloud unavailable — recomputing in the browser… (reason: {0})" },
   "cloud.transfer":        { pt: "Transferência: ↑ {0} · ↓ {1} · ~{2}", en: "Transfer: ↑ {0} up · ↓ {1} down · ~{2}" },
   "cloud.need_orch_url":   { pt: "Informe a URL do orquestrador para usar a nuvem.", en: "Enter the orchestrator URL to use Cloud." },
   "cloud.need_password":   { pt: "Informe a senha da nuvem para usar a nuvem.", en: "Enter the cloud password to use Cloud." },
@@ -355,7 +364,7 @@ const STRINGS = {
   "cloud.creating":        { pt: "Criando a VM da nuvem… (~{0})", en: "Creating cloud VM… (~{0})" },
   "cloud.keep_warm":       { pt: "Manter VM ligada entre cálculos", en: "Keep VM warm between runs" },
   "cloud.warm":            { pt: "VM ligada — esfria após ~15 min de ócio (watchdog na VM).", en: "VM kept warm — auto-stops after ~15 min idle (in-VM watchdog)." },
-  "help.p.backend":      { pt: "Fonte de cálculo: três opções (2C). <em>Navegador</em> (padrão) roda em Web Workers na própria aba. <em>Localhost</em> fala com um servidor Rust opcional (backend/ no repositório, cargo run --release) na máquina do usuário. <em>Nuvem</em> aciona sob demanda uma VM no orquestrador — um serviço Cloud Run público, alcançável de qualquer origem —, protegida pela \"senha da nuvem\" compartilhada; \"Manter VM ligada entre cálculos\" evita religá-la a cada cálculo, mas ela desliga sozinha após ~15 min de ócio (watchdog dentro da própria VM), e cada cálculo com ela ligada é cobrado na conta do mantenedor. Localhost e Nuvem aceleram tanto a densidade multi-referência (uma Dijkstra por referência, em todos os núcleos) quanto o campo de energia de fonte única (de/para/ida-e-volta); rotas (top-N), caminho até o destino e o modo grafo continuam sempre no navegador (nenhum backend produz rotas). Se o servidor ou a VM ficarem inacessíveis, o app volta silenciosamente para os workers do navegador.", en: "Compute source: three options (2C). <em>Browser</em> (default) runs in in-page Web Workers. <em>Localhost</em> talks to an optional Rust server (backend/ in the repo, cargo run --release) on the user's own machine. <em>Cloud</em> boots a VM on demand via the orchestrator — a public Cloud Run service, reachable from any origin — gated by the shared \"cloud password\"; \"Keep VM warm between runs\" avoids rebooting it on every run, but it still auto-stops after ~15 min idle (a watchdog inside the VM), and every run while it's up is billed to the maintainer's account. Localhost and Cloud both accelerate multi-reference density (one Dijkstra per reference, across all cores) AND the single-source energy field (from/to/round). Top-N routes, the destination path, and graph mode always stay in the browser (no backend produces routes). If the server or VM is unreachable, the app falls back silently to the in-browser workers." },
+  "help.p.backend":      { pt: "Fonte de cálculo: três opções (2C). <em>Navegador</em> (padrão) roda em Web Workers na própria aba. <em>Localhost</em> fala com um servidor Rust opcional (backend/ no repositório, cargo run --release) na máquina do usuário. <em>Nuvem</em> aciona sob demanda uma VM no orquestrador — um serviço Cloud Run público, alcançável de qualquer origem —, protegida pela \"senha da nuvem\" compartilhada; \"Manter VM ligada entre cálculos\" evita religá-la a cada cálculo, mas ela desliga sozinha após ~15 min de ócio (watchdog dentro da própria VM), e cada cálculo com ela ligada é cobrado na conta do mantenedor. O seletor <em>\"Máquina da nuvem\"</em> escolhe o tamanho da VM (8/32/128 vCPUs, com preço de referência por hora — a VM roda em modo spot, tipicamente 60–90% mais barato que o valor mostrado); o tamanho é aplicado ao criar/religar a VM (uma VM já ligada mantém o tamanho até o próximo desligamento) e a estimativa de tempo modela o tamanho selecionado. Localhost e Nuvem aceleram tanto a densidade multi-referência (uma Dijkstra por referência, em todos os núcleos) quanto o campo de energia de fonte única (de/para/ida-e-volta); rotas (top-N), caminho até o destino e o modo grafo continuam sempre no navegador (nenhum backend produz rotas). Se o servidor ou a VM ficarem inacessíveis, o app volta para os workers do navegador, dizendo o motivo na linha de status.", en: "Compute source: three options (2C). <em>Browser</em> (default) runs in in-page Web Workers. <em>Localhost</em> talks to an optional Rust server (backend/ in the repo, cargo run --release) on the user's own machine. <em>Cloud</em> boots a VM on demand via the orchestrator — a public Cloud Run service, reachable from any origin — gated by the shared \"cloud password\"; \"Keep VM warm between runs\" avoids rebooting it on every run, but it still auto-stops after ~15 min idle (a watchdog inside the VM), and every run while it's up is billed to the maintainer's account. The <em>\"Cloud machine\"</em> selector picks the VM size (8/32/128 vCPUs, with a per-hour reference price — the VM runs as spot, typically 60–90% cheaper than shown); the size applies when the VM is created/restarted (a running VM keeps its size until the next stop) and the time estimate models the selected size. Localhost and Cloud both accelerate multi-reference density (one Dijkstra per reference, across all cores) AND the single-source energy field (from/to/round). Top-N routes, the destination path, and graph mode always stay in the browser (no backend produces routes). If the server or VM is unreachable, the app falls back to the in-browser workers, stating the reason in the status line." },
   "param.max_workers":   { pt: "Máx. de workers de cálculo (0 = auto)", en: "Max compute workers (0 = auto)" },
   "help.p.workers":      { pt: "Avançado: paraleliza a densidade entre este número de Web Workers. 0 = auto (dimensionado pelos núcleos e memória disponível). Só aumente se sua máquina tiver mais RAM do que o navegador reporta — cada worker usa cerca de 5 GB em um DEM grande, então exceder pode travar a aba.", en: "Advanced: parallelise density across this many Web Workers. 0 = auto (sized to cores and available memory). Only raise it if your machine has more RAM than the browser reports — each worker needs roughly 5 GB on a large DEM, so over-committing can crash the tab." },
   // dormant: no UI control since v37 (engine/backend still implement the mode) — kept for param.max_length below
@@ -865,7 +874,7 @@ const PERSIST_IDS = [
   "mode", "mass", "crr", "cda", "rho", "keff", "pflat", "climb-thr", "ksmooth", "deadband", "dem-smooth", "e-max", "e-max-mode",
   "want-passes", "want-topn", "want-density",
   "n-refs", "ref-sampling", "refs-visible",
-  "backend-url", "orchestrator-url", "cloud-keep-warm", "n-routes", "penalty", "repulsion-mode",
+  "backend-url", "orchestrator-url", "cloud-keep-warm", "cloud-machine", "n-routes", "penalty", "repulsion-mode",
   "routes-colormap", "colormap",
   // Vector network
   "vec-width", "vec-snap", "vec-constrain", "vec-graph-mode", "vec-junction-mode",
@@ -902,7 +911,7 @@ const COMPUTE_SOURCE_KEY = "compute-source";
 // URLs, and importing a bundle must not silently repoint the importer's
 // session to attacker-supplied endpoints. Shared by collectConfig({forBundle})
 // and applyConfig's persist:false (bundle) path so they can't drift apart.
-const CONNECTION_PERSIST_IDS = ["backend-url", "orchestrator-url", "cloud-keep-warm"];
+const CONNECTION_PERSIST_IDS = ["backend-url", "orchestrator-url", "cloud-keep-warm", "cloud-machine"];
 
 function savePersistedParams() {
   const out = {};
@@ -1459,6 +1468,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const el = document.getElementById(id);
     if (el) { el.addEventListener("change", onComputeSourceChange); el.addEventListener("input", estimateRunTime); }
   }
+  // Cloud machine size: the estimate models the SELECTED size directly
+  // (backendSpecForEstimate) — re-estimate on change, no /health probe needed.
+  document.getElementById("cloud-machine")?.addEventListener("change", estimateRunTime);
   // Cloud password: persisted in sessionStorage (a secret — NOT localStorage,
   // where the URL fields live). Restore on load, save on input.
   {
@@ -2098,7 +2110,14 @@ function effectiveBackendUrl() {
   // the run with cloud.need_orch_url rather than guessing.
   const id = cloud ? "orchestrator-url" : "backend-url";
   const raw = (document.getElementById(id)?.value || "").trim();
-  const val = (!cloud && !raw) ? "http://127.0.0.1:8077" : raw;
+  let val = (!cloud && !raw) ? "http://127.0.0.1:8077" : raw;
+  // A pasted bare hostname ("simu-orch….run.app") is a RELATIVE URL to fetch()
+  // — the POST goes to the app's own origin and fails confusingly (visto na
+  // prática contra um dev-server local). Assume https:// when the scheme is
+  // missing; loopback hosts get http:// (the native backend has no TLS).
+  if (val && !/^[a-z][a-z0-9+.-]*:\/\//i.test(val)) {
+    val = (/^(127\.0\.0\.1|localhost|\[::1\])(:|$|\/)/.test(val) ? "http://" : "https://") + val;
+  }
   return val.replace(/\/+$/, "");
 }
 // Kept for reference; Cloud now works from ANY origin (the orchestrator is a
@@ -2123,6 +2142,34 @@ function computeDataUrl() {
 // SAME token gates the orchestrator (control) and Caddy on the VM (data).
 function cloudToken() {
   return (document.getElementById("cloud-token")?.value || "").trim();
+}
+// The requested cloud VM size (#cloud-machine). The orchestrator validates
+// against its own allowlist and applies it on create / on start-from-stopped.
+function cloudMachineType() {
+  return document.getElementById("cloud-machine")?.value || "n2-standard-8";
+}
+// cores + backend memory budget per selectable size — mirrors the orchestrator's
+// ALLOWED_MACHINE_TYPES max-mem-gb table × the backend's 0.8 effective factor
+// (density_mem_budget_bytes em backend/src/main.rs). Used by the time estimate
+// so it tracks the DROPDOWN (the next boot applies it), not the last VM booted.
+const CLOUD_MACHINE_SPECS = {
+  "n2-standard-8":   { cores: 8,   memBudgetBytes: 28 * 0.8e9 },
+  "n2-standard-32":  { cores: 32,  memBudgetBytes: 115 * 0.8e9 },
+  "n2-standard-128": { cores: 128, memBudgetBytes: 460 * 0.8e9 },
+};
+// Backend spec the ESTIMATE should assume. Cloud: the selected machine (a
+// running keep-warm VM of another size is transient — default is stop-after-
+// run, so the next compute boots the selected size). Localhost: the cached
+// /health probe (nulls → the caller's fallbacks).
+function backendSpecForEstimate() {
+  if (computeMode() === "cloud") {
+    const spec = CLOUD_MACHINE_SPECS[cloudMachineType()];
+    if (spec) return spec;
+  }
+  return {
+    cores: state.backendCores ? state.backendCores.cores : null,
+    memBudgetBytes: state.backendCores ? state.backendCores.memBudgetBytes : null,
+  };
 }
 // Headers for a Cloud data-plane compute request: the Bearer token + an opt-in
 // asking the backend to gzip its (large) response (the browser auto-inflates).
@@ -6800,11 +6847,12 @@ runBtn.addEventListener("click", async () => {
     // Liveness ticker: large runs take a while server-side and fetch gives
     // no progress events — an elapsed counter shows the app isn't hung.
     const t0 = performance.now();
-    status.textContent = t("status.backend_computing");
+    status.textContent = t(cloudMode ? "status.cloud_computing" : "status.backend_computing");
     const ticker = setInterval(() => {
       if (gen !== state.computeGen) { clearInterval(ticker); return; }
-      status.textContent =
-        t("status.backend_computing_elapsed", formatDuration(performance.now() - t0));
+      status.textContent = t(
+        cloudMode ? "status.cloud_computing_elapsed" : "status.backend_computing_elapsed",
+        formatDuration(performance.now() - t0));
     }, 1000);
     try {
       const params = {
@@ -6900,11 +6948,12 @@ runBtn.addEventListener("click", async () => {
   const startSingleBackend = async (baseUrl) => {
     progressBar.style.width = "10%"; // no streaming progress from the backend
     const t0 = performance.now();
-    status.textContent = t("status.backend_computing");
+    status.textContent = t(cloudMode ? "status.cloud_computing" : "status.backend_computing");
     const ticker = setInterval(() => {
       if (gen !== state.computeGen) { clearInterval(ticker); return; }
-      status.textContent =
-        t("status.backend_computing_elapsed", formatDuration(performance.now() - t0));
+      status.textContent = t(
+        cloudMode ? "status.cloud_computing_elapsed" : "status.backend_computing_elapsed",
+        formatDuration(performance.now() - t0));
     }, 1000);
     try {
       const params = {
@@ -6983,9 +7032,11 @@ runBtn.addEventListener("click", async () => {
       } catch (err) {
         if (gen !== state.computeGen) return new Promise(() => {});
         console.warn("[backend] falling back to in-browser workers:", err);
-        // In cloud mode a dropped backend fetch usually means the VM was
-        // preempted/reaped mid-run — say so; otherwise the generic message.
-        status.textContent = t(cloudMode ? "cloud.preempted" : "status.backend_fallback");
+        // Surface the REASON in the status line, not just the console — a
+        // silent fallback reads as "the cloud just didn't run" (visto na
+        // prática). err.message is our own fetch/HTTP wording, not user data.
+        status.textContent = t(cloudMode ? "cloud.preempted" : "status.backend_fallback",
+                               err?.message || String(err));
         // This run is now executing on the browser pool, not the backend.
         // Re-tag it so computeDone's online correction trains corrBrowser
         // (actual/predicted vs the browser model), not corrBackend — otherwise
@@ -7392,7 +7443,8 @@ runBtn.addEventListener("click", async () => {
         } catch (err) {
           if (gen !== state.computeGen) return;
           console.warn("[backend] falling back to in-browser workers:", err);
-          status.textContent = t(cloudMode ? "cloud.preempted" : "status.backend_fallback");
+          status.textContent = t(cloudMode ? "cloud.preempted" : "status.backend_fallback",
+                                 err?.message || String(err));
           if (state.lastRun) state.lastRun.backend = false;
           startSingleWorker();
           return;
@@ -9092,11 +9144,16 @@ function setCloudHint(key, ...args) {
 
 // POST/GET helpers with a short timeout. Throw on transport failure (caller
 // maps that to a fallback); a non-ok HTTP status throws too.
-async function cloudFetchJson(url, { method = "GET", timeoutMs = 8000 } = {}) {
+async function cloudFetchJson(url, { method = "GET", timeoutMs = 8000, body = null } = {}) {
   const headers = {};
   const tok = cloudToken();
   if (tok) headers["Authorization"] = `Bearer ${tok}`;
-  const resp = await fetch(url, { method, headers, signal: AbortSignal.timeout(timeoutMs) });
+  let payload;
+  if (body != null) {
+    headers["Content-Type"] = "application/json";
+    payload = JSON.stringify(body);
+  }
+  const resp = await fetch(url, { method, headers, body: payload, signal: AbortSignal.timeout(timeoutMs) });
   if (!resp.ok) {
     const e = new Error(`cloud HTTP ${resp.status}`);
     e.status = resp.status;          // lets callers distinguish 401 (bad password)
@@ -9111,9 +9168,15 @@ async function cloudFetchJson(url, { method = "GET", timeoutMs = 8000 } = {}) {
 // `isStale` lets a superseded run bail out of the poll loop.
 async function ensureCloudVm(orchUrl, isStale) {
   // Kick the (idempotent) start/create on the CONTROL plane (orchestrator).
+  // machineType: the #cloud-machine selection — applied by the orchestrator
+  // when the VM is created or started from STOPPED; a VM already RUNNING
+  // keeps its size until the next stop (the response reports the actual type).
   let started;
   try {
-    started = await cloudFetchJson(`${orchUrl}/cloud/start`, { method: "POST", timeoutMs: 15000 });
+    started = await cloudFetchJson(`${orchUrl}/cloud/start`, {
+      method: "POST", timeoutMs: 15000,
+      body: { machineType: cloudMachineType() },
+    });
   } catch (err) {
     state.cloud.vmState = "ERROR";
     if (err.status === 401) throw Object.assign(new Error("auth_failed"), { reason: "auth_failed", cause: err });
@@ -9392,8 +9455,19 @@ const NATIVE_SPEEDUP  = 1.6;  // native per-ref speedup vs JS — nominal; both
                               // converge toward bandwidth-bound on huge
                               // frontiers (~1.3) and diverge on small ones
                               // (~2.4). Online correction adjusts the residual.
-const BW_CONTENTION   = 0.2;  // each extra concurrent slice slows the others
-                              // ~20% (shared memory bandwidth): a USL penalty.
+const BW_CONTENTION   = 0.2;  // shared-memory-bandwidth penalty coefficient.
+                              // Applied SUB-linearly (√(slices−1), below): the
+                              // linear USL form was tuned in the 1–2-slice
+                              // regime (huge DEMs, RAM-capped) where both agree,
+                              // but extrapolated linearly it capped ANY machine
+                              // at 1/κ = 5× total speedup — 128 vCPUs estimated
+                              // a mere 1.4× faster than 8 on a mid-size DEM
+                              // (visto na prática). √ keeps contention growing
+                              // with concurrency without that absurd ceiling;
+                              // PROVISÓRIO até timings reais em 32/128 vCPUs
+                              // treinarem a correção (corrBackend é um escalar
+                              // por MOTOR — não absorve erro de FORMA entre
+                              // tamanhos de máquina).
 const BACKEND_PAR_CAP = 8;    // fallback core count when /health is unreachable
 // Per-slice scratch+accumulator bytes/cell in the backend (mirrors
 // backend/src/main.rs: 17 scratch + 20 acc; round doubles scratch + 1 byte).
@@ -9493,11 +9567,12 @@ function predictComputeMs(cal, opts, applyCorr) {
       // DEMs — each slice holds full-grid scratch, so 1-2 fit in RAM, not
       // cores-many) and slowed by shared-bandwidth contention between slices.
       const perSlice = (mode === "round" ? BACKEND_BYTES_PER_CELL_ROUND : BACKEND_BYTES_PER_CELL) * N;
-      const memBudget = (state.backendCores && state.backendCores.memBudgetBytes) || 8e9;
+      const spec = backendSpecForEstimate();
+      const memBudget = spec.memBudgetBytes || 8e9;
       const memCap = Math.max(1, Math.floor(memBudget / perSlice));
-      const cores = (state.backendCores && state.backendCores.cores) || BACKEND_PAR_CAP;
+      const cores = spec.cores || BACKEND_PAR_CAP;
       const slices = Math.max(1, Math.min(refs || 1, cores, memCap));
-      const contention = 1 + BW_CONTENTION * (slices - 1);
+      const contention = 1 + BW_CONTENTION * Math.sqrt(slices - 1);
       ms = (refs / slices) * (perRef / NATIVE_SPEEDUP) * contention * dijk;
       corr = cal.corrBackend || 1;
     } else {
