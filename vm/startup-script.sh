@@ -12,7 +12,7 @@
 #      se a metadata `backend-binary-url` estiver setada).
 #   2. Compila/instala o backend simujoules em /opt/simujoules/simujoules-backend.
 #   3. Escreve o systemd unit `simujoules-backend.service` (backend em
-#      0.0.0.0:VM_PORT com --max-mem-gb dimensionado pra c4-standard-96) e o
+#      0.0.0.0:VM_PORT com --max-mem-gb dimensionado pra n2-standard-128) e o
 #      Caddy (TLS/auth/CORS) do passo 3b.
 #   4. Habilita + inicia o backend e o Caddy (o watchdog já foi habilitado no
 #      passo 0).
@@ -215,16 +215,16 @@ fi
 #     n_slices = min(refs, cores, orçamento / per_slice).
 #   density_mem_budget_bytes() usa orçamento_efetivo = max_mem_gb · 1e9 · 0.8.
 #
-#   A c4-standard-96 tem 96 vCPUs e ~360 GB de RAM. Pra dar cores-many (96)
-#   slices num DEM grande sem OOM, reservamos ~40 GB pro corpo da requisição +
+#   A n2-standard-128 tem 128 vCPUs e 512 GB de RAM. Pra dar cores-many (128)
+#   slices num DEM grande sem OOM, reservamos ~50 GB pro corpo da requisição +
 #   cópias do DEM + buffers de saída e damos o resto ao orçamento:
-#     --max-mem-gb 320  →  orçamento_efetivo = 320·0.8e9 = 256e9 bytes.
-#   Aí cabem 96 slices enquanto  N ≤ 256e9 / (55·96) ≈ 48,5 M células
-#   (~7000×7000) — confortável pros DEMs do app. DEMs maiores rodam menos
+#     --max-mem-gb 460  →  orçamento_efetivo = 460·0.8e9 = 368e9 bytes.
+#   Aí cabem 128 slices enquanto  N ≤ 368e9 / (55·128) ≈ 52 M células
+#   (~7200×7200) — confortável pros DEMs do app. DEMs maiores rodam menos
 #   slices (mais refs em série por slice): a saída é a MESMA, só o tempo cresce.
-# Precedência: metadata `max-mem-gb` (do bake-instance.sh) > default 320. Não há
+# Precedência: metadata `max-mem-gb` (do bake-instance.sh) > default 460. Não há
 # MAX_MEM_GB no ambiente da VM; o valor chega só via metadata.
-MAX_MEM_GB="${MAX_MEM_GB_META:-320}"
+MAX_MEM_GB="${MAX_MEM_GB_META:-460}"
 
 echo "-- escrevendo systemd unit simujoules-backend.service (porta $VM_PORT, --max-mem-gb $MAX_MEM_GB) --"
 cat > /etc/systemd/system/simujoules-backend.service <<UNIT
@@ -301,11 +301,19 @@ __DATA_HOST__:__DATA_PORT__ {
 		dns cloudflare {env.CF_API_TOKEN}
 	}
 
+	# CORS por ALLOWLIST: a origem do app em produção (__APP_ORIGIN__) MAIS
+	# localhost/127.0.0.1 em qualquer porta — desenvolvimento local contra a
+	# mesma VM é fluxo esperado. O header ecoa a Origin da requisição (só
+	# quando ela casa com a allowlist); fora dela não há header CORS e o
+	# navegador bloqueia. A auth por token continua valendo pra TODAS as
+	# origens — o CORS aqui é só a camada navegador.
+	@allowedOrigin header_regexp Origin ^(__APP_ORIGIN_RE__|http://localhost(:[0-9]+)?|http://127\.0\.0\.1(:[0-9]+)?)$
+
 	# Preflight CORS: responde OPTIONS sem exigir token (o navegador não manda
 	# Authorization no preflight).
 	@preflight method OPTIONS
 	handle @preflight {
-		header Access-Control-Allow-Origin "__APP_ORIGIN__"
+		header @allowedOrigin Access-Control-Allow-Origin "{http.request.header.Origin}"
 		header Access-Control-Allow-Methods "GET, POST, OPTIONS"
 		header Access-Control-Allow-Headers "Authorization, Content-Type, X-Simu-Gzip"
 		header Access-Control-Max-Age "3600"
@@ -318,11 +326,11 @@ __DATA_HOST__:__DATA_PORT__ {
 		respond "unauthorized" 401
 	}
 
-	# Autorizado: injeta CORS pra origem do app e faz proxy pro backend local.
-	# Remove o Access-Control-Allow-Origin "*" do backend pra não duplicar (dois
-	# valores quebram o CORS no navegador).
+	# Autorizado: injeta CORS (se a origem está na allowlist) e faz proxy pro
+	# backend local. Remove o Access-Control-Allow-Origin "*" do backend pra
+	# não duplicar (dois valores quebram o CORS no navegador).
 	handle {
-		header Access-Control-Allow-Origin "__APP_ORIGIN__"
+		header @allowedOrigin Access-Control-Allow-Origin "{http.request.header.Origin}"
 		header Vary Origin
 		reverse_proxy 127.0.0.1:__VM_PORT__ {
 			header_down -Access-Control-Allow-Origin
@@ -333,9 +341,14 @@ __DATA_HOST__:__DATA_PORT__ {
 }
 CADDY
 fi
+# __APP_ORIGIN_RE__ entra dentro de um regex do Caddy: escapa os metacaracteres
+# do valor (na prática só os pontos do hostname) e depois re-escapa as barras
+# invertidas pro replacement do sed (senão o sed as consome).
+APP_ORIGIN_RE=$(printf '%s' "$APP_ORIGIN" | sed 's/[.[\*^$()+?{}|]/\\&/g' | sed 's/\\/\\\\/g')
 sed -i \
   -e "s|__DATA_HOST__|${DATA_HOST}|g" \
   -e "s|__DATA_PORT__|${DATA_PORT}|g" \
+  -e "s|__APP_ORIGIN_RE__|${APP_ORIGIN_RE}|g" \
   -e "s|__APP_ORIGIN__|${APP_ORIGIN}|g" \
   -e "s|__VM_PORT__|${VM_PORT}|g" \
   /etc/caddy/Caddyfile
@@ -368,7 +381,11 @@ mkdir -p /var/lib/caddy
 # --- 4) Habilitar + iniciar (watchdog já habilitado no passo 0) --------------
 echo "-- habilitando e iniciando serviços --"
 systemctl daemon-reload
-systemctl enable --now simujoules-backend.service
-systemctl enable --now caddy.service
+# enable + RESTART (não `enable --now`): num REBOOT o systemd já subiu as
+# units habilitadas com a config antiga do disco ANTES deste script rodar —
+# `enable --now` seria no-op numa unit ativa e a Caddyfile/unit recém-escritas
+# nunca carregariam (visto na prática: allowlist de CORS ignorada até restart).
+systemctl enable simujoules-backend.service caddy.service
+systemctl restart simujoules-backend.service caddy.service
 
 echo "== startup-script concluída :: backend 127.0.0.1:${VM_PORT}, Caddy ${DATA_HOST}:${DATA_PORT} =="

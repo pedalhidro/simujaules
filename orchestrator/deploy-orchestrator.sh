@@ -14,9 +14,13 @@
 #        simu-cf-dns-token  (token Cloudflare DNS:Edit na zona pedalhidrografi.co)
 #        simu-reap-token    (token de admin só pro Cloud Scheduler chamar /reap)
 #   2. Service account `simu-orchestrator@PROJECT.iam.gserviceaccount.com` com um
-#      papel custom mínimo: compute.instances.{get,start,stop,create,delete},
-#      compute.disks.create, compute.firewalls.{get,update},
+#      papel custom mínimo: compute.instances.{get,start,stop,create,delete,
+#      setMetadata,setTags,setMachineType}, compute.disks.create,
+#      compute.firewalls.{get,update}, compute.networks.updatePolicy,
+#      compute.subnetworks.{use,useExternalIp}, compute.{zone,global}Operations.get,
 #      iam.serviceAccounts.actAs na SA da VM, e secretAccessor nos 3 secrets.
+#      (setMetadata/setTags: o GCP os exige já no INSERT com metadata/tags;
+#      setMachineType: o resize do seletor "Máquina da nuvem" do app.)
 #   3. O startup-script da VM publicado em gs://simujaules/vm/startup-script.sh
 #      (a SA da VM precisa de storage.objectViewer nesse bucket).
 #

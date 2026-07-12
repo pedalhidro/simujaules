@@ -54,7 +54,12 @@ Este serviço só cuida do ciclo de vida.
 ## Endpoints
 
 - `POST /cloud/start` → `{"state","etaSeconds","dataUrl"}` — **cria se ausente**,
-  liga se parada; aperta firewall; aponta DNS. Idempotente.
+  liga se parada; aperta firewall; aponta DNS. Idempotente. Body JSON opcional
+  `{"machineType":"n2-standard-8|32|128"}` (o seletor "Máquina da nuvem" do
+  app): validado contra a allowlist e aplicado no create / no start-de-parada,
+  junto com a metadata `max-mem-gb` da tabela; uma VM já RUNNING mantém o
+  tamanho até o próximo stop. Todas na plataforma mínima Ice Lake (binário
+  cacheado é `target-cpu=native` — ver "Limitações conhecidas").
 - `GET  /cloud/status` → `{"state","dataUrl","externalIp","leaseExpiresAt":null}`
   — estado do GCP. A **saúde** é confirmada pelo navegador batendo direto em
   `dataUrl/health` (o firewall já libera o /32 dele).
@@ -135,3 +140,24 @@ firewalls.get/update, `actAs` na SA da VM, `secretAccessor` nos 3 secrets), e o
 O SA do orquestrador pode **criar/deletar** VMs — o endpoint público é alvo de
 valor. As barreiras são o token compartilhado + firewall-/32 por requisição + o
 token de admin do reaper. Garanta os 3 antes de o serviço ficar acessível.
+
+## Limitações conhecidas
+
+- **Clientes IPv6 não abrem o firewall do plano de dados.** O navegador fala
+  com o Cloud Run pelo AAAA do `run.app` (macOS/redes v6 preferem IPv6), o
+  orquestrador só sabe apertar `/32` IPv4 (`_client_ip` ignora v6 com um
+  warning), e a VM só tem IPv4 — então o `/cloud/start` de um cliente IPv6
+  liga a VM mas **não** libera a porta 443 pro IPv4 que o mesmo navegador vai
+  usar no plano de dados. Funciona hoje por acaso quando o IPv4 do usuário já
+  está na janela de IPs recentes (ex.: um `curl -4` anterior da mesma rede).
+  Conserto real: correlacionar o IPv4 (um preflight autenticado no plano de
+  dados que reporte o IP ao orquestrador), ou aceitar `/128` v6 quando a VM
+  tiver AAAA. Até lá: rode `curl -4 -X POST …/cloud/start` uma vez da mesma
+  rede pra semear o firewall.
+- **O binário do backend é preso à microarquitetura da CPU** (`target-cpu=native`
+  no `backend/.cargo/config.toml`): compilado na `n2-standard-128` (Ice Lake),
+  ele **SIGILL-a** em E2 e até em N2 menores agendadas em Cascade Lake — às
+  vezes só no caminho de CÁLCULO (o `/health` serve normal e o crash aparece
+  como 502 no meio do `/density`). Se trocar o `MACHINE_TYPE` de família ou
+  tamanho, fixe a plataforma (`gcloud compute instances update … --min-cpu-platform
+  "Intel Ice Lake"`) ou delete o binário em `/opt/simujoules` pra recompilar.

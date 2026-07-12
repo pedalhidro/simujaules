@@ -3,7 +3,8 @@
 Scripts para provisionar e operar uma **VM Spot no Google Cloud** que roda o
 backend nativo do Simujoules (`backend/`) quando você quer jogar o cálculo do
 campo de energia numa máquina **muito maior** que o laptop (uma
-`c4-standard-96`: 96 vCPUs, ~360 GB de RAM).
+`n2-standard-128`: 128 vCPUs, 512 GB de RAM — a família C4 tem quota 0 no
+projeto em southamerica-east1, por isso N2).
 
 > **⚠️ ATENÇÃO: estes comandos criam e ligam uma VM COBRADA (billable).**
 > **Nada aqui roda automaticamente — VOCÊ é quem executa, com consciência do
@@ -101,7 +102,7 @@ fazendo.
 | `GCP_PROJECT`        | `pedal-hidrografico`     | bake            | projeto GCP |
 | `GCP_ZONE`           | `southamerica-east1-a`   | bake            | zona da VM |
 | `INSTANCE_NAME`      | `simu-compute`           | bake            | nome da instância |
-| `MACHINE_TYPE`       | `c4-standard-96`         | bake            | tipo de máquina |
+| `MACHINE_TYPE`       | `n2-standard-128`        | bake            | tipo de máquina |
 | `VM_PORT`            | `8077`                   | bake/startup/watchdog | porta do backend |
 | `FIREWALL_RULE`      | `simu-compute-allow-8077`| bake            | nome da regra de firewall |
 | `NETWORK_TAG`        | `simu-compute`           | bake            | tag de rede da regra |
@@ -110,11 +111,11 @@ fazendo.
 | `IMAGE_PROJECT`      | `debian-cloud`           | bake            | projeto da imagem |
 | `BOOT_DISK_SIZE`     | `50GB`                   | bake            | tamanho do disco de boot |
 | `BACKEND_BINARY_URL` | *(vazio → compila)*      | bake→startup    | binário pré-compilado opcional |
-| `MAX_MEM_GB`         | `320`                    | startup         | `--max-mem-gb` do backend (ver abaixo) |
+| `MAX_MEM_GB`         | `460`                    | startup         | `--max-mem-gb` do backend (ver abaixo) |
 | `IDLE_MAX_S`         | `900`                    | startup→watchdog| ociosidade máx. antes de desligar |
 | `SIMU_REPO`/`SIMU_REF` | repo `pedalhidro/simujaules` @ `main` | startup | fonte pra compilar |
 
-### Por que `--max-mem-gb 320`
+### Por que `--max-mem-gb 460`
 
 O pior caso (round mode) gasta por slice concorrente:
 
@@ -126,10 +127,10 @@ onde `N` é o nº de células do DEM. O nº de slices concorrentes é
 `min(refs, cores, orçamento / per_slice)`, e
 `density_mem_budget_bytes()` usa `orçamento_efetivo = max_mem_gb · 1e9 · 0.8`.
 
-A `c4-standard-96` tem ~360 GB; reservando ~40 GB pro corpo da requisição +
-cópias do DEM + buffers de saída, `--max-mem-gb 320` dá
-`orçamento_efetivo = 320·0,8e9 = 256e9 bytes`. Aí cabem os **96 slices** (um
-por core) enquanto `N ≤ 256e9 / (55·96) ≈ 48,5 M células` (~7000×7000) —
+A `n2-standard-128` tem 512 GB; reservando ~50 GB pro corpo da requisição +
+cópias do DEM + buffers de saída, `--max-mem-gb 460` dá
+`orçamento_efetivo = 460·0,8e9 = 368e9 bytes`. Aí cabem os **128 slices** (um
+por core) enquanto `N ≤ 368e9 / (55·128) ≈ 52 M células` (~7200×7200) —
 folgado pros DEMs do app. DEMs maiores rodam menos slices (mais refs em série
 por slice): a **saída é a mesma**, só o tempo cresce.
 

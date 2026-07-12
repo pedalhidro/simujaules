@@ -58,6 +58,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -110,20 +111,40 @@ REAP_TOKEN = _env("REAP_TOKEN", "")
 CF_API_TOKEN = _env("CF_API_TOKEN", "")
 CF_ZONE_ID = _env("CF_ZONE_ID", "")
 DNS_TTL = _env_int("DNS_TTL", 60)
-# IP-placeholder (TEST-NET-1) pro qual o registro A aponta quando a VM está
-# parada — evita deixar o DNS apontando pra um IP efêmero já reciclado pelo GCP.
-DNS_PLACEHOLDER_IP = _env("DNS_PLACEHOLDER_IP", "192.0.2.1")
+# IP-placeholder pro qual o registro A aponta quando a VM está parada — evita
+# deixar o DNS apontando pra um IP efêmero já reciclado pelo GCP. 127.0.0.1 e
+# NÃO um TEST-NET: um navegador com DNS defasado (TTL 60 + cache do Firefox/DoH)
+# que conecte no placeholder precisa de um "connection refused" IMEDIATO —
+# TEST-NET é um buraco negro que pendura cada requisição até o timeout de 8 s
+# do app e come toda a janela de polling do boot (visto na prática).
+DNS_PLACEHOLDER_IP = _env("DNS_PLACEHOLDER_IP", "127.0.0.1")
 
 # Reaper: deleta a instância parada há mais de tantos dias.
 REAP_IDLE_DAYS = _env_int("REAP_IDLE_DAYS", 30)
 
 # --- Spec da instância (espelha vm/bake-instance.sh — manter em sincronia) ---
-MACHINE_TYPE = _env("MACHINE_TYPE", "c4-standard-96")
+# n2 e não c4: o projeto tem N2_CPUS=200 na região; a família C4 tem quota 0
+# em southamerica-east1 (CPUS_PER_VM_FAMILY) — c4-standard-96 falha o insert
+# com QUOTA_EXCEEDED até alguém pedir quota C4.
+MACHINE_TYPE = _env("MACHINE_TYPE", "n2-standard-128")
 PROVISIONING_MODEL = _env("PROVISIONING_MODEL", "SPOT")
 IMAGE_FAMILY = _env("IMAGE_FAMILY", "debian-12")
 IMAGE_PROJECT = _env("IMAGE_PROJECT", "debian-cloud")
 BOOT_DISK_GB = _env_int("BOOT_DISK_GB", 50)
-MAX_MEM_GB = _env("MAX_MEM_GB", "320")
+MAX_MEM_GB = _env("MAX_MEM_GB", "460")
+# Tamanhos selecionáveis pelo app (POST /cloud/start {"machineType": ...}) e o
+# max-mem-gb correspondente (RAM − max(2 GB, ~10%) — espelha a matemática de
+# vm/startup-script.sh). Aplicados ao CRIAR ou ao religar uma VM PARADA; uma VM
+# já ligada mantém o tamanho até o próximo stop.
+ALLOWED_MACHINE_TYPES = {
+    "n2-standard-8": 28,     # 8 vCPUs, 32 GB
+    "n2-standard-32": 115,   # 32 vCPUs, 128 GB
+    "n2-standard-128": 460,  # 128 vCPUs, 512 GB
+}
+# O binário do backend é compilado com target-cpu=native — preso à
+# microarquitetura do primeiro boot. Fixar a plataforma mínima garante que
+# qualquer tamanho N2 agende na MESMA geração (ver README "Limitações").
+MIN_CPU_PLATFORM = _env("MIN_CPU_PLATFORM", "Intel Ice Lake")
 BACKEND_BINARY_URL = _env("BACKEND_BINARY_URL", "")
 # Backstops de custo (ver vm/startup-script.sh e vm/idle-watchdog.sh):
 #   MAX_UPTIME_S_META  — teto do watchdog DENTRO da VM (repassado por metadata,
@@ -245,6 +266,42 @@ def _gcp_get_instance():
     return inst.status, ip, (inst.last_stop_timestamp or None)
 
 
+def _gcp_apply_machine_type(machine_type):
+    """Aplica o tamanho pedido numa VM PARADA (no-op se já é o atual).
+
+    set_machine_type exige TERMINATED — quem chama garante. Também atualiza a
+    metadata max-mem-gb pro valor da tabela (o startup-script relê no boot e
+    reescreve o unit do backend). Falha aqui NÃO deve derrubar o start: o
+    chamador loga e segue com o tamanho antigo (pior caso: custo/capacidade
+    diferente do pedido, nunca uma VM quebrada).
+    """
+    from google.cloud import compute_v1
+
+    instances, _ = _gcp()
+    inst = instances.get(project=GCP_PROJECT, zone=GCP_ZONE, instance=INSTANCE_NAME)
+    if inst.machine_type.rsplit("/", 1)[-1] == machine_type:
+        return
+    op = instances.set_machine_type(
+        project=GCP_PROJECT, zone=GCP_ZONE, instance=INSTANCE_NAME,
+        instances_set_machine_type_request_resource=compute_v1.InstancesSetMachineTypeRequest(
+            machine_type=f"zones/{GCP_ZONE}/machineTypes/{machine_type}"
+        ),
+    )
+    op.result()
+    md = inst.metadata
+    mm = str(_machine_max_mem_gb(machine_type))
+    for item in md.items:
+        if item.key == "max-mem-gb":
+            item.value = mm
+            break
+    else:
+        md.items.append(compute_v1.Items(key="max-mem-gb", value=mm))
+    instances.set_metadata(
+        project=GCP_PROJECT, zone=GCP_ZONE, instance=INSTANCE_NAME, metadata_resource=md
+    ).result()
+    log.info("machine type de %s ajustado p/ %s (max-mem-gb=%s)", INSTANCE_NAME, machine_type, mm)
+
+
 def _gcp_start_instance():
     instances, _ = _gcp()
     instances.start(project=GCP_PROJECT, zone=GCP_ZONE, instance=INSTANCE_NAME)
@@ -260,7 +317,12 @@ def _gcp_delete_instance():
     instances.delete(project=GCP_PROJECT, zone=GCP_ZONE, instance=INSTANCE_NAME)
 
 
-def _gcp_create_instance():
+def _machine_max_mem_gb(machine_type):
+    """max-mem-gb do backend pro tamanho pedido (tabela; fallback = env)."""
+    return ALLOWED_MACHINE_TYPES.get(machine_type, MAX_MEM_GB)
+
+
+def _gcp_create_instance(machine_type=None):
     """Cria a VM de cálculo (espelha vm/bake-instance.sh). IP efêmero, SPOT.
 
     O startup-script vem de STARTUP_SCRIPT_URL (objeto GCS). Segredos do Caddy
@@ -270,9 +332,13 @@ def _gcp_create_instance():
     """
     from google.cloud import compute_v1
 
+    mt = machine_type or MACHINE_TYPE
     inst = compute_v1.Instance()
     inst.name = INSTANCE_NAME
-    inst.machine_type = f"zones/{GCP_ZONE}/machineTypes/{MACHINE_TYPE}"
+    inst.machine_type = f"zones/{GCP_ZONE}/machineTypes/{mt}"
+    # Plataforma mínima fixa: o binário cacheado no disco (target-cpu=native)
+    # SIGILL-a se um tamanho menor agendar numa geração mais antiga.
+    inst.min_cpu_platform = MIN_CPU_PLATFORM
     inst.tags = compute_v1.Tags(items=[NETWORK_TAG])
 
     # Scheduling: SPOT + STOP-on-preempt (igual ao bake). STANDARD não leva
@@ -575,9 +641,13 @@ def get_instance():
     return _map_gcp_status(status), ip, ts
 
 
-def ensure_up(client_ip):
+def ensure_up(client_ip, machine_type=None):
     """Garante a VM ligada (cria se ausente, liga se parada), aperta firewall e
-    aponta o DNS pro IP atual. Retorna (STATE, eta_seconds)."""
+    aponta o DNS pro IP atual. Retorna (STATE, eta_seconds).
+
+    machine_type (já validado contra ALLOWED_MACHINE_TYPES pelo route): aplicado
+    no create e no start-a-partir-de-parada; uma VM RUNNING mantém o tamanho
+    até o próximo stop (trocar a quente não existe no GCP)."""
     state, ip, _ = get_instance()
     # Início de sessão nova (a VM estava ausente/parada/em erro): reseta o
     # conjunto de IPs liberados no firewall só pro client_ip atual, em vez de
@@ -589,7 +659,7 @@ def ensure_up(client_ip):
             _dry_create()
         else:
             try:
-                _gcp_create_instance()
+                _gcp_create_instance(machine_type)
             except Exception as e:  # noqa: BLE001
                 # gunicorn --threads 8: duas /cloud/start podem ambas ver
                 # ABSENT e ambas chamarem instances.insert; a perdedora recebe
@@ -607,6 +677,15 @@ def ensure_up(client_ip):
         if DRY_RUN:
             _dry_start()
         else:
+            if machine_type:
+                try:
+                    _gcp_apply_machine_type(machine_type)
+                except Exception as e:  # noqa: BLE001
+                    # Não-fatal por design: um resize que falhe (permissão,
+                    # corrida com outro start) liga a VM no tamanho antigo em
+                    # vez de negar o compute.
+                    log.warning("não consegui aplicar %s em %s: %s",
+                                machine_type, INSTANCE_NAME, e)
             try:
                 _gcp_start_instance()
             except Exception as e:  # noqa: BLE001
@@ -711,12 +790,25 @@ def _other_client_has_lease(client_id, now=None):
 app = Flask(__name__)
 
 
+# CORS por allowlist: a origem do app em produção MAIS localhost/127.0.0.1 em
+# qualquer porta — desenvolvimento local contra o mesmo orquestrador é fluxo
+# esperado. Espelha o matcher @allowedOrigin do Caddy da VM
+# (vm/startup-script.sh) — os dois planos devem aceitar as mesmas origens.
+_ALLOWED_ORIGIN_RE = re.compile(
+    r"^(%s|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?)$" % re.escape(APP_ORIGIN)
+)
+
+
 @app.after_request
 def _cors(resp):
-    # CORS restrito à origem do app (auth é por token, mas restringir a origem
-    # é defesa-em-profundidade). Authorization precisa estar nos headers
-    # permitidos pro preflight do navegador deixar passar o Bearer.
-    resp.headers["Access-Control-Allow-Origin"] = APP_ORIGIN
+    # CORS restrito à allowlist de origens (auth é por token, mas restringir a
+    # origem é defesa-em-profundidade): ecoa a Origin da requisição só quando
+    # ela casa; fora da lista não há header e o navegador bloqueia.
+    # Authorization precisa estar nos headers permitidos pro preflight do
+    # navegador deixar passar o Bearer.
+    origin = request.headers.get("Origin", "")
+    if _ALLOWED_ORIGIN_RE.fullmatch(origin):
+        resp.headers["Access-Control-Allow-Origin"] = origin
     resp.headers["Vary"] = "Origin"
     resp.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
     # X-Simu-Client: id estável por aba (crypto.randomUUID no app), usado pra
@@ -755,6 +847,13 @@ def _client_ip():
         log.warning("X-Forwarded-For/remote_addr não é um IP válido: %r", ip)
         return ""
     if parsed.version != 4:
+        # LIMITAÇÃO CONHECIDA (ver README "Limitações conhecidas"): navegadores
+        # em redes IPv6 chegam aqui pelo AAAA do run.app e o firewall da VM
+        # nunca abre pro IPv4 deles — o plano de dados (que é IPv4-only, o A de
+        # compute.*) fica inacessível a menos que o mesmo IPv4 já esteja na
+        # janela de IPs recentes (ex.: um curl -4 anterior). O conserto real é
+        # correlacionar o IPv4 do cliente (preflight no plano de dados, ou
+        # aceitar /128 v6 quando a VM tiver AAAA) — por ora só registramos.
         log.warning("IP do cliente é IPv6 (%s) — sem suporte a /32 IPv6 aqui; ignorando.", ip)
         return ""
     return ip
@@ -768,11 +867,19 @@ def _deny():
 def cloud_start():
     """Cria (se ausente) ou liga a VM; aperta firewall; aponta DNS. Idempotente.
 
+    Body JSON opcional: {"machineType": "n2-standard-8|32|128"} — validado
+    contra ALLOWED_MACHINE_TYPES; aplicado no create / start-de-parada (uma VM
+    RUNNING mantém o tamanho até o próximo stop). Sem body = default do env.
+
     {"state":STATE,"etaSeconds":INT,"dataUrl":STR}
     """
     if not _require(CLOUD_AUTH_TOKEN):
         return _deny()
-    state, eta = ensure_up(_client_ip())
+    body = request.get_json(silent=True) or {}
+    machine_type = body.get("machineType") or None
+    if machine_type and machine_type not in ALLOWED_MACHINE_TYPES:
+        return jsonify({"error": f"machineType fora da allowlist: {machine_type}"}), 400
+    state, eta = ensure_up(_client_ip(), machine_type)
     return jsonify({"state": state, "etaSeconds": eta, "dataUrl": DATA_URL})
 
 
