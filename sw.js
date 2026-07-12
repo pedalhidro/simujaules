@@ -511,7 +511,12 @@
 //              grade ×c" input inflates the accessibility thresholds
 //              (centered estimate vs conservative floor, with a warning).
 //              All three persist in bundles.
-const VERSION  = "v57";
+//   v57 → v58: Crop DEM to the current view — new 1A button crops the loaded
+//              DEM to the visible map window (in-memory export→reimport
+//              through the standard load path: mask/CRS/invalidation/
+//              smoothing-tag guard all inherited; geographic DEMs only;
+//              no-overlap / whole-DEM / too-small views get clear statuses).
+const VERSION  = "v58";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

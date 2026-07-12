@@ -522,7 +522,7 @@ const STRINGS = {
   "help.usage_heading":  { pt: "Como usar", en: "How to use" },
   "help.theory_heading": { pt: "O que estamos fazendo", en: "What we're doing" },
   "help.h.load_dem":     { pt: "Carregar um DEM", en: "Load a DEM" },
-  "help.p.load_dem":     { pt: "Use o seletor para abrir um GeoTIFF local, clique num exemplo hospedado, ou aperte <em>Carregar FABDEM para a janela atual</em> (puxa tiles FABDEM 1°×1° pela extensão visível, limite de 50 MB). O DEM aparece como retângulo tracejado e o mapa centra automaticamente.", en: 'Use the file picker to open a local GeoTIFF, click a hosted example, or press <em>Load FABDEM for current viewport</em> (pulls FABDEM 1°×1° tiles for the visible extent, 50 MB cap). The DEM is shown as a dashed rectangle and the map auto-centres.' },
+  "help.p.load_dem":     { pt: "Use o seletor para abrir um GeoTIFF local, clique num exemplo hospedado, ou aperte <em>Carregar FABDEM para a janela atual</em> (puxa tiles FABDEM 1°×1° pela extensão visível, limite de 50 MB). O DEM aparece como retângulo tracejado e o mapa centra automaticamente. Com um DEM carregado, <em>Recortar à janela atual</em> extrai só a extensão visível (menos memória, cálculo mais rápido) e <em>Reduzir resolução</em> faz média de blocos N×N — num MDT de 5 m, 6× ≈ 30 m, o regime onde o modelo é mais preciso. Ambos passam pelo mesmo caminho de carga de um DEM novo (máscara, suavização, sondagem de tempo).", en: 'Use the file picker to open a local GeoTIFF, click a hosted example, or press <em>Load FABDEM for current viewport</em> (pulls FABDEM 1°×1° tiles for the visible extent, 50 MB cap). The DEM is shown as a dashed rectangle and the map auto-centres. With a DEM loaded, <em>Crop to current view</em> extracts just the visible extent (less memory, faster computes) and <em>Downsample</em> does N×N block averaging — on a 5 m DTM, 6× ≈ 30 m, the regime where the model is most accurate. Both go through the same load path as a fresh DEM (mask, smoothing, timing probe).' },
   "help.h.points":       { pt: "Marcar pontos", en: "Pick points" },
   "help.p.points":       { pt: "<strong>Modo padrão:</strong> clique no mapa para o ponto-fonte (<code>src</code>). Um segundo clique marca o destino (<code>dst</code>) — necessário para \"até a fonte\", \"ida e volta\" e \"top-N rotas\".", en: '<strong>Default mode:</strong> click the map for the source (<code>src</code>). A second click sets the destination (<code>dst</code>) — required for "to source point", "round trip", and "top-N routes".' },
   "help.p.density_pts":  { pt: "<strong>Densidade multi-referência:</strong> ative <em>Calcular densidade multi-referência</em>. Os cliques agora adicionam pontos numerados. Use \"Distribuir aleatórias\" ou ajuste <em>N referências</em>. Política FIFO: ao exceder N, o mais antigo é descartado.", en: '<strong>Multi-reference density:</strong> turn on <em>Compute multi-reference density</em>. Clicks now add numbered reference points. Use "Place random" or adjust <em>N references</em>. FIFO policy: above N, the oldest is dropped.' },
@@ -545,6 +545,17 @@ const STRINGS = {
   "demsmooth.auto":      { pt: "auto (σ = 10 m em MDTs finos)", en: "auto (σ = 10 m on fine DTMs)" },
   "demsmooth.off":       { pt: "desligada", en: "off" },
   "status.dem_smoothing": { pt: "Suavizando MDT (σ = {0} m)…", en: "Smoothing DEM (σ = {0} m)…" },
+  "dem.crop":            { pt: "Recortar DEM à janela atual", en: "Crop DEM to current view" },
+  "dem.crop_label":      { pt: "{0} · recorte {1}×{2}", en: "{0} · crop {1}×{2}" },
+  "status.crop_need_geo": { pt: "Recorte só funciona em DEMs geográficos (lon/lat) — este DEM é projetado.", en: "Crop only works on geographic (lon/lat) DEMs — this DEM is projected." },
+  "status.crop_no_overlap": { pt: "A janela atual não intersecta o DEM.", en: "The current view doesn't intersect the DEM." },
+  "status.crop_noop":    { pt: "A janela atual cobre o DEM inteiro — nada a recortar.", en: "The current view covers the whole DEM — nothing to crop." },
+  "status.crop_too_small": { pt: "Recorte pequeno demais (mínimo 2×2 células) — aproxime menos.", en: "Crop too small (minimum 2×2 cells) — zoom out a little." },
+  "dem.downsample":      { pt: "Reduzir resolução", en: "Downsample" },
+  "dem.downsample_label": { pt: "{0} · média {1}× {2}×{3}", en: "{0} · {1}× avg {2}×{3}" },
+  "aria.downsample_factor": { pt: "Fator de redução de resolução", en: "Downsample factor" },
+  "status.downsampling": { pt: "Reduzindo resolução (média {0}×)…", en: "Downsampling ({0}× block average)…" },
+  "status.downsample_too_small": { pt: "Resultado pequeno demais ({0}×{1} células) — use um fator menor.", en: "Result too small ({0}×{1} cells) — use a smaller factor." },
   "help.h.field":        { pt: "Campo de energia", en: "Energy field" },
   "help.p.field":        { pt: "Dijkstra sobre todas as células passáveis a partir do ponto-fonte (ou para o ponto-destino, com arestas reversas) dá o custo mínimo de chegar a cada célula. É isso que a camada <em>Energia</em> renderiza.", en: 'Dijkstra over all passable cells starting from the source (or terminating at the destination, with reversed edges) gives the minimum cost to reach each cell. That\'s what the <em>Energy</em> layer renders.' },
   "help.h.modes":        { pt: "Modos", en: "Modes" },
@@ -1478,6 +1489,14 @@ document.addEventListener("DOMContentLoaded", () => {
       loadFabdemForView();
     });
   }
+  // Crop the loaded DEM to the current viewport (1A) — export→reimport of
+  // the window through the standard load path; see cropDemToViewport().
+  document.getElementById("crop-dem")?.addEventListener("click", cropDemToViewport);
+  // Downsample the loaded DEM by block averaging (1A); factor from the select.
+  document.getElementById("downsample-dem")?.addEventListener("click", () => {
+    const f = parseInt(document.getElementById("dem-downsample-factor")?.value, 10) || 6;
+    downsampleDem(f);
+  });
   // Locate-me floating button. Lives on the map (not in the drawer),
   // so it's reachable on mobile without opening the controls panel.
   document.getElementById("locate-btn")?.addEventListener("click", centerOnUserLocation);
@@ -2662,6 +2681,124 @@ function smoothHeightsInPlace(height, mask, H, W, dxM, dyM, sigmaM) {
       }
       while (ring.length) flushRow(ring.shift());
     }
+  }
+}
+
+// 1A — crop the loaded DEM to the current map viewport. Implemented as an
+// in-memory export→reimport: writeRasterAsGeoTIFF on the sub-grid window, then
+// the standard loadDemFromArrayBuffer path — so compute cancellation, the mask
+// rebuild (GDAL_NODATA round-trip; nodata cells still hold the raw sentinel in
+// state.dem.height), CRS GeoKeys, layer/graph invalidation, the calibration
+// probe AND the smoothing tag guard (an already-smoothed DEM is not
+// re-smoothed; the cumulative σ tag travels with the crop) are all inherited
+// from the one battle-tested load path instead of re-implemented here.
+async function cropDemToViewport() {
+  const dem = state.dem;
+  if (!dem) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("io.no_dem"))}</span>`; return; }
+  // The map (and this viewport read) is EPSG:4326-only — same guard as the
+  // OSM pulls: on a projected DEM lon/lat would map to garbage cells.
+  if (!dem.isGeographic) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("status.crop_need_geo"))}</span>`; return; }
+  const b = map.getBounds();
+  // Viewport ∩ DEM extent (degrees), then cell indices (row 0 = north edge).
+  const west  = Math.max(b.getWest(),  dem.bbox.xmin);
+  const east  = Math.min(b.getEast(),  dem.bbox.xmax);
+  const north = Math.min(b.getNorth(), dem.bbox.ymax);
+  const south = Math.max(b.getSouth(), dem.bbox.ymin);
+  if (!(west < east && south < north)) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("status.crop_no_overlap"))}</span>`; return; }
+  const c0 = Math.max(0, Math.floor((west - dem.originX) / dem.dx));
+  const c1 = Math.min(dem.W, Math.ceil((east - dem.originX) / dem.dx));
+  const r0 = Math.max(0, Math.floor((dem.originY - north) / dem.dy));
+  const r1 = Math.min(dem.H, Math.ceil((dem.originY - south) / dem.dy));
+  const Wc = c1 - c0, Hc = r1 - r0;
+  if (Wc < 2 || Hc < 2) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("status.crop_too_small"))}</span>`; return; }
+  if (Wc === dem.W && Hc === dem.H) { status.textContent = t("status.crop_noop"); return; }
+  const vals = new Float32Array(Hc * Wc);
+  for (let r = 0; r < Hc; r++) {
+    const src = (r0 + r) * dem.W + c0;
+    vals.set(dem.height.subarray(src, src + Wc), r * Wc);
+  }
+  const demLike = {
+    H: Hc, W: Wc,
+    dx: dem.dx, dy: dem.dy,
+    originX: dem.originX + c0 * dem.dx,
+    originY: dem.originY - r0 * dem.dy,
+    isGeographic: dem.isGeographic,
+    geoKeys: dem.geoKeys,
+  };
+  const extraMd = {};
+  if (dem.nodata != null) extraMd.GDAL_NODATA = String(dem.nodata);
+  if (dem.smoothCumSigmaM > 0) extraMd.ImageDescription = `simujaules:demSmoothSigmaM=${dem.smoothCumSigmaM}`;
+  const label = t("dem.crop_label", state.demLabel || "DEM", Wc, Hc);
+  const gen = ++state.demLoadGen;
+  // A crop is a local derivation — the source URL (if any) describes the FULL
+  // raster and would mislabel bundles made from the crop. Same convention as
+  // the file-picker path.
+  state.demSourceUrl = null;
+  try {
+    const buf = writeRasterAsGeoTIFF(vals, demLike, "float32", Object.keys(extraMd).length ? extraMd : undefined);
+    await loadDemFromArrayBuffer(buf, label, gen);
+  } catch (e) {
+    status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(e.message)}</span>`;
+  }
+}
+
+// 1A — downsample the loaded DEM by an integer factor via mask-aware N×N
+// block averaging (each output cell = mean of its block's VALID cells; a
+// block with none stays nodata). This is the same transform as
+// `gdalwarp -r average` — on the 5 m IGC-SP rasters a 6× reduction lands at
+// ~30 m, the regime where the v2 model is most accurate (journal Entries
+// 19/21). Same export→reimport tail as cropDemToViewport, so the standard
+// load path (mask rebuild, GeoKeys, invalidations, smoothing-tag guard)
+// is inherited. Works on projected DEMs too (no viewport involved).
+async function downsampleDem(factor) {
+  const dem = state.dem;
+  if (!dem) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("io.no_dem"))}</span>`; return; }
+  const N = Math.max(2, factor | 0);
+  const W2 = Math.ceil(dem.W / N), H2 = Math.ceil(dem.H / N);
+  if (W2 < 2 || H2 < 2) { status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(t("status.downsample_too_small", W2, H2))}</span>`; return; }
+  status.textContent = t("status.downsampling", N);
+  await new Promise((r) => setTimeout(r, 0)); // let the status line paint before the sync pass
+  const vals = new Float32Array(H2 * W2);
+  // Masked output cells get the source sentinel (loader rebuilds the mask from
+  // GDAL_NODATA below) or NaN when the source had none (loader masks
+  // non-finite values).
+  const sentinel = dem.nodata != null ? dem.nodata : NaN;
+  for (let R = 0; R < H2; R++) {
+    const rmax = Math.min(dem.H, (R + 1) * N);
+    for (let C = 0; C < W2; C++) {
+      const cmax = Math.min(dem.W, (C + 1) * N);
+      let sum = 0, n = 0;
+      for (let r = R * N; r < rmax; r++) {
+        const base = r * dem.W;
+        for (let c = C * N; c < cmax; c++) {
+          if (dem.mask[base + c]) { sum += dem.height[base + c]; n++; }
+        }
+      }
+      vals[R * W2 + C] = n > 0 ? sum / n : sentinel;
+    }
+  }
+  const demLike = {
+    H: H2, W: W2,
+    dx: dem.dx * N, dy: dem.dy * N,
+    originX: dem.originX,
+    originY: dem.originY,
+    isGeographic: dem.isGeographic,
+    geoKeys: dem.geoKeys,
+  };
+  const extraMd = {};
+  if (dem.nodata != null) extraMd.GDAL_NODATA = String(dem.nodata);
+  // The cumulative-smoothing tag travels (block averaging is a resampling,
+  // not a Gaussian — the tag tracks σ only). Note the auto-smoothing rule
+  // won't re-fire anyway once the pixel grows past 10 m.
+  if (dem.smoothCumSigmaM > 0) extraMd.ImageDescription = `simujaules:demSmoothSigmaM=${dem.smoothCumSigmaM}`;
+  const label = t("dem.downsample_label", state.demLabel || "DEM", N, W2, H2);
+  const gen = ++state.demLoadGen;
+  state.demSourceUrl = null; // local derivation, same convention as the crop
+  try {
+    const buf = writeRasterAsGeoTIFF(vals, demLike, "float32", Object.keys(extraMd).length ? extraMd : undefined);
+    await loadDemFromArrayBuffer(buf, label, gen);
+  } catch (e) {
+    status.innerHTML = `<span style="color:#ff6b6b">${escapeHtml(e.message)}</span>`;
   }
 }
 

@@ -9,6 +9,22 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v58 — 2026-07-11
+
+**Crop DEM to the current view.** New "Recortar DEM à janela atual" button in
+1A: crops the loaded DEM to the visible map window — zoom into a
+neighbourhood of a huge raster (e.g. the 135 M-cell Sampa Sítio Urbano) and
+carve out just that extent for faster computes and less memory. Implemented
+as an in-memory export→reimport of the cropped window through the standard
+DEM load path, so everything a real load does is inherited: compute
+cancellation, mask rebuild (GDAL_NODATA round-trip), CRS GeoKeys, network/
+graph/probe invalidation, and the smoothing-tag guard (a crop of an
+already-smoothed DEM is NOT re-smoothed — the cumulative σ tag travels with
+it; a crop of an unsmoothed DEM follows the current 1A smoothing setting,
+like any load). Geographic (lon/lat) DEMs only — same guard as the OSM
+pulls. Clear status messages for no-overlap / whole-DEM / too-small (< 2×2
+cells) views.
+
 ## v57 — 2026-07-11
 
 **Move directions, string pulling, KPI grid correction** — the
@@ -64,6 +80,7 @@ threshold exceeds the run's energy budget — the matrix is truncated there,
 so the KPIs become lower bounds. New matrix section in
 `test-worker-pool.mjs` (brute-force vs single-source, pooled ≡ single,
 budget bounds, maximize suppression).
+
 
 ## v55 — 2026-07-07
 

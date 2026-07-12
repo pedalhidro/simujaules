@@ -953,6 +953,16 @@
             <span data-i18n="ex.fabdem">Carregar FABDEM para a janela atual</span> <span class="ex-tag" data-i18n="ex.tag.fabdem">≤ 50 MB</span>
           </button>
         </div>
+        <button type="button" class="secondary" id="crop-dem" data-i18n="dem.crop" style="margin-top: 6px;">Recortar DEM à janela atual</button>
+        <div style="margin-top: 6px; display: flex; gap: 6px; align-items: center;">
+          <button type="button" class="secondary" id="downsample-dem" data-i18n="dem.downsample">Reduzir resolução</button>
+          <select id="dem-downsample-factor" data-i18n-aria="aria.downsample_factor">
+            <option value="2">2×</option>
+            <option value="3">3×</option>
+            <option value="4">4×</option>
+            <option value="6" selected>6×</option>
+          </select>
+        </div>
         <div style="margin-top: 6px;">
           <label for="dem-smooth" data-i18n="param.dem_smooth">Suavização do MDT</label>
           <select id="dem-smooth">
@@ -1703,6 +1713,18 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v58</strong> — 2026-07-11<br/>
+              <strong>Recortar DEM à janela atual.</strong> Novo botão em 1A:
+              recorta o DEM carregado para a janela visível do mapa — aproxime
+              de um bairro num raster enorme (ex. o Sítio Urbano de 135 M
+              células) e fique só com aquela extensão, com cálculos mais
+              rápidos e menos memória. O recorte passa pelo caminho padrão de
+              carregamento (exportação→reimportação em memória), então herda
+              tudo: cancelamento de cálculo, máscara nodata, CRS, invalidação
+              de rede/grafo/sonda e a marca de suavização (um recorte de MDT
+              já suavizado NÃO é re-suavizado; um recorte de MDT cru segue a
+              configuração de suavização atual, como qualquer carregamento).
+              Só DEMs geográficos (lon/lat), como os pulls OSM.</p>
               <p><strong>v57</strong> — 2026-07-11<br/>
               <strong>Direções de movimento, string pulling e correção de
               grade</strong> — a nota de pesquisa de conectividade da grade
