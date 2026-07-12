@@ -53,6 +53,12 @@ ENV_VARS="${ENV_VARS},REAP_IDLE_DAYS=${REAP_IDLE_DAYS:-30}"
 # ver vm/startup-script.sh), mas é melhor o operador saber que precisa publicar
 # o binário pra evitar o build de ~10 min em toda VM recriada do zero.
 ENV_VARS="${ENV_VARS},BACKEND_BINARY_URL=${BACKEND_BINARY_URL:-}"
+# IP reservado da VM (endereço regional simu-compute-ip). Com ele, VMs
+# recriadas reclamam o mesmo endereço e o registro A nunca muda — configure
+# DNS_PLACEHOLDER_IP com o MESMO valor pra parar a dança de DNS por completo
+# (ver main.py). Vazio = modo efêmero antigo.
+ENV_VARS="${ENV_VARS},STATIC_IP=${STATIC_IP:-}"
+ENV_VARS="${ENV_VARS},DNS_PLACEHOLDER_IP=${DNS_PLACEHOLDER_IP:-127.0.0.1}"
 
 if [[ -z "${BACKEND_BINARY_URL:-}" ]]; then
   echo ">> AVISO: BACKEND_BINARY_URL não definido." >&2

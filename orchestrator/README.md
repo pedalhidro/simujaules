@@ -93,6 +93,7 @@ Este serviço só cuida do ciclo de vida.
 | `GCP_PROJECT/ZONE`  | `pedal-hidrografico` / `southamerica-east1-a` | Projeto/zona da VM.                  |
 | `INSTANCE_NAME`     | `simu-compute`                           | Nome da VM (a ÚNICA tocada).              |
 | `FIREWALL_RULE`     | `simu-compute-allow-443`                 | Regra apertada pro /32 do navegador.      |
+| `STATIC_IP`         | — (vazio = IP efêmero)                   | IP reservado da VM (`simu-compute-ip`): recriações reclamam o mesmo endereço; sete `DNS_PLACEHOLDER_IP` com o MESMO valor pro registro A nunca mudar (fim do DNS podre no navegador). |
 | `STARTUP_SCRIPT_URL`| `gs://simujaules/vm/startup-script.sh`   | Startup-script (create-when-missing).     |
 | `BACKEND_BINARY_URL`| — (vazio)                                | Binário pré-compilado (vazio = compila do fonte no boot, ~10 min). |
 | `REAP_IDLE_DAYS`    | `30`                                     | Dias parada até o reaper deletar.         |

@@ -111,12 +111,24 @@ REAP_TOKEN = _env("REAP_TOKEN", "")
 CF_API_TOKEN = _env("CF_API_TOKEN", "")
 CF_ZONE_ID = _env("CF_ZONE_ID", "")
 DNS_TTL = _env_int("DNS_TTL", 60)
+# IP EXTERNO RESERVADO da VM (endereço regional `simu-compute-ip`). Vazio =
+# efêmero (modo antigo). Com ele setado, VMs RECRIADAS pelo orquestrador
+# (reaper de 30 dias / /cloud/delete) reclamam o MESMO endereço — o registro A
+# nunca muda de valor e o navegador nunca cacheia DNS podre (a dança de
+# placeholder + repoint por boot foi a fonte de horas de NS_BINDING_ABORTED /
+# "CORS did not succeed" no Firefox). Configure DNS_PLACEHOLDER_IP com o MESMO
+# valor pra o stop também virar no-op.
+STATIC_IP = _env("STATIC_IP", "")
+
 # IP-placeholder pro qual o registro A aponta quando a VM está parada — evita
 # deixar o DNS apontando pra um IP efêmero já reciclado pelo GCP. 127.0.0.1 e
 # NÃO um TEST-NET: um navegador com DNS defasado (TTL 60 + cache do Firefox/DoH)
 # que conecte no placeholder precisa de um "connection refused" IMEDIATO —
 # TEST-NET é um buraco negro que pendura cada requisição até o timeout de 8 s
-# do app e come toda a janela de polling do boot (visto na prática).
+# do app e come toda a janela de polling do boot (visto na prática). No modo
+# IP-reservado (STATIC_IP), sete-o pro PRÓPRIO IP reservado: o registro fica
+# eternamente no mesmo valor (uma VM parada recusa conexão na hora, que é o
+# mesmo sinal do placeholder, sem nenhuma mudança de DNS).
 DNS_PLACEHOLDER_IP = _env("DNS_PLACEHOLDER_IP", "127.0.0.1")
 
 # Reaper: deleta a instância parada há mais de tantos dias.
@@ -365,12 +377,16 @@ def _gcp_create_instance(machine_type=None):
     boot.initialize_params = init
     inst.disks = [boot]
 
-    # Interface de rede com IP externo EFÊMERO (access_config sem nat_i_p fixo).
+    # Interface de rede com IP externo: o RESERVADO (STATIC_IP) quando
+    # configurado — VMs recriadas reclamam o mesmo endereço e o DNS nunca
+    # muda — senão efêmero (access_config sem nat_i_p fixo).
     nic = compute_v1.NetworkInterface()
     nic.network = "global/networks/default"
     ac = compute_v1.AccessConfig()
     ac.name = "External NAT"
     ac.type_ = "ONE_TO_ONE_NAT"
+    if STATIC_IP:
+        ac.nat_i_p = STATIC_IP
     nic.access_configs = [ac]
     inst.network_interfaces = [nic]
 
