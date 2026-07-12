@@ -1266,6 +1266,8 @@
             <input type="checkbox" id="cloud-keep-warm" />
             <span data-i18n="cloud.keep_warm">Manter VM ligada entre cálculos</span>
           </label>
+          <button id="cloud-stop-now" type="button" data-i18n="cloud.stop_now"
+                  style="margin-top: 6px; font-size: 11px; padding: 3px 8px;">Desligar VM agora</button>
           <div id="cloud-vm-status" style="font-size: 10px; color: var(--muted); margin-top: 3px;"></div>
           <div id="cloud-transfer" style="font-size: 10px; color: var(--muted); margin-top: 3px;"></div>
         </div>
@@ -1723,6 +1725,16 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v60</strong> — 2026-07-12<br/>
+              <strong>Ergonomia da troca de máquina na nuvem.</strong> Timeout
+              do <code>/cloud/start</code> 15→45 s (o redimensionamento roda
+              dentro dessa chamada — ~11 s medidos — e o aborto do cliente
+              virava um falso "orquestrador inacessível"); o religamento no
+              meio do boot leva o <code>machineType</code> selecionado; um
+              aviso de estado indica quando a VM ligada (keep-warm) difere do
+              tamanho selecionado (a seleção só vale no próximo boot); e o novo
+              botão <em>Desligar VM agora</em> força esse próximo boot — trocar
+              de máquina vira desligar → selecionar → calcular.</p>
               <p><strong>v59</strong> — 2026-07-12<br/>
               <strong>Nuvem funcionando de verdade — e com escolha de máquina.</strong>
               A CSP agora permite o host real do orquestrador (o modo Nuvem

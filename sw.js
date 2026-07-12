@@ -531,7 +531,14 @@
 //              the time estimate models the SELECTED size (sub-linear
 //              bandwidth-contention curve). Cloud runs say "Calculando na
 //              nuvem…"; fallbacks to browser workers state their reason.
-const VERSION  = "v59";
+//   v59 → v60: Cloud machine-switch ergonomics. /cloud/start timeout 15→45 s
+//              (the synchronous resize inside it takes ~11 s and could blow
+//              15); the mid-boot restart carries the selected machineType;
+//              a status hint flags a running keep-warm VM whose size differs
+//              from the dropdown (the selection only applies on next boot);
+//              new "Desligar VM agora" button forces that next boot without
+//              the untick-keep-warm dance.
+const VERSION  = "v60";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

@@ -9,6 +9,17 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v60 — 2026-07-12
+
+**Cloud machine-switch ergonomics.** The `/cloud/start` timeout goes 15 → 45 s
+(the orchestrator resizes the stopped VM *inside* that call — ~11 s measured,
+easily past 15 for bigger shapes — and a client-side abort caused a bogus
+"orchestrator unreachable" fallback); the mid-boot restart now carries the
+selected `machineType`; a status hint flags a running keep-warm VM whose size
+differs from the dropdown (the selection only applies on the next boot); and a
+new **"Desligar VM agora"** button in the cloud panel forces that next boot —
+switching sizes becomes stop → select → compute, no keep-warm toggling.
+
 ## v59 — 2026-07-12
 
 **Cloud compute actually works — and you pick the machine.** The CSP now

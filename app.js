@@ -364,7 +364,10 @@ const STRINGS = {
   "cloud.creating":        { pt: "Criando a VM da nuvem… (~{0})", en: "Creating cloud VM… (~{0})" },
   "cloud.keep_warm":       { pt: "Manter VM ligada entre cálculos", en: "Keep VM warm between runs" },
   "cloud.warm":            { pt: "VM ligada — esfria após ~15 min de ócio (watchdog na VM).", en: "VM kept warm — auto-stops after ~15 min idle (in-VM watchdog)." },
-  "help.p.backend":      { pt: "Fonte de cálculo: três opções (2C). <em>Navegador</em> (padrão) roda em Web Workers na própria aba. <em>Localhost</em> fala com um servidor Rust opcional (backend/ no repositório, cargo run --release) na máquina do usuário. <em>Nuvem</em> aciona sob demanda uma VM no orquestrador — um serviço Cloud Run público, alcançável de qualquer origem —, protegida pela \"senha da nuvem\" compartilhada; \"Manter VM ligada entre cálculos\" evita religá-la a cada cálculo, mas ela desliga sozinha após ~15 min de ócio (watchdog dentro da própria VM), e cada cálculo com ela ligada é cobrado na conta do mantenedor. O seletor <em>\"Máquina da nuvem\"</em> escolhe o tamanho da VM (8/32/128 vCPUs, com preço de referência por hora — a VM roda em modo spot, tipicamente 60–90% mais barato que o valor mostrado); o tamanho é aplicado ao criar/religar a VM (uma VM já ligada mantém o tamanho até o próximo desligamento) e a estimativa de tempo modela o tamanho selecionado. Localhost e Nuvem aceleram tanto a densidade multi-referência (uma Dijkstra por referência, em todos os núcleos) quanto o campo de energia de fonte única (de/para/ida-e-volta); rotas (top-N), caminho até o destino e o modo grafo continuam sempre no navegador (nenhum backend produz rotas). Se o servidor ou a VM ficarem inacessíveis, o app volta para os workers do navegador, dizendo o motivo na linha de status.", en: "Compute source: three options (2C). <em>Browser</em> (default) runs in in-page Web Workers. <em>Localhost</em> talks to an optional Rust server (backend/ in the repo, cargo run --release) on the user's own machine. <em>Cloud</em> boots a VM on demand via the orchestrator — a public Cloud Run service, reachable from any origin — gated by the shared \"cloud password\"; \"Keep VM warm between runs\" avoids rebooting it on every run, but it still auto-stops after ~15 min idle (a watchdog inside the VM), and every run while it's up is billed to the maintainer's account. The <em>\"Cloud machine\"</em> selector picks the VM size (8/32/128 vCPUs, with a per-hour reference price — the VM runs as spot, typically 60–90% cheaper than shown); the size applies when the VM is created/restarted (a running VM keeps its size until the next stop) and the time estimate models the selected size. Localhost and Cloud both accelerate multi-reference density (one Dijkstra per reference, across all cores) AND the single-source energy field (from/to/round). Top-N routes, the destination path, and graph mode always stay in the browser (no backend produces routes). If the server or VM is unreachable, the app falls back to the in-browser workers, stating the reason in the status line." },
+  "cloud.size_mismatch":   { pt: "VM pronta com {0} vCPUs — a seleção de {1} vCPUs só vale no próximo boot (desligue a VM pra aplicar já).", en: "VM ready with {0} vCPUs — the {1}-vCPU selection only applies on the next boot (stop the VM to apply it now)." },
+  "cloud.stop_now":        { pt: "Desligar VM agora", en: "Stop VM now" },
+  "cloud.stopping_manual": { pt: "Desligando a VM… o próximo cálculo religa no tamanho selecionado.", en: "Stopping the VM… the next compute boots the selected size." },
+  "help.p.backend":      { pt: "Fonte de cálculo: três opções (2C). <em>Navegador</em> (padrão) roda em Web Workers na própria aba. <em>Localhost</em> fala com um servidor Rust opcional (backend/ no repositório, cargo run --release) na máquina do usuário. <em>Nuvem</em> aciona sob demanda uma VM no orquestrador — um serviço Cloud Run público, alcançável de qualquer origem —, protegida pela \"senha da nuvem\" compartilhada; \"Manter VM ligada entre cálculos\" evita religá-la a cada cálculo, mas ela desliga sozinha após ~15 min de ócio (watchdog dentro da própria VM), e cada cálculo com ela ligada é cobrado na conta do mantenedor. O seletor <em>\"Máquina da nuvem\"</em> escolhe o tamanho da VM (8/32/128 vCPUs, com preço de referência por hora — a VM roda em modo spot, tipicamente 60–90% mais barato que o valor mostrado); o tamanho é aplicado ao criar/religar a VM (uma VM já ligada mantém o tamanho até o próximo desligamento — o aviso de estado indica quando a seleção difere da VM ligada, e <em>\"Desligar VM agora\"</em> força a troca no próximo cálculo) e a estimativa de tempo modela o tamanho selecionado. Localhost e Nuvem aceleram tanto a densidade multi-referência (uma Dijkstra por referência, em todos os núcleos) quanto o campo de energia de fonte única (de/para/ida-e-volta); rotas (top-N), caminho até o destino e o modo grafo continuam sempre no navegador (nenhum backend produz rotas). Se o servidor ou a VM ficarem inacessíveis, o app volta para os workers do navegador, dizendo o motivo na linha de status.", en: "Compute source: three options (2C). <em>Browser</em> (default) runs in in-page Web Workers. <em>Localhost</em> talks to an optional Rust server (backend/ in the repo, cargo run --release) on the user's own machine. <em>Cloud</em> boots a VM on demand via the orchestrator — a public Cloud Run service, reachable from any origin — gated by the shared \"cloud password\"; \"Keep VM warm between runs\" avoids rebooting it on every run, but it still auto-stops after ~15 min idle (a watchdog inside the VM), and every run while it's up is billed to the maintainer's account. The <em>\"Cloud machine\"</em> selector picks the VM size (8/32/128 vCPUs, with a per-hour reference price — the VM runs as spot, typically 60–90% cheaper than shown); the size applies when the VM is created/restarted (a running VM keeps its size until the next stop — the status hint flags when the selection differs from the running VM, and <em>\"Stop VM now\"</em> forces the switch on the next compute) and the time estimate models the selected size. Localhost and Cloud both accelerate multi-reference density (one Dijkstra per reference, across all cores) AND the single-source energy field (from/to/round). Top-N routes, the destination path, and graph mode always stay in the browser (no backend produces routes). If the server or VM is unreachable, the app falls back to the in-browser workers, stating the reason in the status line." },
   "param.max_workers":   { pt: "Máx. de workers de cálculo (0 = auto)", en: "Max compute workers (0 = auto)" },
   "help.p.workers":      { pt: "Avançado: paraleliza a densidade entre este número de Web Workers. 0 = auto (dimensionado pelos núcleos e memória disponível). Só aumente se sua máquina tiver mais RAM do que o navegador reporta — cada worker usa cerca de 5 GB em um DEM grande, então exceder pode travar a aba.", en: "Advanced: parallelise density across this many Web Workers. 0 = auto (sized to cores and available memory). Only raise it if your machine has more RAM than the browser reports — each worker needs roughly 5 GB on a large DEM, so over-committing can crash the tab." },
   // dormant: no UI control since v37 (engine/backend still implement the mode) — kept for param.max_length below
@@ -1471,6 +1474,15 @@ document.addEventListener("DOMContentLoaded", () => {
   // Cloud machine size: the estimate models the SELECTED size directly
   // (backendSpecForEstimate) — re-estimate on change, no /health probe needed.
   document.getElementById("cloud-machine")?.addEventListener("change", estimateRunTime);
+  // "Desligar VM agora": manual stop, so a size change applies without the
+  // untick-keep-warm-run-retick dance (a lease from a concurrent client still
+  // vetoes the stop orchestrator-side). Best-effort like the post-run stop.
+  document.getElementById("cloud-stop-now")?.addEventListener("click", () => {
+    const url = computeMode() === "cloud" ? effectiveBackendUrl() : "";
+    if (!url || !cloudToken()) { setCloudHint("cloud.need_orch_url"); return; }
+    stopCloudVm(url);
+    setCloudHint("cloud.stopping_manual");
+  });
   // Cloud password: persisted in sessionStorage (a secret — NOT localStorage,
   // where the URL fields live). Restore on load, save on input.
   {
@@ -9173,8 +9185,11 @@ async function ensureCloudVm(orchUrl, isStale) {
   // keeps its size until the next stop (the response reports the actual type).
   let started;
   try {
+    // 45 s: o start pode bloquear no resize síncrono (set_machine_type +
+    // set_metadata, ~11 s medidos no n2-8; máquinas maiores/ops lentas passam
+    // de 15 s) — um timeout curto aborta e cai pro navegador sem necessidade.
     started = await cloudFetchJson(`${orchUrl}/cloud/start`, {
-      method: "POST", timeoutMs: 15000,
+      method: "POST", timeoutMs: 45000,
       body: { machineType: cloudMachineType() },
     });
   } catch (err) {
@@ -9224,7 +9239,15 @@ async function ensureCloudVm(orchUrl, isStale) {
           memBudgetBytes: Number.isFinite(h.mem_budget_bytes) ? h.mem_budget_bytes : null,
         };
       }
-      setCloudHint("cloud.ready", Number.isFinite(h.cores) ? h.cores : "?");
+      // Keep-warm + a size change in the dropdown: the running VM keeps its
+      // size until the next boot — say so instead of a silent mismatch (the
+      // estimate models the SELECTION, so estimate and run would disagree).
+      const selSpec = CLOUD_MACHINE_SPECS[cloudMachineType()];
+      if (Number.isFinite(h.cores) && selSpec && selSpec.cores !== h.cores) {
+        setCloudHint("cloud.size_mismatch", h.cores, selSpec.cores);
+      } else {
+        setCloudHint("cloud.ready", Number.isFinite(h.cores) ? h.cores : "?");
+      }
       return true;
     }
     // Occasionally check the control plane for a hard ERROR (don't fail on a
@@ -9242,7 +9265,10 @@ async function ensureCloudVm(orchUrl, isStale) {
       // running), so re-kicking it is safe.
       if (st.state === "STOPPED" || st.state === "ABSENT") {
         try {
-          await cloudFetchJson(`${orchUrl}/cloud/start`, { method: "POST", timeoutMs: 15000 });
+          await cloudFetchJson(`${orchUrl}/cloud/start`, {
+            method: "POST", timeoutMs: 45000,
+            body: { machineType: cloudMachineType() },
+          });
         } catch (startErr) {
           if (startErr.status === 401) {
             throw Object.assign(new Error("auth_failed"), { reason: "auth_failed", cause: startErr });
