@@ -11,11 +11,13 @@
 # ── One-time setup (run LOCALLY with gcloud+gh authenticated; ~2 min) ────────
 # PROJECT=pedal-hidrografico
 # SA=gh-simujaules@$PROJECT.iam.gserviceaccount.com
-# # 1) Deploy service account, scoped to the simujaules bucket only
+# # 1) Deploy service account, scoped to the simujaules bucket only.
+# #    storage.admin ON THE BUCKET (not project-wide) — rsync needs
+# #    storage.buckets.get, which objectAdmin does NOT carry.
 # gcloud iam service-accounts create gh-simujaules --project=$PROJECT \
 #   --display-name="GitHub Actions deploy (simujaules)"
 # gcloud storage buckets add-iam-policy-binding gs://simujaules \
-#   --member="serviceAccount:$SA" --role=roles/storage.objectAdmin
+#   --member="serviceAccount:$SA" --role=roles/storage.admin
 # # 2) OIDC provider for THIS repo in the existing "github" pool (the pool was
 # #    created by amora's setup — see pedalhidro/amora .github/workflows/deploy.yml;
 # #    create it first if it doesn't exist yet)
