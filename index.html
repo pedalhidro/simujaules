@@ -1714,17 +1714,22 @@
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
               <p><strong>v58</strong> — 2026-07-11<br/>
-              <strong>Recortar DEM à janela atual.</strong> Novo botão em 1A:
-              recorta o DEM carregado para a janela visível do mapa — aproxime
-              de um bairro num raster enorme (ex. o Sítio Urbano de 135 M
-              células) e fique só com aquela extensão, com cálculos mais
-              rápidos e menos memória. O recorte passa pelo caminho padrão de
-              carregamento (exportação→reimportação em memória), então herda
-              tudo: cancelamento de cálculo, máscara nodata, CRS, invalidação
-              de rede/grafo/sonda e a marca de suavização (um recorte de MDT
-              já suavizado NÃO é re-suavizado; um recorte de MDT cru segue a
-              configuração de suavização atual, como qualquer carregamento).
-              Só DEMs geográficos (lon/lat), como os pulls OSM.</p>
+              <strong>Recortar e reduzir resolução do DEM (1A).</strong>
+              <em>Recortar à janela atual</em> recorta o DEM carregado para a
+              janela visível do mapa — aproxime de um bairro num raster enorme
+              (ex. o Sítio Urbano de 135 M células) e fique só com aquela
+              extensão, com cálculos mais rápidos e menos memória (só DEMs
+              geográficos, como os pulls OSM). <em>Reduzir resolução</em>
+              (fator 2/3/4/6×) faz média de blocos N×N ciente da máscara — a
+              mesma transformação do <code>gdalwarp -r average</code>: 6× num
+              raster IGC de 5 m cai em ~30 m, o regime onde o modelo v2 é mais
+              preciso (journal, Entries 19/21); funciona também em DEMs
+              projetados. Ambos passam pelo caminho padrão de carregamento
+              (exportação→reimportação em memória), então herdam tudo:
+              cancelamento de cálculo, máscara nodata, CRS, invalidação de
+              rede/grafo/sonda e a marca de suavização (uma derivação de MDT
+              já suavizado NÃO é re-suavizada), e removem a URL de origem dos
+              metadados de bundle (são derivações locais).</p>
               <p><strong>v57</strong> — 2026-07-11<br/>
               <strong>Direções de movimento, string pulling e correção de
               grade</strong> — a nota de pesquisa de conectividade da grade

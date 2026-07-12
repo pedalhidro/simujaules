@@ -511,11 +511,16 @@
 //              grade ×c" input inflates the accessibility thresholds
 //              (centered estimate vs conservative floor, with a warning).
 //              All three persist in bundles.
-//   v57 → v58: Crop DEM to the current view — new 1A button crops the loaded
-//              DEM to the visible map window (in-memory export→reimport
-//              through the standard load path: mask/CRS/invalidation/
-//              smoothing-tag guard all inherited; geographic DEMs only;
-//              no-overlap / whole-DEM / too-small views get clear statuses).
+//   v57 → v58: Crop + downsample the loaded DEM (1A). "Recortar à janela
+//              atual" crops to the visible map window (geographic DEMs only;
+//              no-overlap / whole-DEM / too-small views get clear statuses);
+//              "Reduzir resolução" (2/3/4/6×) does mask-aware N×N block
+//              averaging — gdalwarp -r average's transform, so 6× on a 5 m
+//              IGC raster ≈ the 30 m regime where the model is most accurate
+//              (journal Entries 19/21); works on projected DEMs too. Both are
+//              in-memory export→reimport through the standard load path
+//              (mask/CRS/invalidation/smoothing-tag guard all inherited) and
+//              drop the source URL from bundle metadata.
 const VERSION  = "v58";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;

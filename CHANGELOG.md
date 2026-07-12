@@ -23,7 +23,13 @@ already-smoothed DEM is NOT re-smoothed — the cumulative σ tag travels with
 it; a crop of an unsmoothed DEM follows the current 1A smoothing setting,
 like any load). Geographic (lon/lat) DEMs only — same guard as the OSM
 pulls. Clear status messages for no-overlap / whole-DEM / too-small (< 2×2
-cells) views.
+cells) views. Alongside it, **"Reduzir resolução"** (factor 2/3/4/6×)
+downsamples the loaded DEM by mask-aware N×N block averaging — the same
+transform as `gdalwarp -r average`, so 6× on a 5 m IGC raster lands at
+~30 m, the regime where the v2 model is most accurate (journal Entries
+19/21). Same export→reimport path, and it works on projected DEMs too (no
+viewport involved). Both derivations drop the source URL from bundle
+metadata (they are local derivations, like a file-picker load).
 
 ## v57 — 2026-07-11
 
