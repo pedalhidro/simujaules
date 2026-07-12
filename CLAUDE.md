@@ -294,6 +294,14 @@ node, so the copies must be kept in sync (like `backend/main.rs` mirrors
 orientation SWEEP (sea/land set per span, never flood-filled — coastline gaps
 would otherwise leak the sea into all land).
 
+`docs/grid-*.mjs` are ANALYSIS harnesses, not tests (they need the
+`sampa_centro.tif` download + `census/node_modules`): they reproduce
+`docs/grid-connectivity-sensitivity-2026-07-11.md` — the research note
+behind the v57 move-directions/string-pulling/grid-correction options —
+and each self-validates its 8-move engine bit-identical against
+`energy-worker.js` before reporting, so they double as an independent
+cross-check when touching the engines.
+
 There is no CI; run them before committing engine changes. Style knob
 changes (colormap, ranges, gamma, blend) re-render cached arrays and must
 never trigger a recompute.

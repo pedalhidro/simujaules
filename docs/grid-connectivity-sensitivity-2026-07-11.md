@@ -1,7 +1,9 @@
 # Research note — move-grid connectivity bias in terrain-mode optimal energy
 
-**Date:** 2026-07-11 · **Status:** analysis complete, no engine change shipped
-**Harness:** `docs/grid-sens.mjs` (self-validating; reproduction §10)
+**Date:** 2026-07-11 · **Status:** analysis complete; findings SHIPPED as
+options in v57 (2026-07-12) — see §12 for the outcome, including the §11
+pre-registration scorecard
+**Harness:** `docs/grid-sens.mjs` (self-validating; reproduction §13)
 **Cross-ref:** intended as an entry for
 `../bicycling-energy-model/research/MODEL_COMPARISON_JOURNAL.md` (the journal
 lives in the sibling `bicycling-energy-model` repo, not here); relates to
@@ -436,7 +438,40 @@ real engine: (a) field-median energy drops 5–8 % on the 5 m DTM, 3–5 % at
 grows ≤ 3×; (d) passes corridors sharpen along contour lines (visual);
 (e) bit-parity JS↔Rust preserved including the profile sub-sampling order.
 
-## 12. Reproduction
+## 12. Outcome — shipped in v57 (2026-07-12)
+
+All three actionable findings shipped as user options (feature commit
+`1ba06ae`, release `19ec3b1`):
+
+- **Move directions** (`#n-dirs`, 4–128, default 8): `buildMoves()` in
+  `energy-worker.js` implements the Farey ladder with profile-integrated
+  long moves; density runs amortize per-worker long-edge tables (§9.1's
+  winner); passes are stamped over swept cells. nDirs ≠ 8 is browser-only —
+  the Rust backend keeps the classic 8-move engine, so the parity
+  invariant is untouched (the nDirs = 8 default is bit-identical, suite-
+  and backend-parity-verified).
+- **String pulling** (`#string-pull`): §9.3's route-display tool, applied
+  worker-side to the single path and top-N (round/maximize excluded).
+- **Grid correction** (`#kpi-corr`): §10's threshold-layer correction with
+  the explicit floor-guarantee warning.
+
+**§11 pre-registration scorecard** (validated against the REAL shipped
+worker on the 900×900 5 m crop, 3 sources, 2026-07-12):
+
+| prediction | measured | verdict |
+|---|---|---|
+| (a) field-median energy drop 5–8 % | 3.9 / 8.7 / 4.6 % per source | **borderline** — the band was drawn from the 4-source pooled median and is too narrow for real per-source terrain spread |
+| (b) budget-reach gain 9–11 % | 3.1 / 9.4 / 3.3 % per source | **miscalibrated** — reach gain is strongly source-dependent; one of three in band |
+| (c) wall time ≤ 3× | ×2.49 (single-source, on-demand) | **confirmed** |
+| (d) corridors sharpen along contours | not formally tested (visual) | open |
+| (e) JS↔Rust bit-parity preserved | N/A by design — nDirs ≠ 8 never reaches the backend; the 8-default parity is test-asserted | resolved differently than predicted |
+
+Honest reading: the engine behaves as the harness said it would (the
+harness IS bit-validated against it), but the pre-registered BANDS were
+overconfident about per-source variance — a lesson for future entries:
+pre-register distributions, not point ranges.
+
+## 13. Reproduction
 
 ```sh
 cd docs
