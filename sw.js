@@ -543,7 +543,15 @@
 //              instead of silently recomputing on the browser pool — the
 //              silent fallback masked every cloud problem and burned laptop
 //              CPU on runs meant for the big VM.
-const VERSION  = "v61";
+//   v61 → v62: Directions ≠ 8 now run on the native/cloud backend (Rust
+//              0.2.0): full bit-parity port of the Farey move sets +
+//              profile-integrated long edges + swept-cell passes stamping
+//              (incl. V8-exact hypot/round — libm drifts 1 ulp), with the
+//              long-edge cost tables shared once per request across all
+//              slices. App version-gates dispatch on /health ≥ 0.2.0 (an
+//              older binary silently ignores nDirs); estimate models the
+//              nDirs memory terms.
+const VERSION  = "v62";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

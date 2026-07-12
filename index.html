@@ -1729,6 +1729,17 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v62</strong> — 2026-07-12<br/>
+              <strong>Direções ≠ 8 no backend nativo/nuvem.</strong> O backend
+              Rust (0.2.0) agora serve o recurso completo de direções de
+              movimento (4–128): conjuntos de Farey, arestas longas integradas
+              ao perfil e carimbo de passagens nas células varridas, em
+              <em>paridade bit a bit</em> com o motor JS (21 casos novos de
+              paridade, todos com delta zero). O app confere a versão do
+              backend (≥ 0.2.0) antes de despachar — um binário antigo
+              ignoraria o campo silenciosamente — e diz o motivo quando o
+              backend é velho demais. A estimativa de tempo modela os termos
+              de memória das direções extras.</p>
               <p><strong>v61</strong> — 2026-07-12<br/>
               <strong>Fallback silencioso agora é opcional.</strong> Nova opção
               <em>Falhar em vez de cair pro navegador</em> no painel da nuvem:

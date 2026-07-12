@@ -251,7 +251,7 @@ const STRINGS = {
   "kpi.corr_note":       { pt: "Correção de grade ×{0} aplicada aos limiares — estimativa centrada: a garantia de piso conservador NÃO vale mais.", en: "Grid correction ×{0} applied to the thresholds — centered estimate: the conservative-floor guarantee NO longer holds." },
   // ---- Move directions + string pulling ----------------------------------
   "param.ndirs":         { pt: "Direções de movimento", en: "Move directions" },
-  "param.ndirs.title":   { pt: "8 = grade clássica (padrão; único valor servido pelo backend nativo — os demais calculam no navegador). Mais direções reduzem a sobre-estimativa de energia por serrilhado das rotas (≈⅔ a menos com 16), a custo de cálculo proporcional.", en: "8 = the classic grid (default; the only value the native backend serves — others compute in-browser). More directions shrink the route-jaggedness energy overestimate (≈⅔ less at 16) at proportional compute cost." },
+  "param.ndirs.title":   { pt: "8 = grade clássica (padrão). Mais direções reduzem a sobre-estimativa de energia por serrilhado das rotas (≈⅔ a menos com 16), a custo de cálculo proporcional. Servido também pelo backend nativo/nuvem a partir da versão 0.2.0 (backends antigos calculam no navegador).", en: "8 = the classic grid (default). More directions shrink the route-jaggedness energy overestimate (≈⅔ less at 16) at proportional compute cost. Also served by the native/cloud backend from version 0.2.0 (older backends compute in-browser)." },
   "param.string_pull":   { pt: "Suavizar rotas exibidas (string pulling)", en: "Smooth displayed routes (string pulling)" },
   "param.string_pull.title": { pt: "Encurta pós-cálculo a rota exibida (e as top-N) ligando vértices por segmentos retos custeados pelo mesmo modelo — a energia mostrada é a soma integrada da própria linha. Ida-e-volta e maximizar ficam de fora.", en: "Post-hoc shortens the displayed route (and top-N) by joining vertices with straight segments costed by the same model — the shown energy is the line's own integrated sum. Round-trip and maximize are excluded." },
   "stats.pulled":        { pt: "rota suavizada (string pulling) — energia = soma integrada da linha exibida", en: "route smoothed (string pulling) — energy = the displayed line's own integrated sum" },
@@ -367,6 +367,7 @@ const STRINGS = {
   "cloud.size_mismatch":   { pt: "VM pronta com {0} vCPUs — a seleção de {1} vCPUs só vale no próximo boot (desligue a VM pra aplicar já).", en: "VM ready with {0} vCPUs — the {1}-vCPU selection only applies on the next boot (stop the VM to apply it now)." },
   "cloud.stop_now":        { pt: "Desligar VM agora", en: "Stop VM now" },
   "cloud.no_fallback":     { pt: "Falhar em vez de cair pro navegador", en: "Fail instead of falling back to browser" },
+  "cloud.backend_old_ndirs": { pt: "backend {0} não serve direções ≠ 8 (precisa ≥ 0.2.0; pedido: {1})", en: "backend {0} doesn't serve directions ≠ 8 (needs ≥ 0.2.0; requested: {1})" },
   "cloud.failed_hard":     { pt: "cálculo na nuvem falhou (fallback desligado): {0}", en: "cloud compute failed (fallback disabled): {0}" },
   "cloud.stopping_manual": { pt: "Desligando a VM… o próximo cálculo religa no tamanho selecionado.", en: "Stopping the VM… the next compute boots the selected size." },
   "help.p.backend":      { pt: "Fonte de cálculo: três opções (2C). <em>Navegador</em> (padrão) roda em Web Workers na própria aba. <em>Localhost</em> fala com um servidor Rust opcional (backend/ no repositório, cargo run --release) na máquina do usuário. <em>Nuvem</em> aciona sob demanda uma VM no orquestrador — um serviço Cloud Run público, alcançável de qualquer origem —, protegida pela \"senha da nuvem\" compartilhada; \"Manter VM ligada entre cálculos\" evita religá-la a cada cálculo, mas ela desliga sozinha após ~15 min de ócio (watchdog dentro da própria VM), e cada cálculo com ela ligada é cobrado na conta do mantenedor. O seletor <em>\"Máquina da nuvem\"</em> escolhe o tamanho da VM (8/32/128 vCPUs, com preço de referência por hora — a VM roda em modo spot, tipicamente 60–90% mais barato que o valor mostrado); o tamanho é aplicado ao criar/religar a VM (uma VM já ligada mantém o tamanho até o próximo desligamento — o aviso de estado indica quando a seleção difere da VM ligada, e <em>\"Desligar VM agora\"</em> força a troca no próximo cálculo) e a estimativa de tempo modela o tamanho selecionado. Localhost e Nuvem aceleram tanto a densidade multi-referência (uma Dijkstra por referência, em todos os núcleos) quanto o campo de energia de fonte única (de/para/ida-e-volta); rotas (top-N), caminho até o destino e o modo grafo continuam sempre no navegador (nenhum backend produz rotas). Se o servidor ou a VM ficarem inacessíveis, o app volta para os workers do navegador, dizendo o motivo na linha de status — a menos que <em>\"Falhar em vez de cair pro navegador\"</em> esteja marcado, caso em que o cálculo aborta com o erro (útil pra não mascarar problemas da nuvem nem recomputar um DEM enorme no laptop sem querer).", en: "Compute source: three options (2C). <em>Browser</em> (default) runs in in-page Web Workers. <em>Localhost</em> talks to an optional Rust server (backend/ in the repo, cargo run --release) on the user's own machine. <em>Cloud</em> boots a VM on demand via the orchestrator — a public Cloud Run service, reachable from any origin — gated by the shared \"cloud password\"; \"Keep VM warm between runs\" avoids rebooting it on every run, but it still auto-stops after ~15 min idle (a watchdog inside the VM), and every run while it's up is billed to the maintainer's account. The <em>\"Cloud machine\"</em> selector picks the VM size (8/32/128 vCPUs, with a per-hour reference price — the VM runs as spot, typically 60–90% cheaper than shown); the size applies when the VM is created/restarted (a running VM keeps its size until the next stop — the status hint flags when the selection differs from the running VM, and <em>\"Stop VM now\"</em> forces the switch on the next compute) and the time estimate models the selected size. Localhost and Cloud both accelerate multi-reference density (one Dijkstra per reference, across all cores) AND the single-source energy field (from/to/round). Top-N routes, the destination path, and graph mode always stay in the browser (no backend produces routes). If the server or VM is unreachable, the app falls back to the in-browser workers, stating the reason in the status line — unless <em>\"Fail instead of falling back to browser\"</em> is ticked, in which case the run aborts with the error (useful to not mask cloud problems or accidentally recompute a huge DEM on the laptop)." },
@@ -6892,6 +6893,9 @@ runBtn.addEventListener("click", async () => {
         // the energy field, announcing it with "matrix":K in the meta. An
         // older binary ignores the flag — detected below via the meta.
         wantMatrix: !!sliceMatrix,
+        // Move set (backend ≥ 0.2.0; dispatch is version-gated — an older
+        // binary would silently ignore this field and compute 8 directions).
+        nDirs,
       };
       const json = new TextEncoder().encode(JSON.stringify(params));
       const head = new Uint8Array(4);
@@ -6986,6 +6990,8 @@ runBtn.addEventListener("click", async () => {
         hasNetwork: constrainNet,
         maximize: false,                   // excluded from the single-source path
         nPortals: portals ? portals.n : 0,
+        // Move set (backend ≥ 0.2.0; dispatch is version-gated).
+        nDirs,
       };
       const json = new TextEncoder().encode(JSON.stringify(params));
       const head = new Uint8Array(4);
@@ -7044,10 +7050,16 @@ runBtn.addEventListener("click", async () => {
   // Backend with browser-pool fallback, per scenario. Resolves with raw
   // {energy, passes} like computeDensityField.
   const densityField = async (opts) => {
-    // nDirs ≠ 8 is browser-only (the Rust backend serves the classic 8-move
-    // engine exactly) — same pattern as top-N/maximize staying in-browser.
-    if (runUseBackend && nDirs === 8) {
+    // nDirs ≠ 8 needs backend ≥ 0.2.0 (the move-set port). Cloud enters
+    // optimistically (version only known post-boot) and the in-try check
+    // throws a reason-ful error an OLD binary — the shared catch below turns
+    // it into the no-fallback abort or the browser fallback with motivo.
+    if (runUseBackend && (nDirs === 8 || cloudMode || backendServesNDirs())) {
       try {
+        if (nDirs !== 8 && !backendServesNDirs()) {
+          throw new Error(t("cloud.backend_old_ndirs",
+                            (state.backendCores && state.backendCores.version) || "?", nDirs));
+        }
         return await startDensityBackend(computeDataUrl(), opts);
       } catch (err) {
         if (gen !== state.computeGen) return new Promise(() => {});
@@ -7207,7 +7219,14 @@ runBtn.addEventListener("click", async () => {
   // path, "maximize", graph mode, AND a non-density compare (which routes to the
   // browser-only startComparePair) always run in-browser. Used to avoid booting a
   // cloud VM for a run that would compute in-browser anyway.
-  const willUseBackend = backendOn && !graphModeActive() && nDirs === 8 &&
+  // nDirs ≠ 8: served by backend ≥ 0.2.0 (the move-set port). Cloud is
+  // OPTIMISTIC here — the VM's version is only known after boot, so we boot
+  // and re-check at dispatch (backendServesNDirs), falling back with a clear
+  // reason if the binary is older. Localhost knows the version from the idle
+  // /health probe, so it gates accurately up front.
+  const nDirsOk = nDirs === 8 ||
+    (cloudMode ? true : backendServesNDirs());
+  const willUseBackend = backendOn && !graphModeActive() && nDirsOk &&
     (wantDensity || (!compareOn && !wantTopN && !maximize && !state.dst));
   // Run-scoped engine override. Normally tracks backendOn, but a failed cloud
   // boot flips it to false so the density path (which reads it inside
@@ -7457,14 +7476,20 @@ runBtn.addEventListener("click", async () => {
       })();
     } else if (compareOn) {
       startComparePair();
-    } else if (useBackend && !wantTopN && !maximize && !state.dst && nDirs === 8) {
+    } else if (useBackend && !wantTopN && !maximize && !state.dst &&
+               (nDirs === 8 || cloudMode || backendServesNDirs())) {
       // Single-source energy field on the native backend (energy + optional
       // passes). Top-N / maximize / a destination path need the browser (the
       // backend produces no routes); any backend failure falls back too.
+      // nDirs ≠ 8: same optimistic-cloud + version-check pattern as density.
       (async () => {
         const t0 = performance.now();
         let r;
         try {
+          if (nDirs !== 8 && !backendServesNDirs()) {
+            throw new Error(t("cloud.backend_old_ndirs",
+                              (state.backendCores && state.backendCores.version) || "?", nDirs));
+          }
           r = await startSingleBackend(computeDataUrl());
         } catch (err) {
           if (gen !== state.computeGen) return;
@@ -9129,11 +9154,23 @@ async function refreshBackendCores() {
         state.backendCores = {
           url, cores: h.cores,
           memBudgetBytes: Number.isFinite(h.mem_budget_bytes) ? h.mem_budget_bytes : null,
+          version: typeof h.version === "string" ? h.version : null,
         };
       }
     }
   } catch { /* unreachable — estimate falls back to the parallelism cap */ }
   estimateRunTime();
+}
+
+// Does the last-probed backend serve nDirs ≠ 8? The move-set port shipped in
+// backend 0.2.0 — an OLDER binary silently IGNORES the params field (serde
+// skips unknown keys) and would return an 8-direction field the app would
+// mislabel, so the version gate is load-bearing, not cosmetic.
+function backendServesNDirs() {
+  const v = state.backendCores && state.backendCores.version;
+  if (!v) return false;
+  const [maj, min] = v.split(".").map((x) => parseInt(x, 10));
+  return maj > 0 || min >= 2;
 }
 
 // Reconcile the compute-source sub-panels (Localhost URL / Cloud orchestrator)
@@ -9260,6 +9297,7 @@ async function ensureCloudVm(orchUrl, isStale) {
         state.backendCores = {
           url: dataUrl, cores: h.cores,
           memBudgetBytes: Number.isFinite(h.mem_budget_bytes) ? h.mem_budget_bytes : null,
+          version: typeof h.version === "string" ? h.version : null,
         };
       }
       // Keep-warm + a size change in the dropdown: the running VM keeps its
@@ -9615,9 +9653,17 @@ function predictComputeMs(cal, opts, applyCorr) {
       // the server's MEMORY-bounded slice count (the dominant factor on huge
       // DEMs — each slice holds full-grid scratch, so 1-2 fit in RAM, not
       // cores-many) and slowed by shared-bandwidth contention between slices.
-      const perSlice = (mode === "round" ? BACKEND_BYTES_PER_CELL_ROUND : BACKEND_BYTES_PER_CELL) * N;
+      // nDirs > 8 (backend ≥ 0.2.0): parent_long adds 1 B/cell per scratch
+      // (37→38, 55→57 round), and the request-shared long-edge cost tables
+      // ((nDirs−8) tables × 8 B/cell × revs) come off the budget ONCE before
+      // the per-slice division — mirrors backend/src/main.rs's budget math.
+      const nd = opts.nDirs || 8;
+      const nLong = Math.max(0, nd - 8);
+      const revs = mode === "round" ? 2 : 1;
+      const perSlice = ((mode === "round" ? BACKEND_BYTES_PER_CELL_ROUND : BACKEND_BYTES_PER_CELL)
+                        + (nLong ? revs : 0)) * N;
       const spec = backendSpecForEstimate();
-      const memBudget = spec.memBudgetBytes || 8e9;
+      const memBudget = Math.max(1, (spec.memBudgetBytes || 8e9) - revs * nLong * 8 * N);
       const memCap = Math.max(1, Math.floor(memBudget / perSlice));
       const cores = spec.cores || BACKEND_PAR_CAP;
       const slices = Math.max(1, Math.min(refs || 1, cores, memCap));
@@ -9680,7 +9726,12 @@ function currentRunOpts(cal, N) {
     // nDirs ≠ 8 always computes in-browser (the backend serves the classic
     // 8-move engine only) — the predictor must mirror the runner's gate.
     nDirs: (() => { const v = parseInt(document.getElementById("n-dirs")?.value, 10); return [4, 8, 16, 32, 64, 128].includes(v) ? v : 8; })(),
-    backend: computeMode() !== "browser" && ((parseInt(document.getElementById("n-dirs")?.value, 10) || 8) === 8),
+    // nDirs ≠ 8 runs on the backend when it's ≥ 0.2.0; cloud assumes the
+    // deployed binary is current (we control it), localhost asks the probe.
+    backend: computeMode() !== "browser" && (() => {
+      const nd = parseInt(document.getElementById("n-dirs")?.value, 10) || 8;
+      return nd === 8 || computeMode() === "cloud" || backendServesNDirs();
+    })(),
     graph,
     // Graph-mode compare also runs a full-DEM unconstrained raster scenario.
     graphCompare: graph && !!document.getElementById("vec-compare")?.checked,

@@ -28,6 +28,10 @@
 //     request body:  [u32 json_len][json Params][f32 height × N][u8 mask × N]
 //                    [u8 network_mask × N  — only when has_network]
 //                    [bridge portals — only when n_portals > 0]
+//     Params may carry `nDirs` (4|8|16|32|64|128, default 8): the v57
+//     movement-directions move set, mirrored from the JS worker's
+//     buildMoves/longEdgeCost. nDirs=8 is bit-identical to the pre-0.2.0
+//     engine; see Params.n_dirs for the version-gate note.
 //     response body: [u32 json_len][json {"elapsed_ms":…,"refs":…[,"matrix":K]}]
 //                    [f64 passes × N][f32 energy × N]
 //                    [f32 matrix × K² — only when Params.want_matrix (and not
@@ -131,6 +135,22 @@ struct Params {
     /// Ignored under maximize — mirrors the JS worker.
     #[serde(default)]
     want_matrix: bool,
+    /// v57 movement directions: 4 | 8 | 16 | 32 | 64 | 128 (Farey heading
+    /// ladders, long moves profile-integrated — see build_moves /
+    /// energy-worker.js buildMoves). Default 8 = the classic engine.
+    /// WIRE-COMPAT NOTE: this Params struct does NOT set
+    /// #[serde(deny_unknown_fields)], so serde silently IGNORES fields it
+    /// doesn't know — a pre-0.2.0 binary ACCEPTS an nDirs request and
+    /// computes the 8-dir field. The app therefore gates nDirs≠8 backend
+    /// dispatch on /health "version" >= 0.2.0. parse_grid_request rejects
+    /// values outside the whitelist with a 400 and forces 8 under maximize
+    /// (mirroring the JS worker's nDirsEff).
+    #[serde(default = "default_n_dirs")]
+    n_dirs: u32,
+}
+
+fn default_n_dirs() -> u32 {
+    8
 }
 
 struct Grid<'a> {
@@ -223,17 +243,24 @@ struct Scratch {
     // passes (counts exceed 2^24 on big DEMs, where f32 would round), so
     // compute_single accumulates in f64 via subtree_passes_f64 instead.
     passes: Vec<f32>,
+    // Which parent links used a LONG grid move (passes stamping over the
+    // swept cells; portals and unit moves never stamp). EMPTY (0 bytes, not
+    // n) when the move set has no long moves — nDirs=8 keeps the documented
+    // 17 B/cell Scratch footprint, mirroring the JS worker's conditional
+    // parentLong allocation.
+    parent_long: Vec<u8>,
     heap: RadixHeap,
 }
 
 impl Scratch {
-    fn new(n: usize) -> Self {
+    fn new(n: usize, has_long: bool) -> Self {
         Scratch {
             e: vec![f32::INFINITY; n],
             parents: vec![-1; n],
             settled: vec![0; n],
             order: Vec::with_capacity(n),
             passes: vec![0.0; n],
+            parent_long: if has_long { vec![0; n] } else { Vec::new() },
             heap: RadixHeap::new(),
         }
     }
@@ -243,6 +270,7 @@ impl Scratch {
         self.settled.fill(0);
         self.order.clear();
         self.passes.fill(0.0);
+        self.parent_long.fill(0);
         self.heap.clear();
     }
 }
@@ -298,6 +326,265 @@ fn portal_cost(len_m: f64, dh: f64, p: &Params) -> f64 {
     v2_edge(len_m, dh, &p.cost)
 }
 
+/// JS `Math.hypot(x, y)` mirror — V8's BUILTIN(MathHypot): abs, normalise by
+/// the max, Kahan-compensated sum of squares, then sqrt(sum)·max. NOT the
+/// same as libm's `f64::hypot`, which differs by 1 ulp on many of the
+/// long-move distances (measured: knight move at dx=dy=30 already differs) —
+/// and a 1-ulp edge-cost difference flips near-tie relaxations, breaking
+/// passes parity with the JS worker. test-backend.mjs runs the reference on
+/// Node (V8), so THIS is the bit-parity target. Finite inputs only (move
+/// distances) — the NaN/Infinity/zero special cases are irrelevant here
+/// except max==0, kept for completeness.
+#[inline]
+fn js_hypot(x: f64, y: f64) -> f64 {
+    let (ax, ay) = (x.abs(), y.abs());
+    let mut max = 0.0f64;
+    if max < ax {
+        max = ax;
+    }
+    if max < ay {
+        max = ay;
+    }
+    if max == 0.0 {
+        return 0.0;
+    }
+    let mut sum = 0.0f64;
+    let mut compensation = 0.0f64;
+    for v in [ax, ay] {
+        let n = v / max;
+        let summand = n * n - compensation;
+        let preliminary = sum + summand;
+        compensation = (preliminary - sum) - summand;
+        sum = preliminary;
+    }
+    sum.sqrt() * max
+}
+
+/// JS `Math.round` mirror: exact halves round toward +∞ (Rust's f64::round
+/// rounds them away from zero — differs for negative halves, which the sweep
+/// templates of negative-dr/dc long moves do hit). x − floor(x) is exact for
+/// the small rationals used here, so this is the spec semantics.
+#[inline]
+fn js_round(x: f64) -> f64 {
+    let f = x.floor();
+    if x - f >= 0.5 {
+        f + 1.0
+    } else {
+        f
+    }
+}
+
+/// Move set (grid neighborhood, 4–128 directions) — port of
+/// energy-worker.js's buildMoves(): Farey/Stern–Brocot heading ladders, THE
+/// FIRST 8 MOVES OF EVERY SET ≥ 8 ARE THE CLASSIC 8 IN THE CLASSIC ORDER
+/// (that property is what keeps nDirs=8 bit-identical to the pre-0.2.0
+/// engine — same moves, same relaxation order, same exact dist expressions).
+/// Long moves (max(|dr|,|dc|) > 1) are PROFILE-INTEGRATED (long_edge_cost);
+/// `sweep_by_delta` maps a long move's flat-index delta to the intermediate
+/// cells its segment sweeps (for the passes stamping).
+struct Moves {
+    k: usize,
+    drs: Vec<i64>,
+    dcs: Vec<i64>,
+    d_idx: Vec<i64>,
+    dists: Vec<f64>,
+    sub_n: Vec<i32>,
+    is_long: Vec<u8>,
+    max_r: i64,
+    sweep_by_delta: HashMap<i64, Vec<i64>>,
+    has_long: bool,
+}
+
+fn build_moves(n_dirs: u32, w: usize, dx: f64, dy: f64) -> Moves {
+    let mut vecs: Vec<(i64, i64)>;
+    if n_dirs == 4 {
+        vecs = vec![(-1, 0), (0, -1), (0, 1), (1, 0)];
+    } else {
+        // classic 8 first, classic order (the bit-parity anchor for nDirs = 8)
+        vecs = vec![(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)];
+        let level = match n_dirs {
+            16 => 1,
+            32 => 2,
+            64 => 3,
+            128 => 4,
+            _ => 0,
+        };
+        if level > 0 {
+            // Farey mediant ladder over the first octant, then the 4 sign ×
+            // swap images of each vector, deduped in insertion order — the
+            // JS Set-of-"r,c"-strings dedupe, same order.
+            let mut oct: Vec<(i64, i64)> = vec![(1, 0), (1, 1)];
+            for _ in 0..level {
+                let mut next = Vec::with_capacity(oct.len() * 2 - 1);
+                for i in 0..oct.len() - 1 {
+                    next.push(oct[i]);
+                    next.push((oct[i].0 + oct[i + 1].0, oct[i].1 + oct[i + 1].1));
+                }
+                next.push(*oct.last().unwrap());
+                oct = next;
+            }
+            let mut seen: std::collections::HashSet<(i64, i64)> = vecs.iter().copied().collect();
+            for &(a, b) in &oct {
+                for (dr, dc) in [(a, b), (b, a)] {
+                    for sr in [1i64, -1] {
+                        for sc in [1i64, -1] {
+                            let v = (dr * sr, dc * sc);
+                            if seen.insert(v) {
+                                vecs.push(v);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let k = vecs.len();
+    let diag = js_hypot(dx, dy);
+    let mut drs = vec![0i64; k];
+    let mut dcs = vec![0i64; k];
+    let mut d_idx = vec![0i64; k];
+    let mut dists = vec![0f64; k];
+    let mut sub_n = vec![0i32; k];
+    let mut is_long = vec![0u8; k];
+    let mut sweep_by_delta: HashMap<i64, Vec<i64>> = HashMap::new();
+    let mut max_r = 1i64;
+    for (kk, &(dr, dc)) in vecs.iter().enumerate() {
+        drs[kk] = dr;
+        dcs[kk] = dc;
+        d_idx[kk] = dr * w as i64 + dc;
+        // Unit moves reuse the EXACT legacy expressions (dx / dy / hypot) —
+        // the nDirs=8 default must stay bit-identical to the 0.1.x engine.
+        dists[kk] = if dr == 0 {
+            dx * dc.abs() as f64
+        } else if dc == 0 {
+            dy * dr.abs() as f64
+        } else if dr.abs() == 1 && dc.abs() == 1 {
+            diag
+        } else {
+            js_hypot(dr as f64 * dy, dc as f64 * dx)
+        };
+        let m = dr.abs().max(dc.abs());
+        if m > 1 {
+            is_long[kk] = 1;
+            sub_n[kk] = (2 * m) as i32;
+            max_r = max_r.max(m);
+            // supercover-ish template of intermediate cells (relative to the
+            // edge START) — passes stamping over the cells a long move
+            // crosses. First-occurrence dedupe = the JS Set(cells) order.
+            let mut cells: Vec<i64> = Vec::new();
+            for s in 1..sub_n[kk] {
+                let rr = js_round(dr as f64 * s as f64 / sub_n[kk] as f64) as i64;
+                let cc = js_round(dc as f64 * s as f64 / sub_n[kk] as f64) as i64;
+                if (rr != 0 || cc != 0) && !(rr == dr && cc == dc) {
+                    let d = rr * w as i64 + cc;
+                    if !cells.contains(&d) {
+                        cells.push(d);
+                    }
+                }
+            }
+            sweep_by_delta.insert(d_idx[kk], cells);
+        }
+    }
+    Moves { k, drs, dcs, d_idx, dists, sub_n, is_long, max_r, sweep_by_delta, has_long: max_r > 1 }
+}
+
+/// Profile-integrated cost of one long move (r,c) → (r+dr, c+dc) — port of
+/// energy-worker.js's longEdgeCost, same op order: bilinear height samples
+/// every ~1 cell (heights f32-widened to f64 exactly like the JS
+/// Float32Array reads), v2_edge per sub-segment, f64 accumulation. `flip`
+/// negates each sub-step's dh (reverse travel). Any sample whose bilinear
+/// support touches an unpassable cell blocks the move (returns Infinity) —
+/// the long-move analog of the unit mask check. A long move costed from its
+/// endpoints' Δh alone would flatten the relief it crosses — deliberately
+/// impossible here, mirror the JS.
+fn long_edge_cost(
+    height: &[f32],
+    mask: &[u8],
+    h: usize,
+    w: usize,
+    r: usize,
+    c: usize,
+    dr: i64,
+    dc: i64,
+    dist_m: f64,
+    n: i32,
+    flip: bool,
+    cost: &Cost,
+) -> f64 {
+    let sub = dist_m / n as f64;
+    let mut e = 0.0f64;
+    let mut h_prev = height[r * w + c] as f64;
+    for s in 1..=n {
+        let hs: f64;
+        if s == n {
+            let idx = (r as i64 + dr) as usize * w + (c as i64 + dc) as usize;
+            hs = height[idx] as f64;
+        } else {
+            let fr = r as f64 + dr as f64 * s as f64 / n as f64;
+            let fc = c as f64 + dc as f64 * s as f64 / n as f64;
+            let r1 = fr.floor().max(0.0).min((h - 2) as f64) as usize;
+            let c1 = fc.floor().max(0.0).min((w - 2) as f64) as usize;
+            let b0 = r1 * w + c1;
+            if mask[b0] == 0 || mask[b0 + 1] == 0 || mask[b0 + w] == 0 || mask[b0 + w + 1] == 0 {
+                return f64::INFINITY;
+            }
+            let tr = fr - r1 as f64;
+            let tc = fc - c1 as f64;
+            hs = height[b0] as f64 * (1.0 - tr) * (1.0 - tc)
+                + height[b0 + 1] as f64 * (1.0 - tr) * tc
+                + height[b0 + w] as f64 * tr * (1.0 - tc)
+                + height[b0 + w + 1] as f64 * tr * tc;
+        }
+        e += v2_edge(sub, if flip { h_prev - hs } else { hs - h_prev }, cost);
+        h_prev = hs;
+    }
+    e
+}
+
+/// Per-direction long-edge cost tables for ONE travel direction (rev):
+/// indexed by move k (Some only for long moves), each a full-grid f64 array
+/// T[u] = long_edge_cost from cell u — Infinity where an endpoint is masked
+/// or the profile is blocked. Same construction as the JS densityField's
+/// longTables, so values are BIT-IDENTICAL to on-demand integration
+/// (test-worker-pool.mjs asserts that equivalence on the JS side). Unlike
+/// the JS workers (one table set per worker), Rust threads share memory:
+/// compute_density builds this ONCE per request and shares it read-only
+/// across all rayon slices — per-slice copies would multiply the 8·N bytes
+/// per long direction by the slice count. Rust uses tables whenever the set
+/// has long moves (the JS ≥3-refs amortisation heuristic is a per-worker-
+/// memory tradeoff that doesn't apply to a shared table); /single keeps
+/// on-demand integration like the JS dijkstra() — one or two searches never
+/// pay back a full-grid table, especially under a budget.
+type LongTable = Vec<Option<Vec<f64>>>;
+
+fn build_long_table(height: &[f32], mask: &[u8], h: usize, w: usize, mv: &Moves, rev: bool, cost: &Cost) -> LongTable {
+    (0..mv.k)
+        .into_par_iter()
+        .map(|k| {
+            if mv.is_long[k] == 0 {
+                return None;
+            }
+            let mut t = vec![f64::INFINITY; h * w];
+            let (dr, dc) = (mv.drs[k], mv.dcs[k]);
+            let r0 = (-dr).max(0) as usize;
+            let r1 = (h as i64 - dr.max(0)).max(0) as usize;
+            let c0 = (-dc).max(0) as usize;
+            let c1 = (w as i64 - dc.max(0)).max(0) as usize;
+            for r in r0..r1 {
+                let base = r * w;
+                for c in c0..c1 {
+                    let u = base + c;
+                    if mask[u] == 0 || mask[(u as i64 + mv.d_idx[k]) as usize] == 0 {
+                        continue;
+                    }
+                    t[u] = long_edge_cost(height, mask, h, w, r, c, dr, dc, mv.dists[k], mv.sub_n[k], rev, cost);
+                }
+            }
+            Some(t)
+        })
+        .collect()
+}
+
 // phu/phv: per-portal deck-END elevations (from OSM `ele`). NaN means "no mapped
 // ele" → fall back to the DEM height at the abutment cell. Must match the JS
 // buildPortalAdj fallback exactly for parity.
@@ -331,15 +618,18 @@ fn dijkstra_tree(
     reverse: bool,
     max_edge_cost: f64,
     portals: &PortalAdj,
+    mv: &Moves,
+    // Long-edge cost table for THIS travel direction (rev), shared read-only
+    // across rayon slices — None = integrate on demand (the /single path,
+    // mirroring the JS dijkstra()). Values are bit-identical either way.
+    tbl: Option<&LongTable>,
     s: &mut Scratch,
 ) {
     s.reset();
     let (h, w) = (g.h, g.w);
-    let diag = g.dx.hypot(g.dy);
-    let drs: [i64; 8] = [-1, -1, -1, 0, 0, 1, 1, 1];
-    let dcs: [i64; 8] = [-1, 0, 1, -1, 1, -1, 0, 1];
-    let dists: [f64; 8] = [diag, g.dy, diag, g.dx, g.dx, diag, g.dy, diag];
-    let d_idx: [i64; 8] = core::array::from_fn(|k| drs[k] * w as i64 + dcs[k]);
+    let mk = mv.k;
+    let max_r = mv.max_r;
+    let track_long = !s.parent_long.is_empty();
 
     let seed_idx = seed_r * w + seed_c;
     s.e[seed_idx] = 0.0;
@@ -356,14 +646,19 @@ fn dijkstra_tree(
         let r = idx / w;
         let c = idx - r * w;
         let h_here = g.height[idx] as f64;
-        let inner = r > 0 && r < h - 1 && c > 0 && c < w - 1;
+        // Interior test uses the move set's max offset radius (1 for the
+        // classic 8) so `inner` guarantees EVERY move lands in-bounds.
+        let inner = r as i64 >= max_r
+            && (r as i64) < h as i64 - max_r
+            && c as i64 >= max_r
+            && (c as i64) < w as i64 - max_r;
 
-        for k in 0..8 {
+        for k in 0..mk {
             let n_idx = if inner {
-                (idx as i64 + d_idx[k]) as usize
+                (idx as i64 + mv.d_idx[k]) as usize
             } else {
-                let nr = r as i64 + drs[k];
-                let nc = c as i64 + dcs[k];
+                let nr = r as i64 + mv.drs[k];
+                let nc = c as i64 + mv.dcs[k];
                 if nr < 0 || nr >= h as i64 || nc < 0 || nc >= w as i64 {
                     continue;
                 }
@@ -373,11 +668,26 @@ fn dijkstra_tree(
                 continue;
             }
 
-            let h_nbr = g.height[n_idx] as f64;
-            let dh = if reverse { h_here - h_nbr } else { h_nbr - h_here };
-            let dist = dists[k];
-
-            let mut edge = v2_edge(dist, dh, &p.cost);
+            let mut edge;
+            if mv.is_long[k] != 0 {
+                // Long move: profile-integrated (maximize never has long
+                // moves — parse_grid_request forces nDirs=8 under maximize,
+                // like the JS worker's nDirsEff).
+                edge = match tbl {
+                    Some(t) => t[k].as_ref().map_or(f64::INFINITY, |arr| arr[idx]),
+                    None => long_edge_cost(
+                        g.height, g.mask, h, w, r, c, mv.drs[k], mv.dcs[k], mv.dists[k], mv.sub_n[k], reverse,
+                        &p.cost,
+                    ),
+                };
+                if edge == f64::INFINITY {
+                    continue;
+                }
+            } else {
+                let h_nbr = g.height[n_idx] as f64;
+                let dh = if reverse { h_here - h_nbr } else { h_nbr - h_here };
+                edge = v2_edge(mv.dists[k], dh, &p.cost);
+            }
             if p.maximize {
                 edge = (max_edge_cost - edge).max(0.0);
             }
@@ -392,6 +702,9 @@ fn dijkstra_tree(
             if tentative < s.e[n_idx] as f64 {
                 s.e[n_idx] = tentative as f32;
                 s.parents[n_idx] = idx as i32;
+                if track_long {
+                    s.parent_long[n_idx] = mv.is_long[k];
+                }
                 s.heap.push(tentative, n_idx as u32);
             }
         }
@@ -416,6 +729,10 @@ fn dijkstra_tree(
                 if tentative < s.e[n_idx] as f64 {
                     s.e[n_idx] = tentative as f32;
                     s.parents[n_idx] = idx as i32;
+                    if track_long {
+                        // portal, not a long grid move — must never stamp
+                        s.parent_long[n_idx] = 0;
+                    }
                     s.heap.push(tentative, n_idx as u32);
                 }
             }
@@ -480,6 +797,90 @@ fn subtree_passes_f64(s: &Scratch, include: Option<&[u8]>) -> Vec<f64> {
     passes
 }
 
+/// Port of energy-worker.js's stampLongPasses: long moves carry flow OVER
+/// their intermediate cells without stepping through them — stamp each used
+/// long edge's flow (the child's subtree count) onto the cells its segment
+/// sweeps. Exact JS mirror, including the load-bearing details:
+///   - flows are read BEFORE any stamp lands (two-phase: collect, then
+///     apply in collection order) — a swept cell's own subtree count must
+///     not contaminate other edges' flows;
+///   - only parent links marked long stamp (portals and unit moves never —
+///     parent_long is 0 for both);
+///   - stamps land only on cells SETTLED by this search (an unsettled
+///     intermediate under eMax is outside `order`, so density's targeted
+///     accumulate/reset would leak it into the next ref).
+/// f32 variant (density): the apply step widens to f64 and rounds the sum
+/// back to f32 — JS Float32Array `+=` semantics, bit-exact.
+fn stamp_long_passes_f32(s: &mut Scratch, sweep: &HashMap<i64, Vec<i64>>) {
+    if s.parent_long.is_empty() || sweep.is_empty() {
+        return;
+    }
+    let mut si: Vec<u32> = Vec::new();
+    let mut sv: Vec<f32> = Vec::new();
+    for &idx32 in &s.order {
+        let idx = idx32 as usize;
+        if s.parent_long[idx] == 0 {
+            continue;
+        }
+        let par = s.parents[idx];
+        if par < 0 {
+            continue;
+        }
+        let Some(sw) = sweep.get(&(idx as i64 - par as i64)) else { continue };
+        let flow = s.passes[idx];
+        if !(flow > 0.0) {
+            continue;
+        }
+        for &d in sw {
+            let cell = (par as i64 + d) as usize;
+            if s.settled[cell] == 0 {
+                continue;
+            }
+            si.push(cell as u32);
+            sv.push(flow);
+        }
+    }
+    for i in 0..si.len() {
+        let cell = si[i] as usize;
+        s.passes[cell] = (s.passes[cell] as f64 + sv[i] as f64) as f32;
+    }
+}
+
+/// f64 twin for the /single passes (JS Float64Array — plain f64 adds).
+fn stamp_long_passes_f64(passes: &mut [f64], s: &Scratch, sweep: &HashMap<i64, Vec<i64>>) {
+    if s.parent_long.is_empty() || sweep.is_empty() {
+        return;
+    }
+    let mut si: Vec<u32> = Vec::new();
+    let mut sv: Vec<f64> = Vec::new();
+    for &idx32 in &s.order {
+        let idx = idx32 as usize;
+        if s.parent_long[idx] == 0 {
+            continue;
+        }
+        let par = s.parents[idx];
+        if par < 0 {
+            continue;
+        }
+        let Some(sw) = sweep.get(&(idx as i64 - par as i64)) else { continue };
+        let flow = passes[idx];
+        if !(flow > 0.0) {
+            continue;
+        }
+        for &d in sw {
+            let cell = (par as i64 + d) as usize;
+            if s.settled[cell] == 0 {
+                continue;
+            }
+            si.push(cell as u32);
+            sv.push(flow);
+        }
+    }
+    for i in 0..si.len() {
+        passes[si[i] as usize] += sv[i];
+    }
+}
+
 struct Acc {
     density: Vec<f64>,
     energy_sum: Vec<f64>,
@@ -506,14 +907,16 @@ impl Acc {
     /// include mask — both legs finite, and within total_cap when set
     /// (eMaxMode = "total"; like the JS worker, the f64 sum is compared
     /// BEFORE the f32 rounding) — adding energy for included cells. Then
-    /// computes FILTERED passes for both legs, so only displayed
-    /// (round-trip-feasible) destinations count as trajectory endpoints.
+    /// computes FILTERED passes for both legs (each leg's long-move stamping
+    /// runs right after its subtree walk, like the JS densityField), so only
+    /// displayed (round-trip-feasible) destinations count as endpoints.
     fn accumulate_round(
         &mut self,
         fwd: &mut Scratch,
         bwd: &mut Scratch,
         include: &mut [u8],
         total_cap: f64,
+        sweep: &HashMap<i64, Vec<i64>>,
     ) {
         let n = self.density.len();
         let nf = n as f64;
@@ -533,7 +936,9 @@ impl Acc {
             include[i] = ok as u8;
         }
         subtree_passes(fwd, Some(include));
+        stamp_long_passes_f32(fwd, sweep);
         subtree_passes(bwd, Some(include));
+        stamp_long_passes_f32(bwd, sweep);
         for i in 0..n {
             self.density[i] += (fwd.passes[i] as f64 + bwd.passes[i] as f64) / nf;
         }
@@ -604,6 +1009,7 @@ fn compute_density(
     dem_mask: &[u8],
     p: &Params,
     portals: &PortalAdj,
+    mv: &Moves,
 ) -> (Vec<f64>, Vec<f32>, Option<Vec<f32>>) {
     let n = g.h * g.w;
 
@@ -675,22 +1081,46 @@ fn compute_density(
     let reverse = p.density_mode == "to";
     let total_cap = if round && p.e_max_mode == "total" && p.e_max > 0.0 { p.e_max } else { 0.0 };
 
+    // Long-edge cost tables (nDirs > 8 only): one full-grid f64 array per
+    // long move per travel direction, computed ONCE per request and shared
+    // READ-ONLY across all rayon slices (unlike the JS workers, which each
+    // build their own — Rust threads share memory, so per-slice tables
+    // would multiply the footprint by the slice count). Non-round builds
+    // only the direction it searches; round builds both.
+    let tbl_fwd: Option<LongTable> = if mv.has_long && (round || !reverse) {
+        Some(build_long_table(g.height, g.mask, g.h, g.w, mv, false, &p.cost))
+    } else {
+        None
+    };
+    let tbl_bwd: Option<LongTable> = if mv.has_long && (round || reverse) {
+        Some(build_long_table(g.height, g.mask, g.h, g.w, mv, true, &p.cost))
+    } else {
+        None
+    };
+
     // Cap concurrent slices by a memory budget so high ref counts on huge
     // DEMs don't OOM-crash. Each concurrent slice holds full-N buffers:
-    //   Scratch ≈ 17·n (e4 + parents4 + settled1 + order4 + passes4),
+    //   Scratch ≈ 17·n (e4 + parents4 + settled1 + order4 + passes4)
+    //             + 1·n more (parent_long) when the move set has long moves,
     //   Acc     ≈ 20·n (density8 + energy_sum8 + energy_count4).
     // Round runs two Scratch (s_f + s_b) plus an `include` Uint8 (n bytes).
+    // The shared long-edge tables cost (revs × n_long_moves × 8 × n) bytes
+    // ONCE per request — subtracted from the budget BEFORE dividing by
+    // per_slice, since they're live alongside every slice.
     // Fewer slices just means more refs processed serially per slice (the
     // Scratch is already reused across a slice's refs), so the OUTPUT is
     // unchanged — only wall time grows. SIMU_MAX_MEM_GB / --max-mem-gb /
     // RAYON_NUM_THREADS are the manual levers (see README).
     let n64 = n as u64;
-    let scratch_bytes = 17 * n64;
+    let scratch_bytes = (17 + mv.has_long as u64) * n64;
     let acc_bytes = 20 * n64;
     // .max(1) guards the divisor: handle_density already rejects n==0, but a
     // zero per_slice here would panic the request loop (defensive belt).
     let per_slice = (if round { 2 * scratch_bytes + acc_bytes + n64 } else { scratch_bytes + acc_bytes }).max(1);
-    let mem_cap = (density_mem_budget_bytes() / per_slice).max(1) as usize;
+    let n_long = mv.is_long.iter().filter(|&&b| b != 0).count() as u64;
+    let n_revs = tbl_fwd.is_some() as u64 + tbl_bwd.is_some() as u64;
+    let table_bytes = n_revs * n_long * 8 * n64;
+    let mem_cap = (density_mem_budget_bytes().saturating_sub(table_bytes) / per_slice).max(1) as usize;
     let n_slices = refs.len()
         .min(rayon::current_num_threads())
         .min(mem_cap)
@@ -700,9 +1130,9 @@ fn compute_density(
     let emax_str = if p.e_max > 0.0 { format!("{:.0}", p.e_max) } else { "∞".to_string() };
     let net_type = if p.has_network { "vector" } else { "raster" };
     eprintln!(
-        "[density] {} refs, Emax={}, mode={}, type={}, {}×{} grid, per-slice ≈ {:.1} GB, budget ≈ {:.1} GB → {} slice(s)",
-        refs.len(), emax_str, p.density_mode, net_type, g.w, g.h,
-        per_slice as f64 / 1e9, density_mem_budget_bytes() as f64 / 1e9, n_slices,
+        "[density] {} refs, Emax={}, mode={}, type={}, dirs={}, {}×{} grid, per-slice ≈ {:.1} GB, tables ≈ {:.1} GB, budget ≈ {:.1} GB → {} slice(s)",
+        refs.len(), emax_str, p.density_mode, net_type, mv.k, g.w, g.h,
+        per_slice as f64 / 1e9, table_bytes as f64 / 1e9, density_mem_budget_bytes() as f64 / 1e9, n_slices,
     );
 
     let results: Vec<(Acc, Vec<(usize, Vec<f32>)>)> = (0..n_slices)
@@ -717,13 +1147,13 @@ fn compute_density(
             if round {
                 // Forward/backward are independent — join them so round runs
                 // with fewer refs than cores still spread across the machine.
-                let mut s_f = Scratch::new(n);
-                let mut s_b = Scratch::new(n);
+                let mut s_f = Scratch::new(n, mv.has_long);
+                let mut s_b = Scratch::new(n, mv.has_long);
                 let mut include = vec![0u8; n];
                 for &(orig_k, r, c) in &refs[lo..hi] {
                     rayon::join(
-                        || dijkstra_tree(g, r, c, p, false, max_edge_cost, portals, &mut s_f),
-                        || dijkstra_tree(g, r, c, p, true, max_edge_cost, portals, &mut s_b),
+                        || dijkstra_tree(g, r, c, p, false, max_edge_cost, portals, mv, tbl_fwd.as_ref(), &mut s_f),
+                        || dijkstra_tree(g, r, c, p, true, max_edge_cost, portals, mv, tbl_bwd.as_ref(), &mut s_b),
                     );
                     if want_matrix {
                         // Masked round-trip total — same predicate + f32
@@ -744,12 +1174,13 @@ fn compute_density(
                         }
                         rows.push((orig_k, row));
                     }
-                    acc.accumulate_round(&mut s_f, &mut s_b, &mut include, total_cap);
+                    acc.accumulate_round(&mut s_f, &mut s_b, &mut include, total_cap, &mv.sweep_by_delta);
                 }
             } else {
-                let mut s = Scratch::new(n);
+                let mut s = Scratch::new(n, mv.has_long);
+                let tbl = if reverse { tbl_bwd.as_ref() } else { tbl_fwd.as_ref() };
                 for &(orig_k, r, c) in &refs[lo..hi] {
-                    dijkstra_tree(g, r, c, p, reverse, max_edge_cost, portals, &mut s);
+                    dijkstra_tree(g, r, c, p, reverse, max_edge_cost, portals, mv, tbl, &mut s);
                     if want_matrix {
                         let mut row = vec![f32::INFINITY; kk];
                         for (j, &cj) in sample_cells.iter().enumerate() {
@@ -760,6 +1191,7 @@ fn compute_density(
                         rows.push((orig_k, row));
                     }
                     subtree_passes(&mut s, None);
+                    stamp_long_passes_f32(&mut s, &mv.sweep_by_delta);
                     acc.accumulate(&s);
                 }
             }
@@ -812,7 +1244,7 @@ fn compute_density(
 /// only. Round mode sums the forward + backward legs (masking over-budget
 /// sums in "total" mode) and filters passes to round-trip-feasible endpoints
 /// — exactly like the worker.
-fn compute_single(g: &Grid, p: &Params, portals: &PortalAdj) -> (Vec<f32>, Vec<f64>) {
+fn compute_single(g: &Grid, p: &Params, portals: &PortalAdj, mv: &Moves) -> (Vec<f32>, Vec<f64>) {
     let n = g.h * g.w;
     let (sr, sc) = (p.src[0], p.src[1]);
     // Off-grid seed → empty field (defensive; the app always sends a valid cell).
@@ -826,12 +1258,16 @@ fn compute_single(g: &Grid, p: &Params, portals: &PortalAdj) -> (Vec<f32>, Vec<f
     // Maximize is excluded from single-source backend (the inverted field is a
     // browser-only mode), so max_edge_cost is unused here.
     let max_edge_cost = 0.0;
+    // Long moves integrate ON DEMAND here (tbl = None), mirroring the JS
+    // dijkstra(): one or two searches never amortise a full-grid table
+    // (under a budget the table would cost more than the search itself).
+    // Values are bit-identical either way.
 
     if round {
-        let mut s_f = Scratch::new(n);
-        let mut s_b = Scratch::new(n);
-        dijkstra_tree(g, sr, sc, p, false, max_edge_cost, portals, &mut s_f);
-        dijkstra_tree(g, sr, sc, p, true, max_edge_cost, portals, &mut s_b);
+        let mut s_f = Scratch::new(n, mv.has_long);
+        let mut s_b = Scratch::new(n, mv.has_long);
+        dijkstra_tree(g, sr, sc, p, false, max_edge_cost, portals, mv, None, &mut s_f);
+        dijkstra_tree(g, sr, sc, p, true, max_edge_cost, portals, mv, None, &mut s_b);
         let mut energy = vec![f32::INFINITY; n];
         let mut include = vec![0u8; n];
         for i in 0..n {
@@ -849,20 +1285,25 @@ fn compute_single(g: &Grid, p: &Params, portals: &PortalAdj) -> (Vec<f32>, Vec<f
         }
         let passes = if p.want_passes {
             // f64 leg sum, like the JS worker's `passes[i] += pb[i]` on
-            // Float64Arrays.
-            let pf = subtree_passes_f64(&s_f, Some(&include));
-            let pb = subtree_passes_f64(&s_b, Some(&include));
+            // Float64Arrays. Each leg stamps its long-move sweeps right
+            // after its subtree walk, BEFORE the legs sum — JS order.
+            let mut pf = subtree_passes_f64(&s_f, Some(&include));
+            stamp_long_passes_f64(&mut pf, &s_f, &mv.sweep_by_delta);
+            let mut pb = subtree_passes_f64(&s_b, Some(&include));
+            stamp_long_passes_f64(&mut pb, &s_b, &mv.sweep_by_delta);
             (0..n).map(|i| pf[i] + pb[i]).collect()
         } else {
             vec![0.0; n]
         };
         (energy, passes)
     } else {
-        let mut s = Scratch::new(n);
-        dijkstra_tree(g, sr, sc, p, reverse, max_edge_cost, portals, &mut s);
+        let mut s = Scratch::new(n, mv.has_long);
+        dijkstra_tree(g, sr, sc, p, reverse, max_edge_cost, portals, mv, None, &mut s);
         let energy = s.e.clone();
         let passes = if p.want_passes {
-            subtree_passes_f64(&s, None)
+            let mut pp = subtree_passes_f64(&s, None);
+            stamp_long_passes_f64(&mut pp, &s, &mv.sweep_by_delta);
+            pp
         } else {
             vec![0.0; n]
         };
@@ -995,6 +1436,19 @@ fn parse_grid_request(
     if params.maximize {
         params.e_max = 0.0;
     }
+    // v57 move directions: whitelist. Reject anything else loudly — the JS
+    // worker silently coerces invalid values to 8 (nDirsEff), but a backend
+    // doing that would hand a non-app client a silently different move set.
+    if ![4u32, 8, 16, 32, 64, 128].contains(&params.n_dirs) {
+        return Err((400, format!(r#"{{"error":"nDirs {} not in {{4,8,16,32,64,128}}"}}"#, params.n_dirs)));
+    }
+    // Maximize forces the classic 8 (mirror of the JS worker's nDirsEff):
+    // the inversion bound maxEdgeCost is a single-grid-edge property, so a
+    // long move would invert to a clamped-0 free shortcut — the same
+    // degeneracy that excludes portals from maximize.
+    if params.maximize {
+        params.n_dirs = 8;
+    }
     let n = params.h * params.w;
     // An empty grid (h or w == 0) is meaningless and would make per_slice == 0
     // in compute_density → a divide-by-zero panic that, on this single-threaded
@@ -1083,7 +1537,8 @@ fn handle_density(mut req: tiny_http::Request) {
         dy: params.dy,
     };
     // dem_mask rides along for maximize's height range (raw-mask JS parity).
-    let (density, energy, matrix) = compute_density(&grid, &dem_mask, &params, &portals);
+    let mv = build_moves(params.n_dirs, params.w, params.dx, params.dy);
+    let (density, energy, matrix) = compute_density(&grid, &dem_mask, &params, &portals, &mv);
 
     // "matrix":K announces the appended f32×K² accessibility matrix — its
     // absence tells a newer app this binary predates the feature (the app
@@ -1163,7 +1618,8 @@ fn handle_single(mut req: tiny_http::Request) {
         dx: params.dx,
         dy: params.dy,
     };
-    let (energy, passes) = compute_single(&grid, &params, &portals);
+    let mv = build_moves(params.n_dirs, params.w, params.dx, params.dy);
+    let (energy, passes) = compute_single(&grid, &params, &portals, &mv);
 
     let meta = format!(
         r#"{{"elapsed_ms":{:.1},"passes":{}}}"#,

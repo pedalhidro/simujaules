@@ -9,6 +9,22 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v62 — 2026-07-12
+
+**Directions ≠ 8 on the cloud/native backend.** The Rust backend (0.2.0)
+now serves the full v57 move-direction feature — Farey move sets (4–128),
+profile-integrated long edges, swept-cell passes stamping — in **bit-parity**
+with the JS worker (the port required V8-exact `Math.hypot`/`Math.round`
+mirrors: libm differs by 1 ulp, enough to flip passes on tied costs; 21 new
+parity cases in `backend/test-backend.mjs`, all exact-zero delta). Unlike the
+JS workers' per-worker tables, Rust builds the long-edge cost tables once per
+request and shares them read-only across all rayon slices. The app
+version-gates nDirs ≠ 8 dispatch on `/health` version ≥ 0.2.0 — an older
+binary silently ignores the field — and reports a clear reason (respecting
+"Falhar em vez de cair pro navegador") when the deployed binary is too old.
+The time estimate models the nDirs memory terms (38/57 B per cell per slice +
+shared tables).
+
 ## v61 — 2026-07-12
 
 **Opt out of the silent browser fallback.** New "Falhar em vez de cair pro

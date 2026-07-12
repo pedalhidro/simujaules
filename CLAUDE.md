@@ -156,8 +156,17 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   neighborhoods via the Farey ladder (`buildMoves`). Invariants: (a) the
   first 8 moves of every set ≥ 8 are the CLASSIC 8 in the CLASSIC order —
   nDirs=8 must stay bit-identical to the historical engine (the Rust-parity
-  anchor); (b) nDirs ≠ 8 is BROWSER-ONLY — app.js gates the backend off
-  (like top-N/maximize), the Rust port serves the 8-move engine unchanged;
+  anchor); (b) since backend 0.2.0 the Rust port serves nDirs ≠ 8 too, in
+  BIT-PARITY — this required V8-exact `js_hypot`/`js_round` mirrors in
+  main.rs (libm's hypot differs by 1 ulp and breaks passes parity; never
+  swap them for the std functions). app.js VERSION-GATES nDirs ≠ 8 dispatch
+  on /health version ≥ 0.2.0: an older binary silently IGNORES the `nDirs`
+  params field (serde skips unknown keys) and would return a mislabeled
+  8-direction field. Rust builds the long-edge tables ONCE per request,
+  shared read-only across rayon slices (per-worker in JS); per_slice grows
+  37→38 (55→57 round) via parent_long and the shared tables
+  ((nDirs−8)·8 B/cell·revs) come off the budget before the slice division —
+  `predictComputeMs`'s backend branch mirrors this math;
   (c) long moves are PROFILE-INTEGRATED (`longEdgeCost`: bilinear heights
   every ~1 cell, v2Edge per sub-step, mask-blocked) — NEVER cost a long
   move from its endpoints' Δh alone, that flattens the relief it crosses

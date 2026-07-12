@@ -117,22 +117,44 @@ cases.push({ dmode: "from", eMax: 0, eMaxMode: "leg", maximize: true, network: n
 for (const dmode of ["from", "to", "round"]) {
   cases.push({ dmode, eMax: 20000, eMaxMode: "leg", droppedRef: true });
 }
+// v57 movement directions (+ndirs): profile-integrated long moves. The Rust
+// density path is table-driven (tables shared across slices) while /single
+// integrates on demand — both must be bit-identical to the JS worker, whose
+// density tables are themselves test-asserted ≡ on-demand (test-worker-pool).
+// Budget, round, portals and network each hit a distinct long-move path:
+// eMax prunes swept-cell stamping to settled cells, round runs two-leg
+// filtered stamping, portals coexist (and never stamp), network blocks the
+// bilinear profile via the effective mask.
+for (const nDirs of [16, 32]) {
+  cases.push({ dmode: "from", eMax: 0, eMaxMode: "leg", nDirs });
+  cases.push({ dmode: "from", eMax: 20000, eMaxMode: "leg", nDirs });
+  cases.push({ dmode: "to", eMax: 20000, eMaxMode: "leg", nDirs, portals: true });
+  cases.push({ dmode: "round", eMax: 20000, eMaxMode: "leg", nDirs });
+  cases.push({ dmode: "from", eMax: 20000, eMaxMode: "leg", nDirs, network: netMask });
+}
+cases.push({ dmode: "round", eMax: 20000, eMaxMode: "total", nDirs: 16, portals: true, network: netMask });
+cases.push({ dmode: "from", eMax: 20000, eMaxMode: "leg", nDirs: 4 });
+// maximize forces nDirs = 8 in BOTH engines (JS nDirsEff / parse_grid_request)
+// — the fields must equal the plain maximize case's, so parity holds.
+cases.push({ dmode: "from", eMax: 0, eMaxMode: "leg", maximize: true, nDirs: 16 });
 
 // Every density case also requests the accessibility matrix (wantMatrix):
 // matrix entries are raw per-ref f32 energy samples — no cross-slice f64
 // accumulation — so unlike the mean-energy field they are BIT-parity
 // (maxΔ === 0) regardless of how either engine slices the refs. Under
 // maximize both engines must omit the matrix entirely.
-for (const { dmode, eMax, eMaxMode, portals = false, maximize = false, network = null, droppedRef = false } of cases) {
+for (const { dmode, eMax, eMaxMode, portals = false, maximize = false, network = null, droppedRef = false, nDirs = 8 } of cases) {
   {
     const caseRefs = droppedRef ? [...refs, [0, 0]] : refs;
     const K = caseRefs.length;
     const nPortals = portals ? portalU.length : 0;
-    // backend
+    // backend — nDirs rides in the params JSON only when non-default, so the
+    // pre-existing cases' wire bytes (and the serde default path) are intact.
     const params = {
       h: H, w: W, dx: 30, dy: 30, cost, eMax, eMaxMode,
       densityMode: dmode, refPoints: caseRefs, hasNetwork: !!network, maximize,
       nPortals, wantMatrix: true,
+      ...(nDirs !== 8 ? { nDirs } : {}),
     };
     const json = new TextEncoder().encode(JSON.stringify(params));
     const head = new Uint8Array(4);
@@ -160,7 +182,7 @@ for (const { dmode, eMax, eMaxMode, portals = false, maximize = false, network =
       kind: "run", H, W, dx: 30, dy: 30, cost, eMax, eMaxMode,
       seedR: -1, seedC: -1, goalR: -1, goalC: -1, mode: dmode,
       wantDensity: true, refPoints: caseRefs, densityMode: dmode, maximize,
-      wantMatrix: true,
+      wantMatrix: true, nDirs,
       matrixCells: Int32Array.from(caseRefs, ([r, c]) => r * W + c),
       height: new Float32Array(height), mask: new Uint8Array(mask),
       networkMask: network ? new Uint8Array(network) : null,
@@ -201,7 +223,7 @@ for (const { dmode, eMax, eMaxMode, portals = false, maximize = false, network =
     const ok = maxD < 1e-15 && maxE < 1e-3 && bad === 0 && matOk;
     allOk = allOk && ok;
     console.log(
-      `mode=${dmode} eMax=${eMax}${eMaxMode === "total" ? " (total)" : ""}${portals ? " +portals" : ""}${network ? " +net" : ""}${maximize ? " (maximize)" : ""}${droppedRef ? " +droppedRef" : ""} +matrix: ` +
+      `mode=${dmode} eMax=${eMax}${eMaxMode === "total" ? " (total)" : ""}${portals ? " +portals" : ""}${network ? " +net" : ""}${maximize ? " (maximize)" : ""}${droppedRef ? " +droppedRef" : ""}${nDirs !== 8 ? ` +ndirs=${nDirs}` : ""} +matrix: ` +
       `max|Δdensity|=${maxD.toExponential(2)}, ` +
       `max|Δenergy|=${maxE.toExponential(2)}, finite-mismatch=${bad}, ` +
       (maximize ? `matrix-omitted=${matOk}` : `max|Δmatrix|=${maxM.toExponential(2)}, matrix-finite-mismatch=${badM}`) +
@@ -230,12 +252,26 @@ for (const portals of [false, true]) {
     singleCases.push({ dmode: "round", eMax: 20000, eMaxMode: "total", portals, hasNetwork, wantPasses: true });
   }
 }
+// v57 movement directions (+ndirs) on the single-source path: on-demand
+// profile integration (no tables) + f64 passes with long-move sweep stamping.
+// /single uses the binary-vs-radix-heap pair of engines, so exact f64 cost
+// ties COULD credit different (equally optimal) parents — like the existing
+// cases, these assert exact passes equality, which holds on this synthetic
+// DEM (no exact ties); a genuine tie would need the documented exemption.
+for (const nDirs of [16, 32]) {
+  singleCases.push({ dmode: "from", eMax: 0, eMaxMode: "leg", portals: false, hasNetwork: false, wantPasses: true, nDirs });
+  singleCases.push({ dmode: "from", eMax: 20000, eMaxMode: "leg", portals: true, hasNetwork: false, wantPasses: true, nDirs });
+  singleCases.push({ dmode: "round", eMax: 20000, eMaxMode: "leg", portals: false, hasNetwork: true, wantPasses: true, nDirs });
+}
+singleCases.push({ dmode: "round", eMax: 20000, eMaxMode: "total", portals: true, hasNetwork: true, wantPasses: true, nDirs: 16 });
+singleCases.push({ dmode: "to", eMax: 20000, eMaxMode: "leg", portals: false, hasNetwork: false, wantPasses: true, nDirs: 32 });
 
-for (const { dmode, eMax, eMaxMode, portals, hasNetwork, wantPasses } of singleCases) {
+for (const { dmode, eMax, eMaxMode, portals, hasNetwork, wantPasses, nDirs = 8 } of singleCases) {
   const nPortals = portals ? portalU.length : 0;
   const params = {
     h: H, w: W, dx: 30, dy: 30, cost, eMax, eMaxMode,
     densityMode: dmode, src: [SR, SC], wantPasses, hasNetwork, nPortals,
+    ...(nDirs !== 8 ? { nDirs } : {}),
   };
   const json = new TextEncoder().encode(JSON.stringify(params));
   const head = new Uint8Array(4);
@@ -261,7 +297,7 @@ for (const { dmode, eMax, eMaxMode, portals, hasNetwork, wantPasses } of singleC
   const ref = runWorker({
     kind: "run", H, W, dx: 30, dy: 30, cost, eMax, eMaxMode,
     seedR: SR, seedC: SC, goalR: -1, goalC: -1, mode: dmode,
-    wantPasses, wantDensity: false,
+    wantPasses, wantDensity: false, nDirs,
     height: new Float32Array(height), mask: new Uint8Array(mask),
     networkMask: hasNetwork ? new Uint8Array(netMask) : null,
     portalU: portals ? portalU : null,
@@ -282,7 +318,7 @@ for (const { dmode, eMax, eMaxMode, portals, hasNetwork, wantPasses } of singleC
   allOk = allOk && ok;
   console.log(
     `[single] mode=${dmode} eMax=${eMax}${eMaxMode === "total" ? " (total)" : ""}` +
-    `${portals ? " +portals" : ""}${hasNetwork ? " +net" : ""}${wantPasses ? " +passes" : ""}: ` +
+    `${portals ? " +portals" : ""}${hasNetwork ? " +net" : ""}${wantPasses ? " +passes" : ""}${nDirs !== 8 ? ` +ndirs=${nDirs}` : ""}: ` +
     `max|Δenergy|=${maxE.toExponential(2)}, finite-mismatch=${bad}` +
     `${wantPasses ? `, max|Δpasses|=${maxP.toExponential(2)}` : ""} ${ok ? "✓" : "✗"}`,
   );
@@ -305,6 +341,36 @@ for (const { dmode, eMax, eMaxMode, portals, hasNetwork, wantPasses } of singleC
   const ok = resp.status === 400;
   allOk = allOk && ok;
   console.log(`[single] maximize=true → HTTP ${resp.status} (expect 400) ${ok ? "✓" : "✗"}`);
+}
+
+// nDirs whitelist: anything ∉ {4,8,16,32,64,128} → 400. (The JS worker
+// coerces invalid values to 8; the backend rejects instead, so a buggy or
+// stale client can't silently get a different move set than it asked for.)
+{
+  const params = {
+    h: H, w: W, dx: 30, dy: 30, cost, eMax: 0, eMaxMode: "leg",
+    densityMode: "from", src: [SR, SC], wantPasses: false, hasNetwork: false,
+    nPortals: 0, nDirs: 12,
+  };
+  const json = new TextEncoder().encode(JSON.stringify(params));
+  const head = new Uint8Array(4);
+  new DataView(head.buffer).setUint32(0, json.length, true);
+  const resp = await fetch(`http://${ADDR}/single`, {
+    method: "POST", body: new Blob([head, json, height, mask]),
+  });
+  const ok = resp.status === 400;
+  allOk = allOk && ok;
+  console.log(`[single] nDirs=12 → HTTP ${resp.status} (expect 400) ${ok ? "✓" : "✗"}`);
+}
+
+// /health must announce version >= 0.2.0 — the app gates nDirs≠8 backend
+// dispatch on it (an older binary silently ignores the nDirs param).
+{
+  const health = await (await fetch(`http://${ADDR}/health`)).json();
+  const [maj, min] = String(health.version).split(".").map(Number);
+  const ok = health.ok === true && (maj > 0 || min >= 2);
+  allOk = allOk && ok;
+  console.log(`[health] version=${health.version} (need >= 0.2.0 for nDirs) ${ok ? "✓" : "✗"}`);
 }
 
 server.kill();
