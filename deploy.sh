@@ -91,46 +91,49 @@ if ! command -v gcloud >/dev/null 2>&1; then
   exit 1
 fi
 
-# 3. Upload with `gcloud storage rsync`:
-#    -r                                      recurse into dem/, icons/, vocab/.
-#    --delete-unmatched-destination-objects  delete bucket objects not in the
-#                                            staging dir (the whole dedicated
-#                                            simujaules bucket) so renames
-#                                            don't leave orphans.
-#    --exclude='^(census|vector|mask|vm)(/|$)'  ...EXCEPT these OUT-OF-BAND
-#                                            prefixes, uploaded by hand and read
-#                                            directly by the app/orchestrator —
-#                                            never staged here, so without the
-#                                            exclude --delete-unmatched would
-#                                            prune them on every deploy
-#                                            (they 404 afterwards):
-#                                              census/setores_br_pop.fgb (~454 MB,
-#                                                CENSUS_FGB_URL, built by build_fgb.py)
-#                                              vector/sampa-viario.gpkg (~145 MB,
-#                                                "Viário RMSampa" example network)
-#                                              mask/water_mask.tif (~2.4 MB,
-#                                                "Águas RMSampa" example barrier mask)
-#                                              vm/startup-script.sh (the cloud-compute
-#                                                VM startup script, read by
-#                                                orchestrator/main.py on VM create)
-#                                            gcloud's --exclude is a Python regex
-#                                            (re.match, start-anchored) on the
-#                                            RELATIVE object path and is applied
-#                                            to the DESTINATION listing too, so
-#                                            matching bucket objects are removed
-#                                            from the delete-candidate set — real
-#                                            protection, not just a source skip.
-#    --checksums-only                        compare by CRC32C, not mtime — the
-#                                            staging dir gets fresh mtimes every
-#                                            run, so without this every file
-#                                            looks changed and re-uploads.
+# 3. Upload with `gcloud storage rsync`, SCOPED so the delete pass can only
+#    ever see app-owned objects. The bucket also holds OUT-OF-BAND prefixes,
+#    uploaded by hand and read directly by the app/orchestrator — never staged
+#    here:
+#      census/setores_br_pop.fgb (~454 MB, CENSUS_FGB_URL, built by build_fgb.py)
+#      vector/sampa-viario.gpkg  (~145 MB, "Viário RMSampa" example network)
+#      mask/water_mask.tif       (~2.4 MB, "Águas RMSampa" example barrier mask)
+#      vm/startup-script.sh      (cloud-compute VM startup script, read by
+#                                 orchestrator/main.py on VM create)
+#
+#    ⚠️ Protection is by SCOPE, not by --exclude: gcloud's --exclude does NOT
+#    remove destination objects from --delete-unmatched-destination-objects'
+#    candidate set (VERIFIED empirically 2026-07-12 with --dry-run: a root
+#    recursive rsync with the old '^(census|vector|mask|vm)(/|$)' exclude
+#    still deleted all four objects — one deploy wiped them in production and
+#    every earlier deploy explains the "census .fgb 404" reports). So:
+#      - top-level files: a NON-recursive rsync of the stage root — its delete
+#        candidates are top-level objects only; prefixes are out of scope.
+#      - dem/ icons/ vocab/: per-directory recursive rsyncs — deletes are
+#        scoped inside each directory.
+#      - modelo/: the "/modelo/" directory-index ALIAS OBJECT (an object
+#        literally named "modelo/", step 4b) makes "gs://…/modelo/" ambiguous
+#        for ANY rsync ("matched more than one URL") — delete it first via the
+#        JSON API (gcloud can't address trailing-slash names), rsync scoped
+#        with delete like the others, and step 4b recreates it right after.
+#        The window without the alias is seconds, and only affects the bare
+#        "/modelo/" URL (the real pages are their own objects).
+#    --checksums-only: compare by CRC32C, not mtime — the staging dir gets
+#    fresh mtimes every run, so without it every file re-uploads.
 echo ">> Uploading to $BUCKET …"
-# NB: the extra '^modelo/$' alternative shields the "/modelo/" directory-index
-# ALIAS OBJECT (an object literally named "modelo/", created in step 4b below)
-# from the delete pass — it never exists in the staging dir.
+: > "$RSYNC_LOG"
+gcloud storage rsync --checksums-only --delete-unmatched-destination-objects \
+  "$STAGE" "$BUCKET/" 2>&1 | tee -a "$RSYNC_LOG"
+for d in dem icons vocab; do
+  gcloud storage rsync -r --checksums-only --delete-unmatched-destination-objects \
+    "$STAGE/$d" "$BUCKET/$d/" 2>&1 | tee -a "$RSYNC_LOG"
+done
+# Alias out of the way (404 = first deploy, fine), then the scoped rsync.
+curl -sS -o /dev/null -X DELETE \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  "https://storage.googleapis.com/storage/v1/b/${BUCKET#gs://}/o/modelo%2F" || true
 gcloud storage rsync -r --checksums-only --delete-unmatched-destination-objects \
-  --exclude='^(census|vector|mask|vm)(/|$)|^modelo/$' \
-  "$STAGE" "$BUCKET/" 2>&1 | tee "$RSYNC_LOG"
+  "$STAGE/modelo" "$BUCKET/modelo/" 2>&1 | tee -a "$RSYNC_LOG"
 
 # 4. Set headers (metadata-only — cheap, so run every deploy). HTML gets a short
 #    cache so deploys propagate quickly; JS an hour; the service worker no-cache
@@ -190,8 +193,9 @@ gcloud storage objects update "$BUCKET/modelo/artigo.pdf" "$BUCKET/modelo/paper.
 #     API, which has NO MainPageSuffix — the bare "/" works only via a
 #     Cloudflare rewrite, so "/modelo/" needs an object literally NAMED
 #     "modelo/" carrying a copy of modelo/index.html. gcloud can't create
-#     trailing-slash object names; the JSON API can. Idempotent overwrite; the
-#     rsync --exclude above shields it from the delete pass.
+#     trailing-slash object names; the JSON API can. Idempotent overwrite;
+#     step 3 DELETED the previous alias before the modelo/ rsync (it makes the
+#     scoped rsync URL ambiguous), so this recreation is load-bearing.
 echo ">> Creating the /modelo/ directory-index alias…"
 ALIAS_BODY="$STAGE/.modelo-alias-body"   # inside $STAGE so the EXIT trap cleans it
 {
