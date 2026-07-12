@@ -538,7 +538,12 @@
 //              from the dropdown (the selection only applies on next boot);
 //              new "Desligar VM agora" button forces that next boot without
 //              the untick-keep-warm dance.
-const VERSION  = "v60";
+//   v60 → v61: "Falhar em vez de cair pro navegador" checkbox (cloud panel,
+//              persisted): a cloud failure aborts the run with the error
+//              instead of silently recomputing on the browser pool — the
+//              silent fallback masked every cloud problem and burned laptop
+//              CPU on runs meant for the big VM.
+const VERSION  = "v61";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

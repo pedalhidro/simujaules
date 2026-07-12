@@ -366,8 +366,10 @@ const STRINGS = {
   "cloud.warm":            { pt: "VM ligada — esfria após ~15 min de ócio (watchdog na VM).", en: "VM kept warm — auto-stops after ~15 min idle (in-VM watchdog)." },
   "cloud.size_mismatch":   { pt: "VM pronta com {0} vCPUs — a seleção de {1} vCPUs só vale no próximo boot (desligue a VM pra aplicar já).", en: "VM ready with {0} vCPUs — the {1}-vCPU selection only applies on the next boot (stop the VM to apply it now)." },
   "cloud.stop_now":        { pt: "Desligar VM agora", en: "Stop VM now" },
+  "cloud.no_fallback":     { pt: "Falhar em vez de cair pro navegador", en: "Fail instead of falling back to browser" },
+  "cloud.failed_hard":     { pt: "cálculo na nuvem falhou (fallback desligado): {0}", en: "cloud compute failed (fallback disabled): {0}" },
   "cloud.stopping_manual": { pt: "Desligando a VM… o próximo cálculo religa no tamanho selecionado.", en: "Stopping the VM… the next compute boots the selected size." },
-  "help.p.backend":      { pt: "Fonte de cálculo: três opções (2C). <em>Navegador</em> (padrão) roda em Web Workers na própria aba. <em>Localhost</em> fala com um servidor Rust opcional (backend/ no repositório, cargo run --release) na máquina do usuário. <em>Nuvem</em> aciona sob demanda uma VM no orquestrador — um serviço Cloud Run público, alcançável de qualquer origem —, protegida pela \"senha da nuvem\" compartilhada; \"Manter VM ligada entre cálculos\" evita religá-la a cada cálculo, mas ela desliga sozinha após ~15 min de ócio (watchdog dentro da própria VM), e cada cálculo com ela ligada é cobrado na conta do mantenedor. O seletor <em>\"Máquina da nuvem\"</em> escolhe o tamanho da VM (8/32/128 vCPUs, com preço de referência por hora — a VM roda em modo spot, tipicamente 60–90% mais barato que o valor mostrado); o tamanho é aplicado ao criar/religar a VM (uma VM já ligada mantém o tamanho até o próximo desligamento — o aviso de estado indica quando a seleção difere da VM ligada, e <em>\"Desligar VM agora\"</em> força a troca no próximo cálculo) e a estimativa de tempo modela o tamanho selecionado. Localhost e Nuvem aceleram tanto a densidade multi-referência (uma Dijkstra por referência, em todos os núcleos) quanto o campo de energia de fonte única (de/para/ida-e-volta); rotas (top-N), caminho até o destino e o modo grafo continuam sempre no navegador (nenhum backend produz rotas). Se o servidor ou a VM ficarem inacessíveis, o app volta para os workers do navegador, dizendo o motivo na linha de status.", en: "Compute source: three options (2C). <em>Browser</em> (default) runs in in-page Web Workers. <em>Localhost</em> talks to an optional Rust server (backend/ in the repo, cargo run --release) on the user's own machine. <em>Cloud</em> boots a VM on demand via the orchestrator — a public Cloud Run service, reachable from any origin — gated by the shared \"cloud password\"; \"Keep VM warm between runs\" avoids rebooting it on every run, but it still auto-stops after ~15 min idle (a watchdog inside the VM), and every run while it's up is billed to the maintainer's account. The <em>\"Cloud machine\"</em> selector picks the VM size (8/32/128 vCPUs, with a per-hour reference price — the VM runs as spot, typically 60–90% cheaper than shown); the size applies when the VM is created/restarted (a running VM keeps its size until the next stop — the status hint flags when the selection differs from the running VM, and <em>\"Stop VM now\"</em> forces the switch on the next compute) and the time estimate models the selected size. Localhost and Cloud both accelerate multi-reference density (one Dijkstra per reference, across all cores) AND the single-source energy field (from/to/round). Top-N routes, the destination path, and graph mode always stay in the browser (no backend produces routes). If the server or VM is unreachable, the app falls back to the in-browser workers, stating the reason in the status line." },
+  "help.p.backend":      { pt: "Fonte de cálculo: três opções (2C). <em>Navegador</em> (padrão) roda em Web Workers na própria aba. <em>Localhost</em> fala com um servidor Rust opcional (backend/ no repositório, cargo run --release) na máquina do usuário. <em>Nuvem</em> aciona sob demanda uma VM no orquestrador — um serviço Cloud Run público, alcançável de qualquer origem —, protegida pela \"senha da nuvem\" compartilhada; \"Manter VM ligada entre cálculos\" evita religá-la a cada cálculo, mas ela desliga sozinha após ~15 min de ócio (watchdog dentro da própria VM), e cada cálculo com ela ligada é cobrado na conta do mantenedor. O seletor <em>\"Máquina da nuvem\"</em> escolhe o tamanho da VM (8/32/128 vCPUs, com preço de referência por hora — a VM roda em modo spot, tipicamente 60–90% mais barato que o valor mostrado); o tamanho é aplicado ao criar/religar a VM (uma VM já ligada mantém o tamanho até o próximo desligamento — o aviso de estado indica quando a seleção difere da VM ligada, e <em>\"Desligar VM agora\"</em> força a troca no próximo cálculo) e a estimativa de tempo modela o tamanho selecionado. Localhost e Nuvem aceleram tanto a densidade multi-referência (uma Dijkstra por referência, em todos os núcleos) quanto o campo de energia de fonte única (de/para/ida-e-volta); rotas (top-N), caminho até o destino e o modo grafo continuam sempre no navegador (nenhum backend produz rotas). Se o servidor ou a VM ficarem inacessíveis, o app volta para os workers do navegador, dizendo o motivo na linha de status — a menos que <em>\"Falhar em vez de cair pro navegador\"</em> esteja marcado, caso em que o cálculo aborta com o erro (útil pra não mascarar problemas da nuvem nem recomputar um DEM enorme no laptop sem querer).", en: "Compute source: three options (2C). <em>Browser</em> (default) runs in in-page Web Workers. <em>Localhost</em> talks to an optional Rust server (backend/ in the repo, cargo run --release) on the user's own machine. <em>Cloud</em> boots a VM on demand via the orchestrator — a public Cloud Run service, reachable from any origin — gated by the shared \"cloud password\"; \"Keep VM warm between runs\" avoids rebooting it on every run, but it still auto-stops after ~15 min idle (a watchdog inside the VM), and every run while it's up is billed to the maintainer's account. The <em>\"Cloud machine\"</em> selector picks the VM size (8/32/128 vCPUs, with a per-hour reference price — the VM runs as spot, typically 60–90% cheaper than shown); the size applies when the VM is created/restarted (a running VM keeps its size until the next stop — the status hint flags when the selection differs from the running VM, and <em>\"Stop VM now\"</em> forces the switch on the next compute) and the time estimate models the selected size. Localhost and Cloud both accelerate multi-reference density (one Dijkstra per reference, across all cores) AND the single-source energy field (from/to/round). Top-N routes, the destination path, and graph mode always stay in the browser (no backend produces routes). If the server or VM is unreachable, the app falls back to the in-browser workers, stating the reason in the status line — unless <em>\"Fail instead of falling back to browser\"</em> is ticked, in which case the run aborts with the error (useful to not mask cloud problems or accidentally recompute a huge DEM on the laptop)." },
   "param.max_workers":   { pt: "Máx. de workers de cálculo (0 = auto)", en: "Max compute workers (0 = auto)" },
   "help.p.workers":      { pt: "Avançado: paraleliza a densidade entre este número de Web Workers. 0 = auto (dimensionado pelos núcleos e memória disponível). Só aumente se sua máquina tiver mais RAM do que o navegador reporta — cada worker usa cerca de 5 GB em um DEM grande, então exceder pode travar a aba.", en: "Advanced: parallelise density across this many Web Workers. 0 = auto (sized to cores and available memory). Only raise it if your machine has more RAM than the browser reports — each worker needs roughly 5 GB on a large DEM, so over-committing can crash the tab." },
   // dormant: no UI control since v37 (engine/backend still implement the mode) — kept for param.max_length below
@@ -877,7 +879,7 @@ const PERSIST_IDS = [
   "mode", "mass", "crr", "cda", "rho", "keff", "pflat", "climb-thr", "ksmooth", "deadband", "dem-smooth", "e-max", "e-max-mode",
   "want-passes", "want-topn", "want-density",
   "n-refs", "ref-sampling", "refs-visible",
-  "backend-url", "orchestrator-url", "cloud-keep-warm", "cloud-machine", "n-routes", "penalty", "repulsion-mode",
+  "backend-url", "orchestrator-url", "cloud-keep-warm", "cloud-machine", "cloud-no-fallback", "n-routes", "penalty", "repulsion-mode",
   "routes-colormap", "colormap",
   // Vector network
   "vec-width", "vec-snap", "vec-constrain", "vec-graph-mode", "vec-junction-mode",
@@ -914,7 +916,7 @@ const COMPUTE_SOURCE_KEY = "compute-source";
 // URLs, and importing a bundle must not silently repoint the importer's
 // session to attacker-supplied endpoints. Shared by collectConfig({forBundle})
 // and applyConfig's persist:false (bundle) path so they can't drift apart.
-const CONNECTION_PERSIST_IDS = ["backend-url", "orchestrator-url", "cloud-keep-warm", "cloud-machine"];
+const CONNECTION_PERSIST_IDS = ["backend-url", "orchestrator-url", "cloud-keep-warm", "cloud-machine", "cloud-no-fallback"];
 
 function savePersistedParams() {
   const out = {};
@@ -2159,6 +2161,12 @@ function cloudToken() {
 // against its own allowlist and applies it on create / on start-from-stopped.
 function cloudMachineType() {
   return document.getElementById("cloud-machine")?.value || "n2-standard-8";
+}
+// "Falhar em vez de cair pro navegador": a cloud failure aborts the run loudly
+// instead of silently recomputing on the laptop (which on a big DEM looks like
+// a hang and HIDES the cloud problem — the failure mode of choice all night).
+function cloudNoFallback() {
+  return !!document.getElementById("cloud-no-fallback")?.checked;
 }
 // cores + backend memory budget per selectable size — mirrors the orchestrator's
 // ALLOWED_MACHINE_TYPES max-mem-gb table × the backend's 0.8 effective factor
@@ -7043,6 +7051,12 @@ runBtn.addEventListener("click", async () => {
         return await startDensityBackend(computeDataUrl(), opts);
       } catch (err) {
         if (gen !== state.computeGen) return new Promise(() => {});
+        // "Falhar em vez de cair pro navegador": abort loudly (computeFailed
+        // also stops the VM) instead of silently recomputing on the laptop.
+        if (cloudMode && cloudNoFallback()) {
+          computeFailed(t("cloud.failed_hard", err?.message || String(err)));
+          return new Promise(() => {}); // run is dead; keep the chain pending
+        }
         console.warn("[backend] falling back to in-browser workers:", err);
         // Surface the REASON in the status line, not just the console — a
         // silent fallback reads as "the cloud just didn't run" (visto na
@@ -7454,6 +7468,10 @@ runBtn.addEventListener("click", async () => {
           r = await startSingleBackend(computeDataUrl());
         } catch (err) {
           if (gen !== state.computeGen) return;
+          if (cloudMode && cloudNoFallback()) {
+            computeFailed(t("cloud.failed_hard", err?.message || String(err)));
+            return;
+          }
           console.warn("[backend] falling back to in-browser workers:", err);
           status.textContent = t(cloudMode ? "cloud.preempted" : "status.backend_fallback",
                                  err?.message || String(err));
@@ -7522,13 +7540,18 @@ runBtn.addEventListener("click", async () => {
         console.warn("[cloud] VM unavailable, falling back to browser:", err);
         const reason = err && err.reason;
         const bootFailed = reason === "boot_failed";
+        // A boot_failed VM may have actually started before going unhealthy —
+        // best-effort stop it so it doesn't linger (the in-VM watchdog backstops).
+        if (bootFailed) stopCloudVm(backendUrl);
+        // "Falhar em vez de cair pro navegador": abort loudly, no browser run.
+        if (cloudNoFallback()) {
+          computeFailed(t("cloud.failed_hard", reason || err?.message || String(err)));
+          return;
+        }
         status.textContent = t(reason === "auth_failed" ? "cloud.auth_failed"
                               : bootFailed ? "cloud.boot_failed"
                               : "cloud.orch_unreachable");
         if (state.lastRun) state.lastRun.backend = false;
-        // A boot_failed VM may have actually started before going unhealthy —
-        // best-effort stop it so it doesn't linger (the in-VM watchdog backstops).
-        if (bootFailed) stopCloudVm(backendUrl);
         state.cloud.mode = "browser"; // computeDone must not try to stop a VM that never started
         dispatchCompute(false);
         return;

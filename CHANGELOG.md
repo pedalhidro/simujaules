@@ -9,6 +9,16 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v61 — 2026-07-12
+
+**Opt out of the silent browser fallback.** New "Falhar em vez de cair pro
+navegador" checkbox in the cloud panel (persisted per device): when ticked, a
+cloud failure — VM boot, auth, or a failed `/density`/`/single` dispatch —
+aborts the run with the error in the status line instead of silently
+recomputing on the in-browser worker pool. The fallback is friendly for
+casual runs but masks cloud problems and quietly burns laptop CPU on
+computes sized for a 128-vCPU VM.
+
 ## v60 — 2026-07-12
 
 **Cloud machine-switch ergonomics.** The `/cloud/start` timeout goes 15 → 45 s
