@@ -17,6 +17,12 @@
 // One rule handles interior, borders, and nodata holes alike.
 //
 // Run: node test-dem-smoothing.mjs
+//
+// The mirror is also EXPORTED (`smoothHeightsInPlace`) so headless tooling
+// (mcp/lib.mjs) applies the app's DEM pre-smoothing without a third copy; the
+// test body only runs when this file is invoked directly.
+import { fileURLToPath } from "url";
+import { resolve } from "path";
 
 // ---------------------------------------------------------------------------
 // The function (app.js-destined; keep in sync verbatim once integrated).
@@ -128,6 +134,9 @@ let seed = 123456789;
 const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
 
 // ---------------------------------------------------------------------------
+const invokedDirectly =
+  process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) {
 console.log("dem pre-smoothing (Entry-20 deployable transform)");
 
 // 1. Flat terrain is invariant (any mask-normalized average of a constant is the constant).
@@ -229,3 +238,6 @@ console.log("dem pre-smoothing (Entry-20 deployable transform)");
 
 console.log(fail === 0 ? "\nALL PASS" : `\n${fail} FAILURE(S)`);
 process.exit(fail ? 1 : 0);
+}
+
+export { smoothHeightsInPlace };

@@ -38,6 +38,22 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   (multi-reference density) and `POST /single` (single-source from/to/round
   energy field + optional passes). Top-N / destination path / maximize stay
   browser-only — the backend produces no routes.
+- `mcp/` — MCP server (stdio) exposing the engine to agents (Claude Code /
+  Desktop): `load_dem`, `energy_field`, `route` (+ top-N, string pull),
+  `energy_at`, `density`. Dev tooling like `census/` — its own
+  `package.json`, never deployed. It imports the existing mirrors instead of
+  copying them: `census/census-density.mjs` (`loadDem`, `deriveCost`,
+  `runDensity`, the GeoTIFF/bundle writers) and `test-dem-smoothing.mjs`
+  (`smoothHeightsInPlace`), and hosts `energy-worker.js` in a
+  `worker_threads` Worker (`mcp/engine-thread.mjs`, the threaded twin of the
+  census `loadWorker()` shim). `mcp/lib.mjs` `buildRunMessage` is the
+  headless mirror of app.js `baseMsg` (no network / bridges / impassable
+  layers yet) — a new run-message field in app.js must land there AND in
+  `census/census-density.mjs` `runDensity`'s own `msg` literal (the `density`
+  tool is the app's pool merge with one slice and builds its message there;
+  the engine silently defaults any missing key, and `test-mcp.mjs` compares
+  `density` against that same harness, so it will not catch drift between
+  the two). See `mcp/README.md`.
 - `sw.js` — service worker (precache + runtime cache). `index.html`,
   `manifest.webmanifest`, `icons/` are the PWA shell.
 - `deploy.sh` — stages and rsyncs to `gs://simujaules`, served at
@@ -279,7 +295,10 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   tag. It runs BEFORE heights ship to the engines, so JS/graph/Rust
   bit-parity is untouched — never move smoothing INTO an engine
   (path-history state, forbidden above). `test-dem-smoothing.mjs` holds the
-  byte-identical mirror and reference tests (hand-kept-in-sync); the σ
+  byte-identical mirror and reference tests (hand-kept-in-sync; the mirror
+  is exported for `mcp/lib.mjs`, which applies the same auto rule at
+  headless DEM load — keep the function body verbatim, the `export` is a
+  trailing statement); the σ
   choices are only valid for THIS transform — don't swap in a plain blur or
   change σ/the auto rule without re-running the journal validation (Entry 74
   is the validation behind the current σ30 rule). Accuracy itself is carried by per-rider
@@ -322,6 +341,7 @@ node test-graph-engine.mjs                 # vector-network graph engine
 node test-water-raster.mjs                 # OSM water-mask rasterisation (areas/sea/rivers)
 node census/test-census-sampler.mjs        # in-browser census sampler helpers (mirrors app.js)
 node census/test-census-density.mjs        # census density harness end-to-end (needs npm install in census/)
+node mcp/test-mcp.mjs                      # MCP server over real stdio vs direct engine runs (needs npm install in census/ AND mcp/)
 cd backend && cargo build --release && node test-backend.mjs
 ```
 

@@ -90,7 +90,7 @@ const main = async () => {
   // Non-default physics knobs so the comparison also proves the params flow
   // through deriveCost (the readCost mirror) rather than being ignored.
   const params = { mode: "from", mass: 80, pFlat: 100, eMax: 0 };
-  const result = runDensity(dem, refs, params);   // partial-merge → Float64 passes
+  const result = await runDensity(dem, refs, params);   // partial-merge → Float64 passes
   assert(result.passes instanceof Float64Array && result.energy instanceof Float32Array,
     "returns Float64 passes + Float32 energy (matches downloadBundle's float64 passes.tif)");
   const run = loadWorker();

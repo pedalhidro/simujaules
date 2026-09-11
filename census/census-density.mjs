@@ -13,11 +13,15 @@
 //     deriveCost() below is the hand-kept mirror of app.js readCost();
 //   - exported GeoTIFFs use NATIVE dx/dy + originX/originY (degrees) for
 //     georeferencing (tiffMetadataForDem, ~app.js:4361);
-//   - a single non-partial density message returns {energy, passes} with both
-//     /N normalisations already applied by the engine (energy-worker.js:1292).
+//   - runDensity sends ONE `densityPartial: true` message and does what
+//     app.js's pool merge does with a single slice: Float64 accumulators, the
+//     second /N and the energySum/energyCount mean applied HERE (the engine
+//     applies only the first /N — energy-worker.js ~2296, app.js ~7383).
+//     test-census-density.mjs asserts this equals the engine's own
+//     non-partial normalisation.
 import { readFileSync, writeFileSync } from "fs";
 import { fileURLToPath } from "url";
-import { dirname, join, resolve } from "path";
+import { basename, dirname, join, resolve } from "path";
 import * as GeoTIFF from "geotiff";
 import JSZip from "jszip";
 
@@ -83,6 +87,14 @@ export function deriveCost(p = {}) {
 }
 
 // ---- DEM load: port of app.js loadDemFromArrayBuffer (georef bits only) -----
+// Mirrors the app's loader line for line where it affects numbers: band-0
+// read (`samples: [0]` — a multi-band file would otherwise smear across the
+// grid), f32-rounded GDAL_NODATA sentinel (heights are f32; an f64 parse of a
+// non-f32-representable sentinel would silently not match), GeoKey-first CRS
+// classification (GTModelTypeGeoKey wins over the magnitude heuristic), and
+// the `simujaules:demSmoothSigmaM=` ImageDescription tag the app stamps on its
+// own dem.tif exports (reported as `srcSmoothSigmaM`; the caller decides
+// whether to pre-smooth — this loader never does, see mcp/lib.mjs).
 export async function loadDem(demPath, label) {
   const file = readFileSync(demPath);
   const ab = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength);
@@ -100,11 +112,11 @@ export async function loadDem(demPath, label) {
   const dx = pixelScale[0], dy = pixelScale[1];
   const originX = tiePoints[0].x, originY = tiePoints[0].y;
 
-  const raster = await image.readRasters({ interleave: true });
+  const raster = await image.readRasters({ samples: [0], interleave: true });
   const height = raster instanceof Float32Array ? raster : Float32Array.from(raster);
 
   const nodataRaw = getTag("GDAL_NODATA");
-  const nodata = nodataRaw ? parseFloat(nodataRaw) : null;
+  const nodata = nodataRaw ? Math.fround(parseFloat(nodataRaw)) : null;
   const N = H * W;
   const mask = new Uint8Array(N);
   for (let i = 0; i < N; i++) {
@@ -112,20 +124,30 @@ export async function loadDem(demPath, label) {
     mask[i] = (Number.isFinite(v) && (nodata === null || v !== nodata)) ? 1 : 0;
   }
 
-  // Same geographic heuristic + degrees->metres flat-earth conversion as the app.
-  const isGeographic = Math.abs(originX) < 360 && Math.abs(originY) < 90 && dx < 0.01;
+  let geoKeys = null;
+  try { geoKeys = image.getGeoKeys ? image.getGeoKeys() : null; } catch { /* ignore */ }
+
+  // Same CRS classification + degrees->metres flat-earth conversion as the app.
+  const modelType = geoKeys && geoKeys.GTModelTypeGeoKey;
+  const isGeographic =
+    modelType === 2 ? true
+      : modelType === 1 ? false
+      : (Math.abs(originX) < 360 && Math.abs(originY) < 90 && dx < 0.01);
   const latRef = isGeographic ? originY - (H * dy) / 2 : 0;
   const dxM = isGeographic ? dx * 111320 * Math.cos((latRef * Math.PI) / 180) : dx;
   const dyM = isGeographic ? dy * 110574 : dy;
 
-  let geoKeys = null;
-  try { geoKeys = image.getGeoKeys ? image.getGeoKeys() : null; } catch { /* ignore */ }
+  const imgDescRaw = getTag("ImageDescription");
+  const srcSmoothSigmaM = parseFloat((String(imgDescRaw || "").match(/simujaules:demSmoothSigmaM=([0-9.]+)/) || [])[1]) || 0;
 
   return {
     height, mask, H, W, dx, dy, dxM, dyM, originX, originY,
-    isGeographic, geoKeys,
+    isGeographic, geoKeys, nodata,
     bbox: { xmin: originX, ymin: originY - H * dy, xmax: originX + W * dx, ymax: originY },
-    label: label || demPath,
+    label: label || basename(demPath),   // the app records the File's name, never a path
+    srcSmoothSigmaM,           // σ already baked into the file (app export tag), 0 = raw
+    smoothSigmaM: 0,           // σ applied by this process (this loader applies none)
+    smoothCumSigmaM: srcSmoothSigmaM,
   };
 }
 
@@ -164,7 +186,12 @@ export function pointsToRefs(dem, features) {
 // one — so we must too, or the float64 passes.tif tag would be inconsistent
 // with a Float32 buffer (a truncated, unreadable TIFF). Returns
 // {energy: Float32Array, passes: Float64Array}, matching downloadBundle.
-export function runDensity(dem, refs, params, runFn = loadWorker()) {
+// `runFn` may be synchronous (the loadWorker shim) or return a Promise (the
+// worker_threads runner in mcp/lib.mjs) — the result is awaited either way.
+// `params.nDirs` (4|8|16|32|64|128) is forwarded when given; when omitted the
+// message carries no nDirs and the engine's classic-8 default applies (the
+// historical harness behaviour). `params.eMaxMode` ("leg" | "total") likewise.
+export async function runDensity(dem, refs, params, runFn = loadWorker()) {
   const N = dem.H * dem.W;
   const msg = {
     kind: "run",
@@ -174,7 +201,7 @@ export function runDensity(dem, refs, params, runFn = loadWorker()) {
     goalR: -1, goalC: -1,
     mode: params.mode, densityMode: params.mode,
     cost: deriveCost(params),                 // v2 bundle, folded once like readCost
-    eMax: params.eMax || 0, eMaxMode: "leg",
+    eMax: params.eMax || 0, eMaxMode: params.eMaxMode || "leg",
     wantDensity: true,
     refPoints: refs,
     densityPartial: true,                     // raw accumulators (first /N only)
@@ -182,8 +209,9 @@ export function runDensity(dem, refs, params, runFn = loadWorker()) {
     height: new Float32Array(dem.height),
     mask: new Uint8Array(dem.mask),
   };
+  if (params.nDirs != null) msg.nDirs = params.nDirs;
   const t0 = performance.now();
-  const part = runFn(msg);
+  const part = await runFn(msg);
   if (!part) throw new Error("engine returned no 'done' message");
   const passes = new Float64Array(N);
   for (let i = 0; i < N; i++) passes[i] = part.density[i] / N;   // second /N, in Float64
@@ -195,14 +223,16 @@ export function runDensity(dem, refs, params, runFn = loadWorker()) {
 }
 
 // ---- bundle export: port of app.js tiffMetadataForDem / buildMetadata -------
-const SIMU_CONTEXT = {
+export const SIMU_CONTEXT = {
   "@vocab": "https://telhas.pedalhidrografi.co/simujoules/vocab/simujoules.jsonld#",
   "schema": "https://schema.org/",
   "geo": "http://www.opengis.net/ont/geosparql#",
   "qudt": "http://qudt.org/schema/qudt/",
 };
 
-function tiffMetadataForDem(dem, sampleKind) {
+// Mirror of app.js tiffMetadataForDem, including its GTModelTypeGeoKey /
+// GTRasterTypeGeoKey backfill (so QGIS/GDAL read our tifs as the app's).
+export function tiffMetadataForDem(dem, sampleKind) {
   const { H, W, originX, originY, dx, dy, isGeographic, geoKeys } = dem;
   const bps = sampleKind === "float64" ? 64 : sampleKind === "uint8" ? 8 : 32;
   const sf = sampleKind === "uint8" ? 1 : 3;
@@ -214,12 +244,21 @@ function tiffMetadataForDem(dem, sampleKind) {
   };
   if (geoKeys && Object.keys(geoKeys).length > 0) Object.assign(md, geoKeys);
   else if (isGeographic) md.GeographicTypeGeoKey = 4326;
+  if (md.ProjectedCSTypeGeoKey && md.GTModelTypeGeoKey == null) md.GTModelTypeGeoKey = 1;
+  else if (md.GeographicTypeGeoKey && md.GTModelTypeGeoKey == null) md.GTModelTypeGeoKey = 2;
+  if (md.GTModelTypeGeoKey != null && md.GTRasterTypeGeoKey == null) md.GTRasterTypeGeoKey = 1;
   return md;
 }
 
-function writeRasterAsGeoTIFF(values, dem, sampleKind) {
-  return GeoTIFF.writeArrayBuffer(values, tiffMetadataForDem(dem, sampleKind));
+// `extraMd` is merged on top (app.js writeRasterAsGeoTIFF): the app tags
+// energy.tif with GDAL_NODATA "inf" and dem.tif with GDAL_NODATA + the
+// ImageDescription smoothing stamp.
+export function writeRasterAsGeoTIFF(values, dem, sampleKind, extraMd) {
+  const md = tiffMetadataForDem(dem, sampleKind);
+  if (extraMd) Object.assign(md, extraMd);
+  return GeoTIFF.writeArrayBuffer(values, md);
 }
+export const ENERGY_NODATA_MD = { GDAL_NODATA: "inf" };
 
 export function buildMetadata(dem, refs, params, result) {
   return {
@@ -258,6 +297,7 @@ export function buildMetadata(dem, refs, params, result) {
       nRefs: refs.length,
       refSource: "census",
       maximize: false, maximizeLength: 0,
+      nDirs: params.nDirs ?? 8,   // what the run actually used (engine default when unset)
       // refPoints re-stamps the green markers on import.
       refPoints: refs.map(([r, c]) => [r, c]),
     },
@@ -280,11 +320,19 @@ export function buildMetadata(dem, refs, params, result) {
   };
 }
 
-export async function writeBundle(outPath, dem, md, result) {
+// Zip entry names are the fixed ones the app's importer looks up. Optional
+// `result.routesFC` / `result.pathFC` (GeoJSON FeatureCollections, see
+// mcp/lib.mjs) become routes.geojson / path.geojson like downloadBundle.
+// `encoded` may carry pre-encoded `energyTif` / `passesTif` Uint8Arrays so a
+// caller that also writes loose tifs encodes each raster once (geotiff.js's
+// encode is the slow part on big DEMs).
+export async function writeBundle(outPath, dem, md, result, encoded = null) {
   const zip = new JSZip();
   zip.file("metadata.jsonld", JSON.stringify(md, null, 2));
-  zip.file("energy.tif", new Uint8Array(writeRasterAsGeoTIFF(result.energy, dem, "float32")));
-  zip.file("passes.tif", new Uint8Array(writeRasterAsGeoTIFF(result.passes, dem, "float64")));
+  zip.file("energy.tif", encoded?.energyTif ?? new Uint8Array(writeRasterAsGeoTIFF(result.energy, dem, "float32", ENERGY_NODATA_MD)));
+  zip.file("passes.tif", encoded?.passesTif ?? new Uint8Array(writeRasterAsGeoTIFF(result.passes, dem, "float64")));
+  if (result.routesFC) zip.file("routes.geojson", JSON.stringify(result.routesFC, null, 2));
+  if (result.pathFC) zip.file("path.geojson", JSON.stringify(result.pathFC, null, 2));
   const buf = await zip.generateAsync({ type: "nodebuffer" });
   writeFileSync(outPath, buf);
   return buf.length;
@@ -317,6 +365,11 @@ function parseArgs(argv) {
       case "--pflat": a.pFlat = parseFloat(next()); break;      // W on the flat
       case "--climb-thr": a.climbThrPct = parseFloat(next()); break;  // % grade
       case "--ksmooth": a.kSmooth = parseFloat(next()); break;  // 0–1 gravity smoothing
+      case "--ndirs": {                                          // move directions (app default 16; CLI default 8)
+        const v = parseInt(next(), 10);
+        if (![4, 8, 16, 32, 64, 128].includes(v)) throw new Error("--ndirs must be one of 4, 8, 16, 32, 64, 128");
+        a.nDirs = v; break;
+      }
       case "--emax": a.eMax = parseFloat(next()); break;
       case "-o": case "--out": a.out = next(); break;
       case "-h": case "--help": a.help = true; break;
@@ -332,7 +385,7 @@ function parseArgs(argv) {
 const USAGE =
   "Usage: node census-density.mjs --dem dem.tif --points points.geojson \\\n" +
   "         [--mode from] [--mass 75] [--crr 0.008] [--cda 0.45] [--rho 1.1] \\\n" +
-  "         [--keff 0.97] [--pflat 80] [--climb-thr 2] [--ksmooth 1] \\\n" +
+  "         [--keff 0.97] [--pflat 80] [--climb-thr 2] [--ksmooth 1] [--ndirs 8] \\\n" +
   "         [--emax 0] [-o out.zip]\n" +
   "Cost knobs are the app's v2 physics inputs (defaults shown = app defaults);\n" +
   "the v1 --alpha/--beta/--eta flags were removed with the v2 cost model.";
@@ -359,7 +412,7 @@ async function main() {
   if (!refs.length) throw new Error("No valid reference points inside the DEM extent.");
 
   console.error(`Computing density over ${refs.length} refs (mode=${a.mode}) ...`);
-  const result = runDensity(dem, refs, a);
+  const result = await runDensity(dem, refs, a);
   console.error(`  done in ${(result.elapsedMs / 1000).toFixed(1)}s`);
 
   const md = buildMetadata(dem, refs, { ...a, timestamp: new Date().toISOString() }, result);

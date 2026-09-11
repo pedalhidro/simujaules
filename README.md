@@ -85,6 +85,11 @@ first load).
 - `sw.js`, `manifest.webmanifest`, `icons/` — the PWA shell.
 - `backend/` — optional native compute server (Rust + rayon). Off by default; see
   [backend/README.md](backend/README.md).
+- `mcp/` — MCP server (stdio) so an agent (Claude Code / Desktop) can load a DEM
+  and ask for energy fields, routes and density through the same engine; see
+  [mcp/README.md](mcp/README.md). Dev tooling, never deployed.
+- `census/` — headless population-weighted density harness (node); see
+  [census/README.md](census/README.md).
 - `deploy.sh` — stages and rsyncs the deployable files to `gs://simujaules`.
 - `test-*.mjs`, `backend/test-backend.mjs` — the node test suites (see below).
 - `dem/`, `fabdem/`, `vocab/` — example DEMs, the FABDEM fetcher, and the
@@ -146,6 +151,9 @@ There is no CI; run these before committing engine changes:
     node test-worker-pool.mjs                 # worker regression suite
     node test-water-raster.mjs                # OSM water-mask rasterisation
     node test-graph-engine.mjs                # graph-mode engine
+    node test-dem-smoothing.mjs               # DEM pre-smoothing mirror
+    node census/test-census-density.mjs       # headless density harness (npm install in census/)
+    node mcp/test-mcp.mjs                     # MCP server vs direct engine runs (npm install in census/ and mcp/)
     cd backend && cargo build --release && node test-backend.mjs   # JS↔Rust parity
 
 `backend/src/main.rs` is a line-for-line port of `energy-worker.js`'s cost model

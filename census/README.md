@@ -156,7 +156,7 @@ node census-density.mjs \
 ```
 
 Cost knobs are the app's **v2 physics inputs** — `--mass 75 --crr 0.008
---cda 0.45 --rho 1.1 --keff 0.97 --pflat 80 --climb-thr 2 --ksmooth 1`
+--cda 0.45 --rho 1.1 --keff 0.97 --pflat 80 --climb-thr 2 --ksmooth 1 --ndirs 8`
 (defaults shown = the app's UI defaults; `--climb-thr` is in %). The harness
 folds them into the `{aRoll, aAero, beta, …}` cost bundle exactly like the
 app's `readCost()` (hand-kept mirror). The v1 `--alpha/--beta/--eta` flags
@@ -165,10 +165,15 @@ were removed with the v2 cost model.
 It loads the DEM, converts each point to a DEM pixel (dropping out-of-extent /
 nodata points, logged), then runs the **same** `densityField` engine the PWA
 uses — `../energy-worker.js`, driven through its real `onmessage` handler (the
-shim from `test-worker-pool.mjs`). A single non-partial density message returns
-the fully-normalised `energy` + `passes`, so there is no re-implemented math:
-the engine owns it. The output is an app-importable **v3 bundle** (zip with
-`metadata.jsonld` + `energy.tif` + `passes.tif`, georeferenced to the DEM).
+shim from `test-worker-pool.mjs`). It sends ONE `densityPartial: true` message
+and does what the app's worker pool does with a single slice: merge into Float64
+accumulators, apply the second /N and the energySum/energyCount mean (the
+engine applies only the first /N) — `test-census-density.mjs` asserts this
+equals the engine's own non-partial normalisation. `--ndirs` picks the move
+set (default 8, the classic neighbourhood; the app's UI default is 16) and is
+recorded in the bundle so an import restores the same knob. The output is an
+app-importable **v3 bundle** (zip with `metadata.jsonld` + `energy.tif` +
+`passes.tif`, georeferenced to the DEM).
 
 Parity details worth knowing if you edit this:
 

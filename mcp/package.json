@@ -1,0 +1,18 @@
+{
+  "name": "simujaules-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server exposing the Simujaules energy engine (energy-worker.js) over stdio. Dev tooling, never deployed.",
+  "scripts": {
+    "postinstall": "npm --prefix ../census install --no-audit --no-fund",
+    "start": "node server.mjs",
+    "test": "node test-mcp.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "geotiff": "3.0.5",
+    "jszip": "3.10.1",
+    "zod": "4.6.1"
+  }
+}
