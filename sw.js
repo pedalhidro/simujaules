@@ -711,7 +711,14 @@
 //              recompute — same rule as the routes colormap). Z-order
 //              follows density too: segments are added in ascending-ratio
 //              order so the densest paints on top at crossings.
-const VERSION  = "v77";
+//   v77 → v78: Editable reference points: clicking a ref marker opens a
+//              popup with a "remove this reference" button (survivors are
+//              renumbered, KPI matrix invalidated). Undo/redo bar (↶ ↷)
+//              parked under the 🔍 search button, plus Ctrl+Z /
+//              Ctrl+Shift+Z: snapshot history of the ref set — click,
+//              delete, Place random/census (one step per batch), Clear,
+//              GeoJSON load, bundle import. Reset on DEM load.
+const VERSION  = "v78";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

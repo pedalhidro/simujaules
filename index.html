@@ -367,6 +367,20 @@
     .geo-search-status { margin: 6px 2px 2px; color: var(--muted); }
     .geo-search-attrib { margin: 6px 2px 0; font-size: 10px; color: var(--muted); }
     .geo-search-attrib a { color: inherit; }
+    /* Desfazer/refazer das referências: barra estilo zoom (+/−) estacionada
+       logo abaixo do 🔍 pela mesma regra — só ganha display dentro do
+       container do Leaflet. Botões desabilitados enquanto a pilha está vazia. */
+    .ref-history-bar { display: none; }
+    .leaflet-control-container .ref-history-bar { display: block; }
+    .leaflet-control-container .ref-history-bar button {
+      width: 30px; height: 30px;
+      display: flex; align-items: center; justify-content: center;
+      background: #fff; color: #333;
+      font-size: 16px; line-height: 1; cursor: pointer; padding: 0; border: none;
+    }
+    .leaflet-control-container .ref-history-bar button + button { border-top: 1px solid #ccc; }
+    .leaflet-control-container .ref-history-bar button:hover:not([disabled]) { background: #f4f4f4; }
+    .leaflet-control-container .ref-history-bar button[disabled] { color: #bbb; cursor: default; }
 
     @media (max-width: 860px) {
       /* Single-column grid on mobile. CRITICAL: position:fixed removes
@@ -946,6 +960,14 @@
   <button id="geo-search-btn" type="button" class="geo-search-btn leaflet-bar leaflet-control"
           data-i18n-title="geosearch.title" title="Buscar endereço ou lugar"
           data-i18n-aria="geosearch.title" aria-pressed="false">🔍</button>
+  <div id="ref-history-bar" class="ref-history-bar leaflet-bar leaflet-control">
+    <button id="ref-undo-btn" type="button" disabled
+            data-i18n-title="ref.undo.title" title="Desfazer (referências) — Ctrl+Z"
+            data-i18n-aria="ref.undo.title" aria-label="Desfazer (referências) — Ctrl+Z">↶</button>
+    <button id="ref-redo-btn" type="button" disabled
+            data-i18n-title="ref.redo.title" title="Refazer (referências) — Ctrl+Shift+Z"
+            data-i18n-aria="ref.redo.title" aria-label="Refazer (referências) — Ctrl+Shift+Z">↷</button>
+  </div>
   <div id="geo-search-panel" class="geo-search-panel" hidden>
     <input type="search" id="geo-search-input" autocomplete="off" enterkeyhint="search"
            data-i18n-placeholder="geosearch.placeholder" placeholder="Buscar endereço ou lugar…"
@@ -1843,6 +1865,15 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v78</strong> — 2026-09-20<br/>
+              <strong>Referências editáveis.</strong> Clicar num marcador de
+              referência abre um popup com o botão "Remover esta referência";
+              as sobreviventes são renumeradas. E um par desfazer/refazer
+              (↶ ↷, logo abaixo do 🔍 — também Ctrl+Z / Ctrl+Shift+Z) percorre
+              o histórico do conjunto de referências: clique no mapa, remoção,
+              "Distribuir aleatórias"/censo (o lote inteiro é um passo),
+              "Limpar", GeoJSON e importação de bundle. Zera ao carregar outro
+              DEM.</p>
               <p><strong>v77</strong> — 2026-08-28<br/>
               <strong>Cores dos segmentos viram dado (3C.c).</strong> Cada
               segmento é colorido pela sua densidade média relativa à média

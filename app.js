@@ -413,6 +413,13 @@ const STRINGS = {
   "census.fetch_failed": { pt: "Falha ao buscar setores censitários: {0}", en: "Failed to fetch census sectors: {0}" },
   "census.lib_missing":  { pt: "Biblioteca FlatGeobuf indisponível (offline?). Reconecte e recarregue.", en: "FlatGeobuf library unavailable (offline?). Reconnect and reload." },
   "ref.clear":           { pt: "Limpar referências", en: "Clear refs" },
+  // Per-marker popup (click a reference on the map) + undo/redo of the set.
+  "ref.delete_this":     { pt: "Remover esta referência", en: "Remove this reference" },
+  "ref.deleted":         { pt: "Referência {0} removida.", en: "Reference {0} removed." },
+  "ref.undo.title":      { pt: "Desfazer (referências) — Ctrl+Z", en: "Undo (reference points) — Ctrl+Z" },
+  "ref.redo.title":      { pt: "Refazer (referências) — Ctrl+Shift+Z", en: "Redo (reference points) — Ctrl+Shift+Z" },
+  "ref.undo.done":       { pt: "Referências: desfeito.", en: "References: undone." },
+  "ref.redo.done":       { pt: "Referências: refeito.", en: "References: redone." },
   "ref.none":            { pt: "nenhuma referência marcada", en: "no references placed" },
   "ref.count":           { pt: "{0} referência(s) marcada(s)", en: "{0} reference(s) placed" },
   "ref.show_markers":    { pt: "Mostrar marcadores de referência", en: "Show reference markers" },
@@ -1498,7 +1505,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const n = parseInt(document.getElementById("n-refs")?.value, 10) || 10;
     placeRandomRefPoints(n);
   });
-  document.getElementById("ref-clear")?.addEventListener("click", clearRefPoints);
+  document.getElementById("ref-clear")?.addEventListener("click", () => {
+    refHistoryPush();
+    clearRefPoints();
+    refHistorySettle();   // clearing an empty set is not an undo step
+  });
   document.getElementById("ref-file")?.addEventListener("change", async (ev) => {
     const f = ev.target.files[0];
     if (f) await loadRefPointsFromFile(f);
@@ -1980,6 +1991,32 @@ let geoSearchActiveIdx = -1;   // item destacado via ↑/↓
     L.DomEvent.disableClickPropagation(geoSearchBtn);
     L.DomEvent.disableScrollPropagation(geoSearchBtn);
   }
+  // Undo/redo of the reference set: a zoom-style bar parked right under 🔍
+  // (same hide-outside-the-Leaflet-container rule). Buttons are disabled
+  // while their stack is empty (updateRefHistoryButtons).
+  const refHistoryBar = document.getElementById("ref-history-bar");
+  if (refHistoryBar && leafletTopLeft) {
+    leafletTopLeft.appendChild(refHistoryBar);
+    L.DomEvent.disableClickPropagation(refHistoryBar);
+    L.DomEvent.disableScrollPropagation(refHistoryBar);
+    document.getElementById("ref-undo-btn")?.addEventListener("click", refUndo);
+    document.getElementById("ref-redo-btn")?.addEventListener("click", refRedo);
+    // (Both start `disabled` in the markup; `state` is declared further down,
+    // so the first updateRefHistoryButtons() runs on the first push.)
+  }
+  // Ctrl/⌘+Z undoes, Ctrl/⌘+Shift+Z or Ctrl/⌘+Y redoes — only outside text
+  // inputs (their native undo must keep working) and only when there is a
+  // step to take, so the browser default is otherwise untouched.
+  document.addEventListener("keydown", (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    const tag = e.target?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target?.isContentEditable) return;
+    const key = e.key.toLowerCase();
+    const redo = (key === "z" && e.shiftKey) || key === "y";
+    const undo = key === "z" && !e.shiftKey;
+    if (redo && state.refHistory.future.length) { e.preventDefault(); refRedo(); }
+    else if (undo && state.refHistory.past.length) { e.preventDefault(); refUndo(); }
+  });
 }
 
 async function photonGeocode(query) {
@@ -2337,6 +2374,9 @@ const state = {
   // Multi-reference density: list of [r, c] pixel coords plus their map markers.
   refPoints: [],
   refMarkers: [],
+  // Undo/redo stacks of ref-set snapshots (see refHistoryPush). Reset on
+  // DEM load — snapshots index cells of the grid they were taken on.
+  refHistory: { past: [], future: [] },
   // Total in-extent population the CURRENT refs proxy (Σ setor pop × in-bbox
   // area fraction, from the census sampler). Each census ref is an equal-share
   // proxy of refPopM/K. Nulled on ANY ref-set change (manual click, clear,
@@ -3339,6 +3379,7 @@ async function loadDemFromArrayBuffer(buf, label, gen) {
   state.qmcIndex = 0;
   state.refPopM = null;
   kpiInvalidate();
+  refHistoryReset();   // snapshots index the OLD grid's cells
   state.src = null;
   state.dst = null;
   state.lastResult = null;
@@ -6330,7 +6371,9 @@ map.on("click", (e) => {
   // "— density —" displays and leak a stale seed into the compute message.
   const densityOn = !!document.getElementById("want-density")?.checked;
   if (densityOn) {
+    refHistoryPush();
     addRefPoint([r, c]);
+    refHistorySettle();
     return;
   }
   if (!state.src) {
@@ -6420,17 +6463,79 @@ function addRefPoint(rc) {
   state.refPopM = null;
   kpiInvalidate();
   state.refPoints.push([r, c]);
-  const { originX, originY, dx, dy } = state.dem;
-  const latlng = L.latLng(originY - (r + 0.5) * dy, originX + (c + 0.5) * dx);
-  const idx = state.refPoints.length;
-  const m = L.marker(latlng, { icon: makeRefIcon(idx) })
-    .bindTooltip(`ref ${idx} · r=${r}, c=${c}`);
-  // Respect the visibility toggle: a marker added while refs are hidden stays
-  // off the map until the toggle re-adds it (applyLayerControls).
-  if (document.getElementById("refs-visible")?.checked ?? true) m.addTo(map);
-  state.refMarkers.push(m);
+  state.refMarkers.push(makeRefMarker(state.refPoints.length, [r, c]));
   enforceRefCap();
   syncRefDisplay();
+}
+
+// Build the numbered marker for ref #idx (1-based) at cell rc. Clicking it
+// opens a popup with the ref's label and a "remove this reference" button —
+// the popup content is a function so the label reflects the CURRENT number
+// (deletes/trims renumber the survivors). Respects the visibility toggle: a
+// marker created while refs are hidden stays off the map until the toggle
+// re-adds it (applyLayerControls).
+function makeRefMarker(idx, rc) {
+  const [r, c] = rc;
+  const { originX, originY, dx, dy } = state.dem;
+  const latlng = L.latLng(originY - (r + 0.5) * dy, originX + (c + 0.5) * dx);
+  const m = L.marker(latlng, { icon: makeRefIcon(idx) })
+    .bindTooltip(`ref ${idx} · r=${r}, c=${c}`);
+  m.bindPopup(() => {
+    const i = state.refMarkers.indexOf(m);
+    const cur = state.refPoints[i] || rc;
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "text-align:center;font-size:12px;color:#000;";
+    const label = document.createElement("div");
+    label.style.cssText = "margin-bottom:6px;font-family:ui-monospace,monospace;";
+    label.textContent = `ref ${i + 1} · r=${cur[0]}, c=${cur[1]}`;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "🗑 " + t("ref.delete_this");
+    // Same explicit style as the drawn-shape delete popup: Leaflet's popup is
+    // white, so the app's .secondary class would be invisible here.
+    btn.style.cssText =
+      "margin:0;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;" +
+      "background:#d6493e;color:#fff;border:none;border-radius:4px;white-space:nowrap;";
+    btn.addEventListener("click", () => { m.closePopup(); deleteRefPoint(m); });
+    wrap.appendChild(label);
+    wrap.appendChild(btn);
+    return wrap;
+  }, { closeButton: false, offset: [0, -ICON_REF_SIZE / 2] });
+  // Marker clicks must never fall through to the map handler (which would
+  // drop a NEW reference under the one being inspected).
+  m.on("click", (e) => L.DomEvent.stopPropagation(e));
+  if (document.getElementById("refs-visible")?.checked ?? true) m.addTo(map);
+  return m;
+}
+
+// Re-stamp every surviving ref's numbered icon + default tooltip so what's
+// drawn matches the current order (after a FIFO trim, a delete, or a KPI
+// recolor being undone).
+function renumberRefMarkers() {
+  for (let i = 0; i < state.refMarkers.length; i++) {
+    const marker = state.refMarkers[i];
+    const rc = state.refPoints[i];
+    if (!marker || !rc) continue;
+    marker.setIcon(makeRefIcon(i + 1));
+    marker.unbindTooltip().bindTooltip(`ref ${i + 1} · r=${rc[0]}, c=${rc[1]}`);
+  }
+}
+
+// Remove ONE reference by its marker (from the marker's popup). One undo
+// step; the survivors are renumbered so the labels stay contiguous.
+function deleteRefPoint(marker) {
+  const i = state.refMarkers.indexOf(marker);
+  if (i < 0) return;
+  refHistoryPush();
+  state.refPoints.splice(i, 1);
+  state.refMarkers.splice(i, 1);
+  marker.remove();
+  state.refPopM = null;   // the set no longer matches the census sample
+  kpiInvalidate();
+  renumberRefMarkers();
+  syncRefDisplay();
+  status.textContent = t("ref.deleted", i + 1);
+  scheduleStatusClear(status.textContent);
 }
 
 function enforceRefCap() {
@@ -6446,12 +6551,7 @@ function enforceRefCap() {
   }
   // After a FIFO trim the surviving refs need their numbered icons
   // refreshed so what's drawn matches the (now reset) order.
-  for (let i = 0; i < state.refMarkers.length; i++) {
-    const marker = state.refMarkers[i];
-    const [r, c] = state.refPoints[i];
-    marker.setIcon(makeRefIcon(i + 1));
-    marker.unbindTooltip().bindTooltip(`ref ${i + 1} · r=${r}, c=${c}`);
-  }
+  renumberRefMarkers();
 }
 
 function clearRefPoints() {
@@ -6462,6 +6562,105 @@ function clearRefPoints() {
   state.refPopM = null;
   kpiInvalidate();
   syncRefDisplay();
+}
+
+// ------- Reference-set undo / redo -------
+// Snapshot-based. Every USER-LEVEL operation on the ref set — map click,
+// marker delete, Place random / census, Clear refs, GeoJSON load, bundle
+// import — calls refHistoryPush() once BEFORE it mutates, so a batch of N
+// random points is ONE undo step. Sync callers follow with
+// refHistorySettle() to drop the entry when nothing actually changed (e.g. a
+// clear on an empty set). The N-references cap travels with the snapshot
+// (loadRefPointsFromFile raises it), and restore rebuilds the markers
+// DIRECTLY — not through addRefPoint — so a cap lowered since the snapshot
+// cannot FIFO-trim what undo brings back. Compute-time network re-snapping
+// (runCompute) mutates refPoints in place without a snapshot on purpose: it
+// is not a user action and re-applies to whatever undo restores.
+const REF_HISTORY_MAX = 50;
+
+function refSnapshot() {
+  return {
+    pts: state.refPoints.map(([r, c]) => [r, c]),
+    qmc: state.qmcIndex,
+    popM: state.refPopM,
+    cap: document.getElementById("n-refs")?.value ?? null,
+  };
+}
+
+function refSnapshotEquals(a, b) {
+  if (!a || !b || a.pts.length !== b.pts.length) return false;
+  if (a.qmc !== b.qmc || a.popM !== b.popM || a.cap !== b.cap) return false;
+  for (let i = 0; i < a.pts.length; i++) {
+    if (a.pts[i][0] !== b.pts[i][0] || a.pts[i][1] !== b.pts[i][1]) return false;
+  }
+  return true;
+}
+
+function refHistoryPush() {
+  const h = state.refHistory;
+  h.past.push(refSnapshot());
+  if (h.past.length > REF_HISTORY_MAX) h.past.shift();
+  h.future.length = 0;
+  updateRefHistoryButtons();
+}
+
+// Drop the top snapshot if the operation it preceded turned out to be a no-op.
+function refHistorySettle() {
+  const h = state.refHistory;
+  if (h.past.length && refSnapshotEquals(h.past[h.past.length - 1], refSnapshot())) {
+    h.past.pop();
+    updateRefHistoryButtons();
+  }
+}
+
+function refHistoryReset() {
+  state.refHistory.past.length = 0;
+  state.refHistory.future.length = 0;
+  updateRefHistoryButtons();
+}
+
+function refRestore(snap) {
+  for (const m of state.refMarkers) m.remove();
+  state.refMarkers = [];
+  state.refPoints = snap.pts.map(([r, c]) => [r, c]);
+  state.qmcIndex = snap.qmc;
+  kpiInvalidate();                 // rows were keyed to the set being replaced
+  state.refPopM = snap.popM;
+  const capInput = document.getElementById("n-refs");
+  if (capInput && snap.cap != null) capInput.value = snap.cap;
+  if (state.dem) {
+    for (let i = 0; i < state.refPoints.length; i++) {
+      state.refMarkers.push(makeRefMarker(i + 1, state.refPoints[i]));
+    }
+  }
+  syncRefDisplay();
+}
+
+function refUndo() {
+  const h = state.refHistory;
+  if (!h.past.length) return;
+  h.future.push(refSnapshot());
+  refRestore(h.past.pop());
+  updateRefHistoryButtons();
+  status.textContent = t("ref.undo.done");
+  scheduleStatusClear(status.textContent);
+}
+
+function refRedo() {
+  const h = state.refHistory;
+  if (!h.future.length) return;
+  h.past.push(refSnapshot());
+  refRestore(h.future.pop());
+  updateRefHistoryButtons();
+  status.textContent = t("ref.redo.done");
+  scheduleStatusClear(status.textContent);
+}
+
+function updateRefHistoryButtons() {
+  const u = document.getElementById("ref-undo-btn");
+  const r = document.getElementById("ref-redo-btn");
+  if (u) u.disabled = !state.refHistory.past.length;
+  if (r) r.disabled = !state.refHistory.future.length;
 }
 
 // Drop the cached accessibility matrix + KPI block and restore the default
@@ -6475,13 +6674,7 @@ function kpiInvalidate() {
   const group = document.getElementById("kpi-group");
   if (group) group.style.display = "none";
   // Undo the accessibility recoloring (markers may have been trimmed since).
-  for (let i = 0; i < state.refMarkers.length; i++) {
-    const marker = state.refMarkers[i];
-    const rc = state.refPoints[i];
-    if (!marker || !rc) continue;
-    marker.setIcon(makeRefIcon(i + 1));
-    marker.unbindTooltip().bindTooltip(`ref ${i + 1} · r=${rc[0]}, c=${rc[1]}`);
-  }
+  renumberRefMarkers();
 }
 
 // ---- Quasi-Monte-Carlo point sets for reference placement ----------------
@@ -6545,6 +6738,7 @@ function placeRandomRefPoints(n) {
   // "census" is population-weighted and runs an async cloud query (FlatGeobuf
   // over the DEM bbox); fork to it and leave the QMC/random paths synchronous.
   if (sampling === "census") { placeCensusRefPoints(want); return; }
+  refHistoryPush();   // the whole batch is one undo step (census pushes its own)
   const nextUV =
     sampling === "sobol"  ? () => sobolPoint2D(++state.qmcIndex) :
     sampling === "halton" ? () => haltonPoint2D(++state.qmcIndex) :
@@ -6574,6 +6768,7 @@ function placeRandomRefPoints(n) {
     placed.push([r, c]);
   }
   for (const rc of placed) addRefPoint(rc);
+  refHistorySettle();
 }
 
 // ---- Census (IBGE 2022) population-weighted reference sampling ------------
@@ -6750,6 +6945,7 @@ async function placeCensusRefPoints(want) {
       else skipped++;
     }
     if (!valid.length) return fail("census.no_points");   // refs left untouched
+    refHistoryPush();             // one undo step for the whole replacement
     clearRefPoints();             // census REPLACES the current set (like file load)
     for (const rc of valid) addRefPoint(rc);
     const placed = state.refPoints.length;
@@ -6830,6 +7026,8 @@ async function loadRefPointsFromFile(file) {
     else skipped++;
   }
   if (!valid.length) return fail("ref.load.no_points", file.name);
+  // Snapshot BEFORE the cap is raised so undo restores the previous cap too.
+  refHistoryPush();
   // Raise the N-references cap so the whole file survives the FIFO trim in
   // addRefPoint (input + worker top out at 2000; warn if we clip).
   const capInput = document.getElementById("n-refs");
@@ -6842,6 +7040,7 @@ async function loadRefPointsFromFile(file) {
   clearRefPoints();
   for (const rc of valid) addRefPoint(rc);
   const placed = state.refPoints.length;
+  refHistorySettle();
   status.textContent = skipped
     ? t("ref.loaded.skipped", placed, file.name, skipped)
     : t("ref.loaded", placed, file.name);
@@ -12388,6 +12587,7 @@ function applyMetadataToUI(md, bin = {}) {
   // the markers and respects enforceRefCap, so the cap field set above
   // governs how many actually survive.
   if (Array.isArray(p.refPoints) && state.dem && demMatch !== false) {
+    refHistoryPush();   // the import replaces the set as ONE undoable step
     // Clear whatever is on the map from a previous bundle / run.
     if (state.refMarkers) for (const m of state.refMarkers) m.remove();
     state.refMarkers = [];
@@ -12396,6 +12596,7 @@ function applyMetadataToUI(md, bin = {}) {
       if (Array.isArray(rc) && rc.length >= 2) addRefPoint([rc[0] | 0, rc[1] | 0]);
     }
     syncRefDisplay();
+    refHistorySettle();
   }
 
   // ---- Network mask restore ---------------------------------------------
