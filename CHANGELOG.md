@@ -9,6 +9,33 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v79 — 2026-09-20
+
+**Celular: painel vira folha inferior (bottom sheet).** Em telas ≤ 860 px o
+painel lateral deslizante (uma sidebar — impraticável no celular) foi
+substituído por uma folha ancorada na borda de baixo, com três posições:
+**mínima** (só a alça + o botão Calcular), **meia** (52% da tela, padrão ao
+abrir) e **cheia** (deixa uma faixa de 56 px no topo para a pílula de
+status; os botões flutuantes do mapa se escondem). Arrasta-se pela alça ou
+pela cabeça da folha (encaixa na posição mais próxima ao soltar) e um toque
+na alça alterna mínima → meia → cheia. O botão **Calcular** (com a
+estimativa de tempo) é movido para a cabeça da folha no celular, então fica
+sempre à mão sem abrir o painel — e volta ao lugar de origem no desktop. Um
+toque no mapa (marcar origem/destino/referência) recolhe a folha para a
+mínima, como antes fechava a gaveta. O hambúrguer ☰ e o pano de fundo somem
+no celular (a folha está sempre presente); a pilha de botões da direita fica
+localizar (8) / camadas (56) e o popover de camadas abre em 104. A pílula de
+status/progresso sai da borda inferior (agora da folha) para o topo,
+centralizada, estreita o bastante para não cobrir 🔍 nem localizar.
+
+**Celular: alvos de toque.** Botões e linhas de exemplo com ≥ 40 px de
+altura, campos numéricos/selects com 16 px (abaixo disso o Safari iOS dá
+zoom na página ao focar), cabeçalhos dos grupos com 40 px, checkboxes de 20
+px, botão dos popups de marcador com 40 px; `overscroll-behavior: none`
+para não disparar pull-to-refresh arrastando mapa/folha; em retrato o
+subtítulo da marca sai para a linha caber. O hash CSP do script inline da
+gaveta/folha foi recalculado (o corpo mudou).
+
 ## v78 — 2026-09-20
 
 **Referências editáveis.** Clicar num marcador de referência abre um popup

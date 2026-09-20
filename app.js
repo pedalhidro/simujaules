@@ -501,6 +501,7 @@ const STRINGS = {
   // Accessible names / tooltips (icon buttons, file pickers, layer rows) + a few
   // strings that used to be hardcoded (calibration, gate reasons, budget hint).
   "drawer.toggle":       { pt: "Mostrar/ocultar painel", en: "Show/hide panel" },
+  "sheet.handle":        { pt: "Expandir/recolher painel", en: "Expand/collapse panel" },
   "lang.toggle.aria":    { pt: "Mudar idioma", en: "Switch language" },
   "modal.close":         { pt: "Fechar", en: "Close" },
   "aria.dem_file":       { pt: "Carregar DEM", en: "Load DEM" },
