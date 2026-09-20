@@ -711,7 +711,21 @@
 //              recompute — same rule as the routes colormap). Z-order
 //              follows density too: segments are added in ascending-ratio
 //              order so the densest paints on top at crossings.
-const VERSION  = "v77";
+//   v77 → v78: Editable reference points: clicking a ref marker opens a
+//              popup with a "remove this reference" button (survivors are
+//              renumbered, KPI matrix invalidated). Undo/redo bar (↶ ↷)
+//              parked under the 🔍 search button, plus Ctrl+Z /
+//              Ctrl+Shift+Z: snapshot history of the ref set — click,
+//              delete, Place random/census (one step per batch), Clear,
+//              GeoJSON load, bundle import. Reset on DEM load.
+//   v78 → v79: Phone layout: the slide-in sidebar drawer (≤ 860 px) becomes
+//              a BOTTOM SHEET with peek / half / full snap points (drag the
+//              head, tap the handle). Compute + time estimate move into the
+//              sheet head on phones (back to #run-slot on desktop); a map tap
+//              collapses to peek. Hamburger/backdrop hidden on phones, status
+//              pill at top centre, ≥ 40 px touch targets, 16 px inputs (no
+//              iOS focus zoom). Drawer inline-script CSP hash recomputed.
+const VERSION  = "v79";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

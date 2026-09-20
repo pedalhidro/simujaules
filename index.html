@@ -63,7 +63,7 @@
     default-src 'self';
     script-src 'self' https://unpkg.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com 'wasm-unsafe-eval'
       'sha256-Zummr8wLfJ3XxdgpKBzuhAKVQKIcBLTZ/vDz4TDv2lg='
-      'sha256-759bp9RLFyEKbmJ2/BusIfD6K8bDDx0xlabSImiad4M='
+      'sha256-3Ncpey8Q1Duv9sf5yFIhb5GwCoZh8vQzW1RBGG4MnrI='
       'sha256-xRKHkuCIqaZQ8tc4K6yAEK0CmbWBBJSpZvmHKcRdVIU='
       'sha256-xChjLER4dCiBiSng0gVHR06gT1nCUkmOsZ/ajs/SZcg=';
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com;
@@ -217,6 +217,11 @@
     }
     #sidebar-resizer:hover, #sidebar-resizer.dragging { background: var(--accent-2); opacity: 0.45; }
     #map { height: 100vh; height: 100dvh; }
+    /* Bottom-sheet scaffolding is inert on desktop: the head is hidden and the
+       body wrapper is display:contents so fitPanelColumns() still measures
+       .panel-header / .panel-cols as direct children of the scrolling #panel. */
+    .sheet-head { display: none; }
+    .panel-body { display: contents; }
 
     /* ---- Mobile drawer ----------------------------------------------------
        Below 860 px (small tablets and phones) the panel becomes a fixed
@@ -367,6 +372,20 @@
     .geo-search-status { margin: 6px 2px 2px; color: var(--muted); }
     .geo-search-attrib { margin: 6px 2px 0; font-size: 10px; color: var(--muted); }
     .geo-search-attrib a { color: inherit; }
+    /* Desfazer/refazer das referências: barra estilo zoom (+/−) estacionada
+       logo abaixo do 🔍 pela mesma regra — só ganha display dentro do
+       container do Leaflet. Botões desabilitados enquanto a pilha está vazia. */
+    .ref-history-bar { display: none; }
+    .leaflet-control-container .ref-history-bar { display: block; }
+    .leaflet-control-container .ref-history-bar button {
+      width: 30px; height: 30px;
+      display: flex; align-items: center; justify-content: center;
+      background: #fff; color: #333;
+      font-size: 16px; line-height: 1; cursor: pointer; padding: 0; border: none;
+    }
+    .leaflet-control-container .ref-history-bar button + button { border-top: 1px solid #ccc; }
+    .leaflet-control-container .ref-history-bar button:hover:not([disabled]) { background: #f4f4f4; }
+    .leaflet-control-container .ref-history-bar button[disabled] { color: #bbb; cursor: default; }
 
     @media (max-width: 860px) {
       /* Single-column grid on mobile. CRITICAL: position:fixed removes
@@ -374,77 +393,113 @@
          remaining child (#map) would auto-place into column 1 (0 px wide)
          and render as a black void. One column → map fills the only cell. */
       #app { grid-template-columns: 1fr; grid-template-rows: 1fr; }
-      /* Drawer mode: force a single column and hide the resizer. */
       .panel-cols { column-count: 1; }
-      #sidebar-resizer { display: none; }
+      /* The sidebar affordances (resizer, hamburger, backdrop) are desktop-
+         only: on phones the panel is a BOTTOM SHEET that is always present. */
+      #sidebar-resizer, .drawer-toggle, .drawer-backdrop { display: none !important; }
+      /* No pull-to-refresh / rubber-banding under a map + sheet UI. */
+      html, body { overscroll-behavior: none; }
+
+      /* ---- Bottom sheet -------------------------------------------------
+         #panel docks to the bottom edge, full width, and the inline sheet
+         controller sets its HEIGHT to one of three snap points: peek (just
+         the handle + Compute), half, full. Dragging the head or tapping the
+         handle moves between them; the body scrolls internally. */
       #panel {
         position: fixed;
-        top: 0; left: 0;
-        height: 100vh; height: 100dvh;
-        width: min(86vw, 360px);
+        top: auto; left: 0; right: 0; bottom: 0;
+        width: auto;
+        height: 52vh; height: 52dvh; /* controller overrides per snap point */
+        max-height: 100vh; max-height: 100dvh;
         z-index: 900;
-        transform: translateX(-100%);
-        transition: transform 0.22s ease-out;
-        box-shadow: 4px 0 18px rgba(0, 0, 0, 0.5);
-        /* Extra top padding so content clears the hamburger button. */
-        padding-top: 56px;
-        padding-bottom: 72px; /* last form row clears the fixed bottom × / locate */
+        transform: none;
+        display: flex; flex-direction: column;
+        overflow: hidden;
+        border-right: none; border-top: 1px solid var(--border);
+        border-radius: 14px 14px 0 0;
+        box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.5);
+        padding: 0 12px calc(8px + env(safe-area-inset-bottom, 0px));
+        transition: height 0.22s ease-out;
       }
-      #panel.open { transform: translateX(0); }
-      /* On phones the top-left corner is awkward to reach with the
-         right thumb; move both floating buttons to the bottom row. */
-      /* Mobile mirrors desktop: locate / hamburger / layers form a single
-         top-right stack (8 / 56 / 104) so they all stay ABOVE the layer-control
-         modal (which opens at top:152) — tapping them, including to close the
-         modal, always works. Sized for an iPhone SE: the 40px buttons sit in the
-         narrow strip the slide-in drawer leaves on the right. */
-      .drawer-toggle {
-        display: inline-flex;
-        top: 56px;
-        right: 8px;
-        bottom: auto;
-        left: auto;
+      #panel.sheet-dragging { transition: none; }
+      .sheet-head {
+        display: block; flex: none;
+        margin: 0 -12px; padding: 0 12px 6px;
+        touch-action: none; /* the drag is ours — no scroll/zoom gesture here */
+        user-select: none; -webkit-user-select: none;
       }
-      .locate-button {
-        top: 8px;
-        right: 8px;
-        bottom: auto;
+      .sheet-handle {
+        width: 44px; height: 5px; border-radius: 3px;
+        background: var(--muted); opacity: 0.7;
+        margin: 0 auto 8px;
+        /* Generous invisible hit area around the 5 px pill (::before). */
+        position: relative; padding: 0; cursor: grab;
       }
-      /* Once the drawer is open, swap the icon to an × via the data-attr.
-         The button stays where it is so the user can close from the same
-         spot they opened it from. */
-      .drawer-toggle.open { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+      .sheet-handle::before { content: ""; position: absolute; inset: -12px -60px; }
+      #sheet-actions #run { margin: 0; width: 100%; min-height: 44px; font-size: 15px; }
+      #sheet-actions #time-estimate { margin-top: 3px; }
+      .panel-body {
+        display: block; flex: 1 1 auto; min-height: 0;
+        overflow-y: auto; overflow-x: hidden;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+        padding-top: 4px;
+      }
+      /* In peek only the head shows — keep the body from painting a sliver. */
+      #panel.sheet-peek .panel-body { visibility: hidden; }
 
-      /* Touch-friendly bump on mobile, but only as much as readability
-         actually needs — the user has to scroll less when these stay
-         modest. Buttons end up ~32 px tall, comfortable for thumbs. */
-      button { padding: 8px; font-size: 13px; }
-      .ex-link { padding: 6px 10px; font-size: 12px; }
-      input[type="number"], select { padding: 6px 9px; font-size: 13px; }
-      /* Keep the small inline buttons (engine tag, help) compact even on
-         mobile — they're not primary actions. */
-      .engine-tag, .help-button { padding: 0; }
-      .help-button { width: 24px !important; height: 24px; font-size: 13px; }
-      .engine-tag { height: 24px; min-width: 30px; font-size: 11px; }
+      /* Top-right stack without the hamburger: locate (8) / layers (56). */
+      .locate-button { top: 8px; right: 8px; bottom: auto; }
+      .layer-ctrl-button { top: 56px; right: 8px; bottom: auto; }
+      #layer-order-modal { top: 104px; }
+      #layer-order-modal > .modal { max-height: calc(100vh - 116px); max-height: calc(100dvh - 116px); }
+      /* Compute feedback pill: TOP centre (the sheet owns the bottom edge),
+         narrow enough to clear the 🔍 (left) and locate (right) buttons. */
+      /* `body #status-float` out-specifies the base rule further down (which
+         sets bottom:14px) — same-specificity would lose on source order. */
+      body #status-float {
+        top: 8px; bottom: auto;
+        max-width: calc(100vw - 120px);
+      }
+      /* Sheet at full height: the map is covered, so its floating controls
+         (locate / layers / 🔍 + ↶↷ column) step aside; the 56 px strip the
+         sheet leaves at the top keeps the status pill visible. */
+      body.sheet-full .locate-button, body.sheet-full .layer-ctrl-button,
+      body.sheet-full .leaflet-top.leaflet-left { display: none; }
+      /* Hide Leaflet's default +/− zoom control on phones — pinch-zoom is the
+         natural gesture; 🔍 and ↶↷ keep the top-left column. */
+      .leaflet-control-zoom { display: none; }
 
-      h1 { font-size: 13px; }
+      /* ---- Touch targets ------------------------------------------------
+         ≥ 40 px controls, 16 px inputs (below that iOS Safari auto-zooms
+         the page on focus), roomier collapsible headers. */
+      button { padding: 9px 10px; font-size: 14px; min-height: 40px; }
+      .ex-link { padding: 9px 10px; font-size: 13px; min-height: 40px; }
+      input[type="number"], input[type="text"], input[type="search"], select {
+        padding: 8px 10px; font-size: 16px; min-height: 40px;
+      }
+      input[type="file"] { font-size: 14px; }
+      input[type="checkbox"], input[type="radio"] { width: 20px; height: 20px; }
+      details.group > summary { min-height: 40px; padding: 4px 0; font-size: 12px; }
+      details.group-parent > summary { min-height: 40px; padding: 8px 2px; font-size: 13px; }
+      label { font-size: 12px; }
+      .hint, .meta { font-size: 11px; }
+      /* Keep the small inline buttons (lang tag, help) compact — not primary
+         actions, and they share the brand row. */
+      .engine-tag, .help-button { padding: 0; min-height: 0; }
+      .help-button { width: 28px !important; height: 28px; font-size: 14px; }
+      .engine-tag { height: 28px; min-width: 34px; font-size: 12px; }
+      /* Leaflet marker popups (reference delete etc.) get a thumb-sized button. */
+      .leaflet-popup-content button { min-height: 40px; font-size: 14px; }
+
+      h1 { font-size: 14px; }
       .group { padding: 8px 10px; }
     }
-    /* On really small screens (phones in portrait), let the modal use the
-       full viewport — the side-by-side help layout already collapses below
-       720 px in the existing rule. */
+    /* Phones in portrait: help modal uses the whole viewport (its two-column
+       layout already collapses below 720 px). */
     @media (max-width: 480px) {
       .modal { padding: 16px; max-height: 92vh; }
-      #panel { width: 92vw; }
-    }
-
-    /* Hide Leaflet's default +/− zoom control on mobile — the hamburger
-       lives in the same top-left slot, and pinch-zoom is the natural
-       gesture on touch devices anyway. */
-    @media (max-width: 860px) {
-      .leaflet-control-zoom { display: none; }
-      /* Third in the top-right stack (mirrors desktop), clear of its own modal. */
-      .layer-ctrl-button { top: 104px; right: 8px; bottom: auto; }
+      .panel-header .subtitle { display: none; } /* brand row fits on one line */
     }
     h1 {
       font-size: 14px;
@@ -946,6 +1001,14 @@
   <button id="geo-search-btn" type="button" class="geo-search-btn leaflet-bar leaflet-control"
           data-i18n-title="geosearch.title" title="Buscar endereço ou lugar"
           data-i18n-aria="geosearch.title" aria-pressed="false">🔍</button>
+  <div id="ref-history-bar" class="ref-history-bar leaflet-bar leaflet-control">
+    <button id="ref-undo-btn" type="button" disabled
+            data-i18n-title="ref.undo.title" title="Desfazer (referências) — Ctrl+Z"
+            data-i18n-aria="ref.undo.title" aria-label="Desfazer (referências) — Ctrl+Z">↶</button>
+    <button id="ref-redo-btn" type="button" disabled
+            data-i18n-title="ref.redo.title" title="Refazer (referências) — Ctrl+Shift+Z"
+            data-i18n-aria="ref.redo.title" aria-label="Refazer (referências) — Ctrl+Shift+Z">↷</button>
+  </div>
   <div id="geo-search-panel" class="geo-search-panel" hidden>
     <input type="search" id="geo-search-input" autocomplete="off" enterkeyhint="search"
            data-i18n-placeholder="geosearch.placeholder" placeholder="Buscar endereço ou lugar…"
@@ -958,6 +1021,16 @@
 
   <div id="app">
     <aside id="panel">
+      <!-- Bottom-sheet head (phones only; display:none on desktop). The grab
+           handle drags/taps the sheet between peek / half / full, and the
+           inline sheet controller MOVES #run + #time-estimate into
+           #sheet-actions at phone widths so Compute is reachable without
+           opening the panel. -->
+      <div class="sheet-head" id="sheet-head">
+        <div class="sheet-handle" role="button" tabindex="0" data-i18n-aria="sheet.handle" aria-label="Expandir/recolher painel"></div>
+        <div id="sheet-actions"></div>
+      </div>
+      <div class="panel-body" id="panel-body">
       <div class="panel-header">
         <div class="brand">
           <img class="app-icon" src="./icons/icon-192-v2.png" alt="" width="28" height="28" />
@@ -1391,8 +1464,12 @@
       </details>
       </details>
 
+      <!-- #run-slot marks where the sheet controller puts Compute back when the
+           viewport returns to desktop width. -->
+      <div id="run-slot">
       <button id="run" data-i18n="btn.compute" disabled>Compute</button>
       <div id="time-estimate" style="font-size: 10px; color: var(--muted); margin-top: 3px; text-align: center;"></div>
+      </div>
 
       <details class="group-parent" id="result-group" style="margin-top: 8px;">
         <summary data-i18n="group.result">3. Resultados</summary>
@@ -1442,6 +1519,7 @@
       </details>
 
       </div><!-- /.panel-cols -->
+      </div><!-- /.panel-body -->
     </aside>
     <div id="sidebar-resizer" data-i18n-title="resizer.title" title="Drag to set 1–4 columns" aria-hidden="true"></div>
     <div id="map"></div>
@@ -1512,26 +1590,112 @@
       const btn = document.getElementById('drawer-toggle');
       const backdrop = document.getElementById('drawer-backdrop');
       if (!panel || !btn || !backdrop) return;
-      function setOpen(open) {
-        panel.classList.toggle('open', open);
-        btn.classList.toggle('open', open);
-        backdrop.classList.toggle('active', open);
-        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-        btn.textContent = open ? '×' : '☰';
-        // The locate / layer buttons stay in the top-right stack (clear of the
-        // left slide-in drawer), so they're left visible — same as desktop.
-      }
       const app = document.getElementById('app');
       const isDesktop = () => window.innerWidth > 860;
+
+      // ---- Phone bottom sheet ---------------------------------------------
+      // At ≤ 860 px the panel is a bottom sheet with three snap points. The
+      // Compute button (+ its time estimate) is MOVED into the sheet head so it
+      // stays reachable in peek; on the way back to desktop it returns to
+      // #run-slot. app.js holds element references (runBtn), which survive
+      // reparenting — only the DOM position changes.
+      const sheetHead = document.getElementById('sheet-head');
+      const sheetActions = document.getElementById('sheet-actions');
+      const runSlot = document.getElementById('run-slot');
+      const runBtnEl = document.getElementById('run');
+      const estimateEl = document.getElementById('time-estimate');
+      const SNAPS = ['peek', 'half', 'full'];
+      let sheetState = 'half';
+      function placeRun(mobile) {
+        const target = mobile ? sheetActions : runSlot;
+        if (!target || !runBtnEl) return;
+        if (runBtnEl.parentElement !== target) {
+          target.appendChild(runBtnEl);
+          if (estimateEl) target.appendChild(estimateEl);
+        }
+      }
+      function snapHeights() {
+        const vh = window.innerHeight;
+        const ps = getComputedStyle(panel);
+        const peek = (sheetHead ? sheetHead.offsetHeight : 60) + parseFloat(ps.paddingBottom || '0') + 2;
+        // full leaves a 56 px strip for the status pill (map controls hide).
+        return { peek, half: Math.max(peek + 80, Math.round(vh * 0.52)), full: vh - 56 };
+      }
+      function applySheet(state) {
+        sheetState = SNAPS.includes(state) ? state : 'half';
+        const h = snapHeights();
+        for (const s of SNAPS) panel.classList.toggle('sheet-' + s, s === sheetState);
+        document.body.classList.toggle('sheet-full', sheetState === 'full');
+        panel.style.height = h[sheetState] + 'px';
+        if (sheetHead) sheetHead.querySelector('.sheet-handle')?.setAttribute('aria-expanded', sheetState === 'peek' ? 'false' : 'true');
+      }
+      function setOpen(open) {
+        // Kept for app.js's __simuDrawer API: close → peek (map tap), open → half.
+        if (isDesktop()) return;
+        applySheet(open ? 'half' : 'peek');
+      }
+      function enterMobile() {
+        placeRun(true);
+        applySheet(sheetState);
+      }
+      function enterDesktop() {
+        placeRun(false);
+        for (const s of SNAPS) panel.classList.remove('sheet-' + s);
+        document.body.classList.remove('sheet-full');
+        panel.style.height = '';
+      }
+      // Drag / tap on the sheet head. Buttons inside the head (Compute) keep
+      // their own clicks; everything else on the head is a grab surface.
+      if (sheetHead) {
+        let drag = null;
+        sheetHead.addEventListener('pointerdown', (e) => {
+          if (isDesktop() || e.target.closest('button, input, select, a')) return;
+          drag = { y0: e.clientY, h0: panel.getBoundingClientRect().height, moved: false, id: e.pointerId };
+          panel.classList.add('sheet-dragging');
+          try { sheetHead.setPointerCapture(e.pointerId); } catch {}
+          e.preventDefault();
+        });
+        sheetHead.addEventListener('pointermove', (e) => {
+          if (!drag) return;
+          const dy = drag.y0 - e.clientY;
+          if (Math.abs(dy) > 6) drag.moved = true;
+          const h = snapHeights();
+          panel.style.height = Math.max(h.peek, Math.min(h.full, drag.h0 + dy)) + 'px';
+        });
+        const endDrag = (e) => {
+          if (!drag) return;
+          const { moved } = drag;
+          drag = null;
+          panel.classList.remove('sheet-dragging');
+          try { sheetHead.releasePointerCapture(e.pointerId); } catch {}
+          if (!moved) {
+            // Tap on the handle: cycle peek → half → full → peek.
+            applySheet(SNAPS[(SNAPS.indexOf(sheetState) + 1) % SNAPS.length]);
+            return;
+          }
+          // Release: snap to the nearest point.
+          const cur = panel.getBoundingClientRect().height;
+          const h = snapHeights();
+          let best = 'half', bestD = Infinity;
+          for (const s of SNAPS) { const d = Math.abs(h[s] - cur); if (d < bestD) { bestD = d; best = s; } }
+          applySheet(best);
+        };
+        sheetHead.addEventListener('pointerup', endDrag);
+        sheetHead.addEventListener('pointercancel', endDrag);
+        sheetHead.querySelector('.sheet-handle')?.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); applySheet(SNAPS[(SNAPS.indexOf(sheetState) + 1) % SNAPS.length]); }
+        });
+      }
+
+      // ---- Desktop sidebar collapse (hamburger) ------------------------------
       // Highlight the hamburger while the docked sidebar is VISIBLE (desktop:
-      // not collapsed). Mobile uses the .open class for its open-state highlight.
+      // not collapsed). Hidden by CSS on phones (the sheet replaces it).
       const syncToggleActive = () => {
         if (isDesktop()) btn.classList.toggle('active', !app.classList.contains('panel-collapsed'));
         else btn.classList.remove('active');
       };
       btn.addEventListener('click', () => {
         if (isDesktop()) {
-          // Desktop: collapse/expand the docked sidebar (keep the ☰ glyph).
           const collapsed = app.classList.toggle('panel-collapsed');
           btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
           btn.textContent = '☰';
@@ -1540,19 +1704,27 @@
           // doesn't render at the old width.
           window.dispatchEvent(new Event('resize'));
         } else {
-          setOpen(!panel.classList.contains('open'));
+          setOpen(sheetState === 'peek');
         }
       });
       backdrop.addEventListener('click', () => setOpen(false));
       // On a viewport class change, drop the other mode's state so the panel
-      // doesn't get stuck (half-translated on desktop, or collapsed on mobile).
-      window.addEventListener('resize', () => {
-        if (isDesktop()) { setOpen(false); }
-        else { app.classList.remove('panel-collapsed'); btn.textContent = '☰'; btn.setAttribute('aria-expanded', 'false'); }
+      // doesn't get stuck (sheet-sized on desktop, or collapsed on mobile).
+      let wasDesktop = null;
+      const syncMode = () => {
+        const d = isDesktop();
+        if (d) {
+          if (wasDesktop !== true) enterDesktop();
+        } else {
+          app.classList.remove('panel-collapsed'); btn.textContent = '☰'; btn.setAttribute('aria-expanded', 'false');
+          enterMobile(); // re-applies the snap height on every resize (URL bar, rotation)
+        }
+        wasDesktop = d;
         syncToggleActive();
-      });
-      syncToggleActive(); // initial state (sidebar visible on desktop → highlighted)
-      // Expose so app.js can close the drawer after a successful map click.
+      };
+      window.addEventListener('resize', syncMode);
+      syncMode(); // initial state
+      // Expose so app.js can collapse the sheet to peek after a successful map click.
       window.__simuDrawer = { close: () => setOpen(false), open: () => setOpen(true) };
 
       // ---- Sidebar column resizer (desktop / landscape) ------------------
@@ -1843,6 +2015,23 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v79</strong> — 2026-09-20<br/>
+              <strong>Celular: folha inferior no lugar da sidebar.</strong> Em
+              telas ≤ 860 px o painel vira uma folha ancorada embaixo, com
+              três posições (mínima / meia / cheia) — arraste pela alça ou
+              toque nela para alternar. O botão Calcular fica sempre visível
+              na cabeça da folha; um toque no mapa recolhe a folha. Pílula de
+              status no topo, botões e campos com alvos de toque maiores
+              (≥ 40 px; campos com 16 px para o iOS não dar zoom).</p>
+              <p><strong>v78</strong> — 2026-09-20<br/>
+              <strong>Referências editáveis.</strong> Clicar num marcador de
+              referência abre um popup com o botão "Remover esta referência";
+              as sobreviventes são renumeradas. E um par desfazer/refazer
+              (↶ ↷, logo abaixo do 🔍 — também Ctrl+Z / Ctrl+Shift+Z) percorre
+              o histórico do conjunto de referências: clique no mapa, remoção,
+              "Distribuir aleatórias"/censo (o lote inteiro é um passo),
+              "Limpar", GeoJSON e importação de bundle. Zera ao carregar outro
+              DEM.</p>
               <p><strong>v77</strong> — 2026-08-28<br/>
               <strong>Cores dos segmentos viram dado (3C.c).</strong> Cada
               segmento é colorido pela sua densidade média relativa à média
