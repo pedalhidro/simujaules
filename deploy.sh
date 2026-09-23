@@ -110,10 +110,19 @@ cp icons/apple-touch-icon-v2.png   "$STAGE/icons/"
 echo ">> Version-stamping asset URLs…"
 V="$(sed -n 's/^const VERSION *= *"\(v[0-9][0-9]*\)".*/\1/p' sw.js)"
 [[ -n "$V" ]] || { echo "could not read VERSION from sw.js" >&2; exit 1; }
-sed -i '' "s|src=\"./app.js\"|src=\"./app.js?v=${V}\"|" "$STAGE/index.html"
-sed -i '' "s|const WORKER_URL = \"./energy-worker.js\"|const WORKER_URL = \"./energy-worker.js?v=${V}\"|" "$STAGE/app.js"
-sed -i '' "s|importScripts(\"graph-engine.js\")|importScripts(\"graph-engine.js?v=${V}\")|" "$STAGE/energy-worker.js"
-sed -i '' "s|\"./app.js\",|\"./app.js?v=${V}\",|; s|\"./energy-worker.js\",|\"./energy-worker.js?v=${V}\",|; s|\"./graph-engine.js\",|\"./graph-engine.js?v=${V}\",|" "$STAGE/sw.js"
+# `sed -i` não é portável: o BSD (macOS) exige `-i ''`, o GNU (Linux) lê esse
+# '' como o script e a expressão como nome de arquivo — o deploy abortava aqui
+# no Linux. Reescreve via arquivo temporário FORA do $STAGE (nada de .bak
+# sobrando pra subir no rsync).
+stamp() { # stamp <sed-script> <arquivo>
+  local tmp; tmp="$(mktemp)"
+  sed "$1" "$2" > "$tmp" && cat "$tmp" > "$2"
+  rm -f "$tmp"
+}
+stamp "s|src=\"./app.js\"|src=\"./app.js?v=${V}\"|" "$STAGE/index.html"
+stamp "s|const WORKER_URL = \"./energy-worker.js\"|const WORKER_URL = \"./energy-worker.js?v=${V}\"|" "$STAGE/app.js"
+stamp "s|importScripts(\"graph-engine.js\")|importScripts(\"graph-engine.js?v=${V}\")|" "$STAGE/energy-worker.js"
+stamp "s|\"./app.js\",|\"./app.js?v=${V}\",|; s|\"./energy-worker.js\",|\"./energy-worker.js?v=${V}\",|; s|\"./graph-engine.js\",|\"./graph-engine.js?v=${V}\",|" "$STAGE/sw.js"
 grep -q "app\.js?v=${V}" "$STAGE/index.html"        || { echo "stamp failed: index.html" >&2; exit 1; }
 grep -q "energy-worker\.js?v=${V}" "$STAGE/app.js"  || { echo "stamp failed: app.js" >&2; exit 1; }
 grep -q "graph-engine\.js?v=${V}" "$STAGE/energy-worker.js" || { echo "stamp failed: energy-worker.js" >&2; exit 1; }
