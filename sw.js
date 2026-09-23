@@ -725,7 +725,17 @@
 //              collapses to peek. Hamburger/backdrop hidden on phones, status
 //              pill at top centre, ≥ 40 px touch targets, 16 px inputs (no
 //              iOS focus zoom). Drawer inline-script CSP hash recomputed.
-const VERSION  = "v79";
+//   v79 → v80: WebAssembly engine (2C "Motor WebAssembly", default on): the
+//              browser workers run density-pool slices and the plain
+//              single-source field on the native backend's engine compiled
+//              to WebAssembly (wasm/ include!s backend/src/main.rs verbatim →
+//              engine32.wasm, plus engine64.wasm / Memory64 past 4 GiB) via
+//              wasm-worker.js, a superset of energy-worker.js that reruns any
+//              job on the JS engine if the wasm path fails. Measured ~2×
+//              density (8 dirs), ~1.5× (16), ~1.3–1.5× single-source.
+//              Precache gains wasm-worker.js + engine32.wasm (engine64.wasm
+//              is runtime-cached on first use — only big DEMs need it).
+const VERSION  = "v80";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 
@@ -807,6 +817,8 @@ const PRECACHE_URLS = [
   "./app.js",
   "./energy-worker.js",
   "./graph-engine.js",
+  "./wasm-worker.js",
+  "./engine32.wasm",
   "./manifest.webmanifest",
   "./icons/icon-v2.svg",
   "./icons/icon-192-v2.png",

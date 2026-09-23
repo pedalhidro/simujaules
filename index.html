@@ -11,7 +11,8 @@
        an unconstrained script-src is a real risk. Directive-by-directive:
          script-src   — the three SRI-pinned CDN hosts; 'wasm-unsafe-eval'
                          so sql.js (cdnjs) can compile the .wasm it fetches
-                         on first .gpkg open; sha256 hashes (NOT
+                         on first .gpkg open, and app.js the v80 compute
+                         engines (engine32/64.wasm); sha256 hashes (NOT
                          'unsafe-inline') for the JSON-LD block, the two
                          inline scripts below (drawer toggle, SW
                          registration), and the help-dialog focus-trap
@@ -53,7 +54,8 @@
                          silent failure: the app already falls back to
                          browser workers on any fetch failure.
          worker-src, child-src — 'self' (energy-worker.js, and its
-                         importScripts of graph-engine.js).
+                         importScripts of graph-engine.js; wasm-worker.js,
+                         which importScripts energy-worker.js).
          object-src 'none'; base-uri 'self'; form-action 'self' — no
                          plugins, no <base>, no <form> in this app; safe,
                          standard hardening with zero behavioural cost.
@@ -1461,6 +1463,10 @@
         </div>
         <label data-i18n="param.max_workers" style="margin-top: 8px;">Max compute workers (0 = auto)</label>
         <input type="number" id="max-workers" value="0" min="0" max="64" step="1" />
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 6px;">
+          <input type="checkbox" id="use-wasm" checked />
+          <span data-i18n="param.use_wasm">WebAssembly engine in the workers (faster)</span>
+        </label>
       </details>
       </details>
 
@@ -1945,6 +1951,7 @@
           <p data-i18n-html="help.p.compute"></p>
           <p data-i18n-html="help.p.backend"></p>
           <p data-i18n-html="help.p.workers"></p>
+          <p data-i18n-html="help.p.wasm"></p>
 
           <h4 data-i18n="help.h.viz">5 · Visualização</h4>
           <p data-i18n-html="help.p.viz"></p>
@@ -2015,6 +2022,14 @@
           <details id="changelog" style="margin-top: 12px;">
             <summary data-i18n="help.h.changelog" style="cursor: pointer; font-weight: 600;">Changelog</summary>
             <div style="font-size: 11px; line-height: 1.5; margin-top: 6px;">
+              <p><strong>v80</strong> — 2026-09-22<br/>
+              <strong>Motor WebAssembly.</strong> A densidade e o campo de
+              fonte única (sem destino/top-N) rodam, por padrão, no motor do
+              backend nativo compilado para WebAssembly — os mesmos números
+              do Localhost/Nuvem, ~2× mais rápido na densidade (8 direções),
+              ~1,5× com 16 e ~1,3–1,5× na fonte única. Qualquer falha refaz o
+              cálculo no motor JS. Liga/desliga em 2C; acima de 4 GiB por
+              worker, Chrome ≥ 133 e Firefox ≥ 143 usam a versão de 64 bits.</p>
               <p><strong>v79</strong> — 2026-09-20<br/>
               <strong>Celular: folha inferior no lugar da sidebar.</strong> Em
               telas ≤ 860 px o painel vira uma folha ancorada embaixo, com

@@ -55,6 +55,9 @@ CDN_ERR="$(mktemp)"
 trap 'rm -rf "$STAGE" "$RSYNC_LOG" "$CDN_ERR"' EXIT
 
 cp index.html app.js energy-worker.js graph-engine.js favicon.ico "$STAGE/"
+# v80 WebAssembly engine: the worker + both prebuilt modules (wasm/build.sh
+# writes them at the repo root and they are committed — no build step here).
+cp wasm-worker.js engine32.wasm engine64.wasm "$STAGE/"
 # Explicit glob rather than `cp -r dem/ ...` — BSD and GNU cp disagree on
 # trailing-slash semantics (GNU nests a second dem/ level, breaking the
 # example-DEM URLs hardcoded in app.js).
@@ -101,7 +104,9 @@ cp icons/apple-touch-icon-v2.png   "$STAGE/icons/"
 #    load-bearing for the app shell: index.html (never edge-cached — .html
 #    isn't a Cloudflare default-cacheable extension, verified DYNAMIC) points
 #    at app.js?v=NN, app.js spawns energy-worker.js?v=NN, the worker imports
-#    graph-engine.js?v=NN, and sw.js's precache list is stamped identically
+#    graph-engine.js?v=NN (and wasm-worker.js?v=NN / engine32|64.wasm?v=NN,
+#    wasm-worker.js importing energy-worker.js?v=NN — v80), and sw.js's
+#    precache list is stamped identically
 #    so the SW caches exactly the URLs the pages request. sw.js itself stays
 #    unversioned on purpose (its URL must be stable for browser SW updates;
 #    it's already no-cache). Only the STAGED copies are rewritten — the repo
@@ -122,11 +127,17 @@ stamp() { # stamp <sed-script> <arquivo>
 stamp "s|src=\"./app.js\"|src=\"./app.js?v=${V}\"|" "$STAGE/index.html"
 stamp "s|const WORKER_URL = \"./energy-worker.js\"|const WORKER_URL = \"./energy-worker.js?v=${V}\"|" "$STAGE/app.js"
 stamp "s|importScripts(\"graph-engine.js\")|importScripts(\"graph-engine.js?v=${V}\")|" "$STAGE/energy-worker.js"
-stamp "s|\"./app.js\",|\"./app.js?v=${V}\",|; s|\"./energy-worker.js\",|\"./energy-worker.js?v=${V}\",|; s|\"./graph-engine.js\",|\"./graph-engine.js?v=${V}\",|" "$STAGE/sw.js"
+stamp "s|\"./app.js\",|\"./app.js?v=${V}\",|; s|\"./energy-worker.js\",|\"./energy-worker.js?v=${V}\",|; s|\"./graph-engine.js\",|\"./graph-engine.js?v=${V}\",|; s|\"./wasm-worker.js\",|\"./wasm-worker.js?v=${V}\",|; s|\"./engine32.wasm\",|\"./engine32.wasm?v=${V}\",|" "$STAGE/sw.js"
+stamp "s|const WASM_WORKER_URL = \"./wasm-worker.js\"|const WASM_WORKER_URL = \"./wasm-worker.js?v=${V}\"|; s|wasm32: \"./engine32.wasm\", wasm64: \"./engine64.wasm\"|wasm32: \"./engine32.wasm?v=${V}\", wasm64: \"./engine64.wasm?v=${V}\"|" "$STAGE/app.js"
+stamp "s|importScripts(\"energy-worker.js\")|importScripts(\"energy-worker.js?v=${V}\")|" "$STAGE/wasm-worker.js"
 grep -q "app\.js?v=${V}" "$STAGE/index.html"        || { echo "stamp failed: index.html" >&2; exit 1; }
 grep -q "energy-worker\.js?v=${V}" "$STAGE/app.js"  || { echo "stamp failed: app.js" >&2; exit 1; }
 grep -q "graph-engine\.js?v=${V}" "$STAGE/energy-worker.js" || { echo "stamp failed: energy-worker.js" >&2; exit 1; }
 grep -q "app\.js?v=${V}" "$STAGE/sw.js"             || { echo "stamp failed: sw.js" >&2; exit 1; }
+grep -q "wasm-worker\.js?v=${V}" "$STAGE/app.js"    || { echo "stamp failed: app.js (wasm worker)" >&2; exit 1; }
+grep -q "engine64\.wasm?v=${V}" "$STAGE/app.js"     || { echo "stamp failed: app.js (wasm engines)" >&2; exit 1; }
+grep -q "energy-worker\.js?v=${V}" "$STAGE/wasm-worker.js" || { echo "stamp failed: wasm-worker.js" >&2; exit 1; }
+grep -q "engine32\.wasm?v=${V}" "$STAGE/sw.js"      || { echo "stamp failed: sw.js (wasm)" >&2; exit 1; }
 
 if ! command -v gcloud >/dev/null 2>&1; then
   echo "gcloud not on PATH. Install the Google Cloud SDK." >&2
@@ -183,8 +194,13 @@ gcloud storage rsync -r --checksums-only --delete-unmatched-destination-objects 
 #    Cloudflare "Browser Cache TTL" can override these (see the header note).
 echo ">> Setting headers…"
 gcloud storage objects update \
-  "$BUCKET/app.js" "$BUCKET/energy-worker.js" "$BUCKET/graph-engine.js" \
+  "$BUCKET/app.js" "$BUCKET/energy-worker.js" "$BUCKET/graph-engine.js" "$BUCKET/wasm-worker.js" \
   --cache-control="public, max-age=3600"
+# WebAssembly modules: application/wasm is what lets the page compile them
+# while they download (WebAssembly.compileStreaming); app.js falls back to
+# compiling the downloaded bytes if the type is ever wrong.
+gcloud storage objects update "$BUCKET/engine32.wasm" "$BUCKET/engine64.wasm" \
+  --content-type="application/wasm" --cache-control="public, max-age=3600"
 
 # The vocab is consumed by RDF tools that content-negotiate; tag it as
 # application/ld+json. Long-lived cache because the vocab churns rarely.

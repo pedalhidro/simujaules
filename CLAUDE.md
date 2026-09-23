@@ -54,6 +54,17 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   the engine silently defaults any missing key, and `test-mcp.mjs` compares
   `density` against that same harness, so it will not catch drift between
   the two). See `mcp/README.md`.
+- `wasm/` + `wasm-worker.js` + `engine32.wasm` / `engine64.wasm` — the v80
+  in-browser WebAssembly engine (2C "Motor WebAssembly", default ON).
+  `wasm/src/lib.rs` `include!`s `backend/src/main.rs` VERBATIM and adds a
+  tiny C ABI (no wasm-bindgen); `wasm/build.sh` writes the two modules to the
+  repo root (committed — deploy stays build-free): `engine32.wasm` (stable,
+  every browser, ≤ 4 GiB) and `engine64.wasm` (Memory64, nightly +
+  build-std, declared 16 GiB max). `wasm-worker.js` is a SUPERSET of
+  `energy-worker.js` (it importScripts it) that serves density-pool slices
+  (`densityPartial`) and plain single-source fields on the module when the
+  page attaches one (`msg.wasm = {module, is64}`) and hands every other
+  message — and any wasm failure — to the JS engine. See `wasm/README.md`.
 - `sw.js` — service worker (precache + runtime cache). `index.html`,
   `manifest.webmanifest`, `icons/` are the PWA shell.
 - `deploy.sh` — stages and rsyncs to `gs://simujaules`, served at
@@ -112,6 +123,40 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   Worker callbacks drop messages whose generation doesn't match.
 
 ## Invariants — easy to break, hard to notice
+
+- THE WASM ENGINE IS THE BACKEND ENGINE (v80). `wasm/src/lib.rs`
+  `include!`s `backend/src/main.rs` verbatim, so there is no third engine to
+  keep in parity (the pre-v11 Wasm engine was a separate reimplementation —
+  that is why it was dropped). Never put engine logic in `wasm/src/lib.rs`.
+  Consequences: (a) EVERY change to `main.rs` must be followed by
+  `wasm/build.sh`, committing BOTH `.wasm` files, and `node
+  wasm/test-wasm.mjs` — a stale module silently serves the old engine in the
+  browser; (b) wasm results equal the native backend's, so vs the JS worker
+  they differ exactly like the backend does — passes on exact f64 ties
+  (radix vs binary heap, single-source) and density in the ~7th digit on
+  non-power-of-two grids (Acc f64 vs `densityField`'s Float32 accumulation);
+  `test-wasm.mjs` uses test-backend's 2^16-cell grid, where both are exact;
+  (c) `main.rs` pieces exist FOR the wasm build — `parse_grid_body` (shared
+  request validation), `compute_density_acc` (raw accumulators = the JS
+  `densityPartial` shape, merged by the app's pool exactly like JS slices)
+  and `Params.matrix_cells` (a pool slice samples ALL K ref cells) — keep
+  them; the HTTP path never sends `matrixCells`, so `/density` is unchanged.
+  App side: `wasmEngineFor`/`densityEngine`/`singleEngine` pick the engine in
+  BOTH the runner and `currentRunOpts` (must not drift, like
+  `densityPoolSize`, which now takes the `engine`); `wasmJobBytes` mirrors
+  `main.rs`'s Scratch/Acc/`compute_single` buffers (keep in sync, like
+  `BACKEND_BYTES_PER_CELL`) — the wasm worker holds MORE per worker than the
+  JS one, so a pool only switches engine when workers × `wasmSpeedup` beats
+  JS, and jobs over `memBudgetBytes()` stay JS unless `#max-workers` is set.
+  The single-source gate mirrors `/single`'s (no destination, top-N,
+  maximize; graph and the compare pair stay JS). Modules compile ONCE on the
+  page (`loadWasmEngine`) and travel to workers as `WebAssembly.Module`s.
+  `engine64.wasm` MUST keep `--max-memory`: without a declared maximum
+  Firefox copies a Memory64 memory on every grow (measured quadratic —
+  256 MiB of 1 MiB grows took 24 s). A wasm job posts no progress (one call
+  into the module) — `wasmTicker` animates the bar from the prediction;
+  `corrWasm` is its own online correction, and a run that fell back mid-way
+  (`engine-fallback`) is excluded from it.
 
 - `backend/src/main.rs` is a PORT of `energy-worker.js` `dijkstra()`
   (cost model, f32 energy storage, settled-flag handling, passes
@@ -192,7 +237,10 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   on /health version ≥ 0.2.0: an older binary silently IGNORES the `nDirs`
   params field (serde skips unknown keys) and would return a mislabeled
   8-direction field. Rust builds the long-edge tables ONCE per request,
-  shared read-only across rayon slices (per-worker in JS); per_slice grows
+  shared read-only across rayon slices (per-worker in JS) — and, since v80,
+  only when the request has ≥ 3 refs, the JS `useTables` rule (the wasm
+  build's pool slices carry 1–2 refs; values are bit-identical either way,
+  and the memory models stay conservative by always counting tables); per_slice grows
   37→38 (55→57 round) via parent_long and the shared tables
   ((nDirs−8)·8 B/cell·revs) come off the budget before the slice division —
   `predictComputeMs`'s backend branch mirrors this math;
@@ -343,6 +391,7 @@ node census/test-census-sampler.mjs        # in-browser census sampler helpers (
 node census/test-census-density.mjs        # census density harness end-to-end (needs npm install in census/)
 node mcp/test-mcp.mjs                      # MCP server over real stdio vs direct engine runs (needs npm install in census/ AND mcp/)
 cd backend && cargo build --release && node test-backend.mjs
+node wasm/test-wasm.mjs                    # wasm-worker.js + engine32/64.wasm vs energy-worker.js (after wasm/build.sh)
 ```
 
 `census/test-census-sampler.mjs` holds PURE MIRRORS of `app.js`'s census-sampling

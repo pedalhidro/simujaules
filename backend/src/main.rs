@@ -135,6 +135,15 @@ struct Params {
     /// Ignored under maximize — mirrors the JS worker.
     #[serde(default)]
     want_matrix: bool,
+    /// Optional accessibility-matrix SAMPLE TARGETS (flat cells, −1 = off-grid)
+    /// replacing the default "sample at every ref cell". Only the in-browser
+    /// wasm build (wasm/, v80) sends it: a density POOL slice runs a subset of
+    /// the refs but samples at ALL K ref cells — the JS worker's matrixCells —
+    /// so the app assembles the K×K matrix from slice rows (rows × K, row i =
+    /// the slice's i-th ref). The app's HTTP path never sends it, so /density
+    /// is byte-identical to before (rows = cols = ref_points).
+    #[serde(default)]
+    matrix_cells: Option<Vec<i64>>,
     /// v57 movement directions: 4 | 8 | 16 | 32 | 64 | 128 (Farey heading
     /// ladders, long moves profile-integrated — see build_moves /
     /// energy-worker.js buildMoves). Default 8 = the classic engine.
@@ -1004,13 +1013,19 @@ fn density_mem_budget_bytes() -> u64 {
     total.saturating_sub(3_000_000_000).max(2_000_000_000)
 }
 
-fn compute_density(
+/// Multi-reference density, UN-normalised: the merged per-slice accumulators
+/// (density = Σ passes/N, energy sum + reach count) and the optional
+/// accessibility matrix. compute_density normalises this for /density; the
+/// in-browser wasm build (wasm/) ships it raw as a density-pool PARTIAL —
+/// the same shape the JS worker's densityPartial returns — so the app merges
+/// wasm and JS slices identically.
+fn compute_density_acc(
     g: &Grid,
     dem_mask: &[u8],
     p: &Params,
     portals: &PortalAdj,
     mv: &Moves,
-) -> (Vec<f64>, Vec<f32>, Option<Vec<f32>>) {
+) -> (Acc, Option<Vec<f32>>) {
     let n = g.h * g.w;
 
     // Same MAX_EDGE_COST bound as the JS worker's maximize mode. JS-parity
@@ -1060,8 +1075,14 @@ fn compute_density(
     // (−1 = off-grid), mirroring the JS worker's matrixCells. Off-mask cells
     // stay valid targets — they just never settle, reading Infinity.
     let want_matrix = p.want_matrix && !p.maximize;
-    let kk = p.ref_points.len();
-    let sample_cells: Vec<i64> = if want_matrix {
+    // Rows = one per ORIGINAL ref; columns = the sample targets (the ref
+    // cells themselves unless matrix_cells overrides them — see Params).
+    let n_rows = p.ref_points.len();
+    let sample_cells: Vec<i64> = if !want_matrix {
+        Vec::new()
+    } else if let Some(mc) = &p.matrix_cells {
+        mc.iter().map(|&c| if c >= 0 && (c as usize) < n { c } else { -1 }).collect()
+    } else {
         p.ref_points
             .iter()
             .map(|rc| {
@@ -1073,9 +1094,8 @@ fn compute_density(
                 }
             })
             .collect()
-    } else {
-        Vec::new()
     };
+    let kk = sample_cells.len(); // matrix columns (== n_rows without the override)
 
     let round = p.density_mode == "round";
     let reverse = p.density_mode == "to";
@@ -1086,13 +1106,19 @@ fn compute_density(
     // READ-ONLY across all rayon slices (unlike the JS workers, which each
     // build their own — Rust threads share memory, so per-slice tables
     // would multiply the footprint by the slice count). Non-round builds
-    // only the direction it searches; round builds both.
-    let tbl_fwd: Option<LongTable> = if mv.has_long && (round || !reverse) {
+    // only the direction it searches; round builds both. Only for ≥ 3 refs
+    // — the JS densityField's `useTables` rule (same count: the request's
+    // ref_points, before filtering): the precompute pays back after ~3
+    // searches (docs/grid-longedge.mjs), so fewer refs integrate on demand
+    // like /single. Values are bit-identical either way; this matters for the
+    // in-browser wasm build (wasm/), whose pool slices carry 1–2 refs each.
+    let use_tables = mv.has_long && p.ref_points.len() >= 3;
+    let tbl_fwd: Option<LongTable> = if use_tables && (round || !reverse) {
         Some(build_long_table(g.height, g.mask, g.h, g.w, mv, false, &p.cost))
     } else {
         None
     };
-    let tbl_bwd: Option<LongTable> = if mv.has_long && (round || reverse) {
+    let tbl_bwd: Option<LongTable> = if use_tables && (round || reverse) {
         Some(build_long_table(g.height, g.mask, g.h, g.w, mv, true, &p.cost))
     } else {
         None
@@ -1202,7 +1228,7 @@ fn compute_density(
     // Sequential slice-order merge — deterministic across runs. Matrix rows
     // scatter into their original-index slots (rows of refs the filter
     // dropped stay all-Infinity, matching the JS worker).
-    let mut matrix = if want_matrix { Some(vec![f32::INFINITY; kk * kk]) } else { None };
+    let mut matrix = if want_matrix { Some(vec![f32::INFINITY; n_rows * kk]) } else { None };
     let mut acc_opt: Option<Acc> = None;
     for (a, rows) in results {
         if let Some(m) = matrix.as_mut() {
@@ -1215,8 +1241,21 @@ fn compute_density(
             None => a,
         });
     }
-    let acc = acc_opt.unwrap_or_else(|| Acc::new(n));
+    (acc_opt.unwrap_or_else(|| Acc::new(n)), matrix)
+}
 
+/// Multi-reference density: the raw accumulators (compute_density_acc) plus
+/// the final normalisation — density /N (the per-ref /N happened in
+/// Acc::accumulate*) and the per-cell mean energy.
+fn compute_density(
+    g: &Grid,
+    dem_mask: &[u8],
+    p: &Params,
+    portals: &PortalAdj,
+    mv: &Moves,
+) -> (Vec<f64>, Vec<f32>, Option<Vec<f32>>) {
+    let n = g.h * g.w;
+    let (acc, matrix) = compute_density_acc(g, dem_mask, p, portals, mv);
     let mut density = acc.density;
     for v in density.iter_mut() {
         *v /= n as f64;
@@ -1419,6 +1458,17 @@ fn parse_grid_request(
         }
         body = dec;
     }
+    parse_grid_body(&body, require_refs)
+}
+
+/// The framing/validation half of parse_grid_request, on an in-memory body —
+/// shared with the in-browser wasm build (wasm/), which receives the SAME
+/// framed bytes from the page instead of over HTTP, so both paths validate
+/// (nDirs whitelist, maximize coercions, exact-length check) identically.
+fn parse_grid_body(
+    body: &[u8],
+    require_refs: bool,
+) -> Result<(Params, Vec<f32>, Vec<u8>, Option<Vec<u8>>, PortalAdj), (u16, String)> {
     if body.len() < 4 {
         return Err((400, r#"{"error":"truncated body"}"#.to_string()));
     }

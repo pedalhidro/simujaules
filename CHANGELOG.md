@@ -9,6 +9,45 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v80 — 2026-09-22
+
+**Motor WebAssembly nos workers do navegador.** A densidade multi-referência
+e o campo de energia de fonte única (de/para/ida-e-volta, sem destino nem
+top-N) agora rodam, por padrão, no **mesmo motor do backend nativo**
+compilado para WebAssembly: `wasm/` inclui `backend/src/main.rs` literalmente
+(`include!`), então os números são os do Localhost/Nuvem, sem um terceiro
+motor para manter em paridade (a razão por que o motor Wasm antigo, uma
+reimplementação separada, saiu na v11). Medido em Chrome 151 e Firefox 155
+sobre os DTMs de SP (0,55–8,5 M células): densidade ~2× mais rápida com 8
+direções e ~1,5× com 16; fonte única ~1,3–1,5×. O `wasm-worker.js` é um
+superconjunto do `energy-worker.js` — rotas, caminho até o destino,
+maximizar, modo grafo e interpolação seguem no motor JS, e qualquer falha
+do WebAssembly (carregamento, erro de validação, falta de memória) refaz o
+mesmo cálculo no JS. Controle em 2C (**Motor WebAssembly nos workers**,
+lembrado por dispositivo). Como o worker Wasm usa mais memória por worker,
+o pool é dimensionado para o motor escolhido e o app só troca de motor
+quando o ganho (workers × velocidade) compensa; acima do orçamento de
+memória do navegador fica o motor JS, salvo com "Máx. de workers"
+definido. Até 4 GiB por worker (`engine32.wasm`); além disso, Chrome ≥ 133
+e Firefox ≥ 143 usam a versão de 64 bits (`engine64.wasm`, Memory64, até
+16 GiB — construída com o máximo declarado, sem o qual o Firefox copia a
+memória inteira a cada crescimento). A estimativa de tempo modela o motor
+Wasm (fator de velocidade + correção online própria) e a barra de progresso
+anda pela previsão (o Wasm não reporta progresso durante a chamada). Os
+passes podem diferir do motor JS só em empates exatos de custo e a
+densidade no 7º dígito (acumulação f64 × f32) — exatamente como o backend
+nativo. Backend: `compute_density_acc` (acumuladores crus, para os
+parciais do pool), `parse_grid_body` (validação compartilhada) e o
+parâmetro opcional `matrixCells` — sem mudança no protocolo HTTP
+(`test-backend.mjs` 100/100) —, e as tabelas de arestas longas (≥ 16
+direções) passam a seguir a regra do JS: só com ≥ 3 referências por
+requisição (fatias do pool com 1–2 referências integram sob demanda;
+valores idênticos). Novo `wasm/test-wasm.mjs`: 214 casos, bit a bit
+iguais ao worker JS nas duas versões. No app de ponta a ponta (Chrome,
+Sampa Centro, 8,5 M células, 6 referências em 3 workers): densidade
+61 → 39 s com 16 direções e 33 → 19 s com 8; fonte única 29 → 22 s
+(ida) e 53 → 34 s (ida-e-volta).
+
 ## v79 — 2026-09-20
 
 **Celular: painel vira folha inferior (bottom sheet).** Em telas ≤ 860 px o

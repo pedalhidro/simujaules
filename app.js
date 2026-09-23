@@ -46,6 +46,7 @@ const STRINGS = {
   "status.loading_dem":      { pt: "Carregando DEM…",                                  en: "Loading DEM…" },
   "status.computing":        { pt: "Calculando…",                                      en: "Computing…" },
   "status.done_ms":          { pt: "Concluído em {0} ms.",                             en: "Done in {0} ms." },
+  "status.engine_wasm":      { pt: " (motor WebAssembly)",                             en: " (WebAssembly engine)" },
   "status.network_loaded":   { pt: "Rede carregada.",                                  en: "Network loaded." },
   "status.load_dem_first":   { pt: "Carregue um DEM primeiro.",                        en: "Load a DEM first." },
   "status.src_set":          { pt: "Origem definida. Clique de novo para o destino, ou rode.", en: "Source set. Click again to set destination, or run." },
@@ -390,6 +391,8 @@ const STRINGS = {
   "cloud.stopping_manual": { pt: "Desligando a VM… o próximo cálculo religa no tamanho selecionado.", en: "Stopping the VM… the next compute boots the selected size." },
   "help.p.backend":      { pt: "Fonte de cálculo: três opções (2C). <em>Navegador</em> (padrão) roda em Web Workers na própria aba. <em>Localhost</em> fala com um servidor Rust opcional (backend/ no repositório, cargo run --release) na máquina do usuário. <em>Nuvem</em> aciona sob demanda uma VM no orquestrador — um serviço Cloud Run público, alcançável de qualquer origem —, protegida pela \"senha da nuvem\" compartilhada; \"Manter VM ligada entre cálculos\" evita religá-la a cada cálculo, mas ela desliga sozinha após ~15 min de ócio (watchdog dentro da própria VM), e cada cálculo com ela ligada é cobrado na conta do mantenedor. O seletor <em>\"Máquina da nuvem\"</em> escolhe o tamanho da VM (8/32/128 vCPUs, com preço de referência por hora — a VM roda em modo spot, tipicamente 60–90% mais barato que o valor mostrado); o tamanho é aplicado ao criar/religar a VM (uma VM já ligada mantém o tamanho até o próximo desligamento — o aviso de estado indica quando a seleção difere da VM ligada, e <em>\"Desligar VM agora\"</em> força a troca no próximo cálculo) e a estimativa de tempo modela o tamanho selecionado. Localhost e Nuvem aceleram tanto a densidade multi-referência (uma Dijkstra por referência, em todos os núcleos) quanto o campo de energia de fonte única (de/para/ida-e-volta); rotas (top-N), caminho até o destino e o modo grafo continuam sempre no navegador (nenhum backend produz rotas). Se o servidor ou a VM ficarem inacessíveis, o app volta para os workers do navegador, dizendo o motivo na linha de status — a menos que <em>\"Falhar em vez de cair pro navegador\"</em> esteja marcado, caso em que o cálculo aborta com o erro (útil pra não mascarar problemas da nuvem nem recomputar um DEM enorme no laptop sem querer).", en: "Compute source: three options (2C). <em>Browser</em> (default) runs in in-page Web Workers. <em>Localhost</em> talks to an optional Rust server (backend/ in the repo, cargo run --release) on the user's own machine. <em>Cloud</em> boots a VM on demand via the orchestrator — a public Cloud Run service, reachable from any origin — gated by the shared \"cloud password\"; \"Keep VM warm between runs\" avoids rebooting it on every run, but it still auto-stops after ~15 min idle (a watchdog inside the VM), and every run while it's up is billed to the maintainer's account. The <em>\"Cloud machine\"</em> selector picks the VM size (8/32/128 vCPUs, with a per-hour reference price — the VM runs as spot, typically 60–90% cheaper than shown); the size applies when the VM is created/restarted (a running VM keeps its size until the next stop — the status hint flags when the selection differs from the running VM, and <em>\"Stop VM now\"</em> forces the switch on the next compute) and the time estimate models the selected size. Localhost and Cloud both accelerate multi-reference density (one Dijkstra per reference, across all cores) AND the single-source energy field (from/to/round). Top-N routes, the destination path, and graph mode always stay in the browser (no backend produces routes). If the server or VM is unreachable, the app falls back to the in-browser workers, stating the reason in the status line — unless <em>\"Fail instead of falling back to browser\"</em> is ticked, in which case the run aborts with the error (useful to not mask cloud problems or accidentally recompute a huge DEM on the laptop)." },
   "param.max_workers":   { pt: "Máx. de workers de cálculo (0 = auto)", en: "Max compute workers (0 = auto)" },
+  "param.use_wasm":      { pt: "Motor WebAssembly nos workers (mais rápido)", en: "WebAssembly engine in the workers (faster)" },
+  "help.p.wasm":         { pt: "<em>Motor WebAssembly</em> (2C, ligado por padrão): os workers do navegador rodam a densidade multi-referência e o campo de energia de fonte única (de/para/ida-e-volta, sem destino/top-N) no <strong>mesmo motor do backend nativo</strong>, compilado para WebAssembly — o código de <code>backend/src/main.rs</code>, então os números são os do Localhost/Nuvem. Medido: ~2× mais rápido que o motor JS na densidade com 8 direções, ~1,5× com 16, e ~1,3–1,5× na fonte única. Usa mais memória por worker (o pool pode ficar menor num DEM grande — o app só troca de motor quando o ganho compensa) e fica com o motor JS em DEMs acima do orçamento de memória do navegador, a menos que \"Máx. de workers\" esteja definido. Até 4 GiB por worker (wasm32); acima disso, Chrome ≥ 133 e Firefox ≥ 143 usam a versão de 64 bits (até 16 GiB). Rotas, caminho até o destino, maximizar e o modo grafo seguem no motor JS; qualquer falha do WebAssembly refaz o mesmo cálculo no JS. A passagem (<em>passes</em>) pode diferir do motor JS só em empates exatos de custo — mesmo comportamento do backend nativo.", en: "<em>WebAssembly engine</em> (2C, on by default): the browser workers run multi-reference density and the single-source energy field (from/to/round, no destination/top-N) on the <strong>native backend's own engine</strong>, compiled to WebAssembly — the code in <code>backend/src/main.rs</code>, so the numbers are Localhost/Cloud's. Measured: ~2× faster than the JS engine for density with 8 directions, ~1.5× with 16, and ~1.3–1.5× for single source. It uses more memory per worker (the pool can shrink on a big DEM — the app only switches engine when it pays off) and keeps the JS engine on DEMs above the browser's memory budget unless \"Max workers\" is set. Up to 4 GiB per worker (wasm32); beyond that, Chrome ≥ 133 and Firefox ≥ 143 use the 64-bit build (up to 16 GiB). Routes, the destination path, maximize and graph mode stay on the JS engine; any WebAssembly failure reruns the same compute on JS. Passes may differ from the JS engine only on exact cost ties — the same as the native backend." },
   "help.p.workers":      { pt: "Avançado: paraleliza a densidade entre este número de Web Workers. 0 = auto (dimensionado pelos núcleos e memória disponível). Só aumente se sua máquina tiver mais RAM do que o navegador reporta — cada worker usa cerca de 5 GB em um DEM grande, então exceder pode travar a aba.", en: "Advanced: parallelise density across this many Web Workers. 0 = auto (sized to cores and available memory). Only raise it if your machine has more RAM than the browser reports — each worker needs roughly 5 GB on a large DEM, so over-committing can crash the tab." },
   // dormant: no UI control since v37 (engine/backend still implement the mode) — kept for param.max_length below
   "param.maximize":      { pt: "Maximizar energia (inverter otimização)", en: "Maximize energy (reverse optimization)" },
@@ -1200,6 +1203,15 @@ function setupConfigButtons() {
 // native Rust backend (backend/ in the repo, OFF by default) can take over
 // density runs; everything else always stays in-browser.
 const WORKER_URL = "./energy-worker.js";
+// v80 WebAssembly engine (#use-wasm, default on): wasm-worker.js is a SUPERSET
+// of energy-worker.js that runs density-pool slices and plain single-source
+// fields on the native engine compiled to WebAssembly (wasm/ — it include!s
+// backend/src/main.rs verbatim, so its numbers are the Localhost/Cloud
+// engine's), falling back to the JS engine per message. The page compiles
+// each module once (loadWasmEngine) and hands the WebAssembly.Module to its
+// workers. Engine choice: wasmEngineFor/densityEngine (runner + estimate).
+const WASM_WORKER_URL = "./wasm-worker.js";
+const WASM_ENGINE_URLS = { wasm32: "./engine32.wasm", wasm64: "./engine64.wasm" };
 
 // ------- Map setup -------
 // "Refresh style" dirty bookkeeping.
@@ -1438,6 +1450,15 @@ document.addEventListener("DOMContentLoaded", () => {
       try { localStorage.setItem("simu-max-workers", maxWorkersEl.value); } catch {}
     });
   }
+  // The WebAssembly engine toggle (v80) is a per-device choice too — kept out
+  // of PERSIST_IDS so bundles/config exports never carry it.
+  const useWasmEl = document.getElementById("use-wasm");
+  if (useWasmEl) {
+    try { const v = localStorage.getItem("simu-use-wasm"); if (v != null) useWasmEl.checked = v === "1"; } catch {}
+    useWasmEl.addEventListener("change", () => {
+      try { localStorage.setItem("simu-use-wasm", useWasmEl.checked ? "1" : "0"); } catch {}
+    });
+  }
   // Density toggle reveals the multi-ref controls and locks out the
   // single-source top-N toggle, which doesn't compose with multi-reference
   // density. (Passes are always computed since v68 — no toggle to lock.)
@@ -1523,7 +1544,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // compute-source selector switches the engine model (handled below with the
   // radios, since they share a name rather than a single id).
   for (const id of ["mode", "want-topn", "n-routes", "want-density",
-                    "n-refs", "e-max", "mass", "crr", "cda", "rho", "keff", "pflat", "ksmooth", "max-workers",
+                    "n-refs", "e-max", "mass", "crr", "cda", "rho", "keff", "pflat", "ksmooth", "max-workers", "use-wasm",
                     // Network/graph + interpolation controls — they move the
                     // estimate now that interp is a separate phase and graph
                     // mode has its own (much cheaper) compute model.
@@ -2273,6 +2294,16 @@ const state = {
   // at run start so the post-compute online correction can compare the
   // estimate it would have made against the real elapsed time.
   lastRun: null,
+  // Predicted compute ms for lastRun (corrected) — drives the synthetic
+  // progress of wasm jobs, which can't report progress mid-call.
+  lastRunPredictedMs: 0,
+  // Engine the last grid compute actually ran on ("wasm32"/"wasm64", or null
+  // for the JS engine / native backend) — tagged onto the done status.
+  lastRunEngine: null,
+  // WebAssembly engine modules: loading[engine] = Promise<{module, is64}|null>
+  // (compiled once per session); failed[engine] = reason once a module could
+  // not be fetched/compiled/instantiated (later runs skip it).
+  wasm: { loading: {}, failed: {} },
   // Cloud compute-source state machine (see computeMode()/ensureCloudVm()):
   //   mode           — last computeMode() resolved at run start ("cloud" arms it)
   //   orchestratorUrl — base URL of the orchestrator (a public Cloud Run
@@ -7246,6 +7277,8 @@ runBtn.addEventListener("click", async () => {
   // Snapshot the run config now (engine/refs/budget/mode) so computeDone can
   // online-correct the estimate against the real elapsed time.
   if (state.calibration) state.lastRun = currentRunOpts(state.calibration, N);
+  state.lastRunPredictedMs = state.lastRun ? predictComputeMs(state.calibration, state.lastRun, true) : 0;
+  state.lastRunEngine = null;
   const wantNetworkInterp = !!document.getElementById("net-interp")?.checked;
   const interpMaxDistance = Math.max(1, parseInt(document.getElementById("net-interp-max-dist")?.value, 10) || 50);
   const interpSmoothing   = Math.max(0, parseInt(document.getElementById("net-interp-smoothing")?.value, 10) || 0);
@@ -7278,7 +7311,8 @@ runBtn.addEventListener("click", async () => {
     // changed it while this compute was in flight (see the round_note gate).
     m.runMode = mode;
     renderResult(m);
-    status.textContent = t("status.done_ms", m.elapsedMs.toFixed(0));
+    status.textContent = t("status.done_ms", m.elapsedMs.toFixed(0)) +
+      (state.lastRunEngine ? t("status.engine_wasm") : "");
     scheduleStatusClear(status.textContent);
     setGroupOpen("result-group", true); // compute done → reveal results
     syncLoadedHighlights();              // 3C → done (green), 4 → ready (orange)
@@ -7332,13 +7366,45 @@ runBtn.addEventListener("click", async () => {
   // A worker-load failure (404, parse error) or an exception outside the
   // worker's own try/catch surfaces as an `error` event, not a message —
   // without these handlers the UI used to stay stuck on "Computing…".
-  const spawnWorker = (onMessage) => {
-    const w = new Worker(WORKER_URL);
+  const spawnWorker = (onMessage, url = WORKER_URL) => {
+    const w = new Worker(url);
     w.onmessage = (ev) => { if (gen === state.computeGen) onMessage(ev.data); };
     w.onerror = (e) => computeFailed(e.message || "worker failed to load or crashed");
     w.onmessageerror = () => computeFailed("worker message could not be deserialised");
     state.workers.push(w);
     return w;
+  };
+
+  // ---- WebAssembly engine bookkeeping (v80) ---------------------------------
+  // Record the engine a grid job actually runs on (a module that failed to
+  // load falls back to JS), so the done status and the online correction
+  // (corrWasm vs corrBrowser) describe the real run, not the estimate's guess.
+  const noteRunEngine = (engine) => {
+    state.lastRunEngine = engine;
+    if (state.lastRun) state.lastRun.wasm = engine;
+  };
+  // wasm-worker.js reran a job on the JS engine. An instantiate failure
+  // disables that module for the session; a trap/rejection (e.g. out of
+  // memory on this DEM) only affects this job. The run's timing is now a
+  // wasm/JS mix — keep it out of the online correction.
+  const noteEngineFallback = (m) => {
+    console.warn(`[wasm] ${m.engine} fell back to the JS engine (${m.stage}):`, m.reason);
+    if (m.stage === "instantiate") state.wasm.failed[m.engine] = m.reason;
+    state.lastRunEngine = null;
+    if (state.lastRun) state.lastRun.skipCorrection = true;
+  };
+  // A wasm job is one call into the module — no progress events. Animate the
+  // bar against the run's predicted time instead (capped below 100 % until the
+  // result lands). Returns the stop function.
+  const wasmTicker = (onFrac) => {
+    const predicted = state.lastRunPredictedMs;
+    if (!(predicted > 0)) return () => {};
+    const t0 = performance.now();
+    const id = setInterval(() => {
+      if (gen !== state.computeGen) { clearInterval(id); return; }
+      onFrac(Math.min(0.95, (performance.now() - t0) / predicted));
+    }, 250);
+    return () => clearInterval(id);
   };
 
   // Per-worker DEM clones — buffers are transferred, so each worker needs
@@ -7529,15 +7595,24 @@ runBtn.addEventListener("click", async () => {
   // main-thread DEM, and the OS. On huge DEMs this still yields 1 worker
   // (the honest ceiling: two won't fit), exactly the old behaviour.
   const K = wantDensity ? state.refPoints.length : 0;
-  const poolN = wantDensity ? densityPoolSize({ N, K, round: densityMode === "round", nDirs }) : 1;
 
   // Run one full density field over the worker pool and resolve with the
   // raw outputs (no interp, no UI finalisation — the callers compose those).
   // useNetwork toggles the network constraint per scenario, which is what
   // the constrained-vs-unconstrained comparison varies. Progress maps into
   // [progressBase, progressBase + progressScale].
-  const computeDensityField = ({ useNetwork, progressBase = 0, progressScale = 1, wantMatrix: sliceMatrix = false }) =>
-    new Promise((resolve) => {
+  // Engine per scenario (v80): the wasm engine when densityEngine picks it and
+  // its module loads — otherwise the JS worker; the pool is sized for the
+  // engine it actually runs (densityPoolSize, shared with the estimate).
+  const computeDensityField = async ({ useNetwork, progressBase = 0, progressScale = 1, wantMatrix: sliceMatrix = false }) => {
+    const round = densityMode === "round";
+    let engine = densityEngine({ N, K, round, nDirs, hasNet: useNetwork });
+    const wasmSpec = engine ? await loadWasmEngine(engine) : null;
+    if (gen !== state.computeGen) return new Promise(() => {});
+    if (!wasmSpec) engine = null;
+    noteRunEngine(engine);
+    const poolN = densityPoolSize({ N, K, round, nDirs, hasNet: useNetwork, engine });
+    return new Promise((resolve) => {
       const density = new Float64Array(N);
       const energySum = new Float64Array(N);
       const energyCount = new Int32Array(N);
@@ -7554,6 +7629,13 @@ runBtn.addEventListener("click", async () => {
         for (let i = 0; i < poolN; i++) acc += workerFrac[i] * sliceLen[i];
         reportProgress(progressBase + progressScale * (acc / K));
       };
+      // wasm slices post no progress — animate the unfinished ones against
+      // the predicted time (stopped on completion, failure or a JS fallback,
+      // whose own progress events then take over).
+      const stopTicker = engine ? wasmTicker((frac) => {
+        for (let i = 0; i < poolN; i++) if (workerFrac[i] < 1) workerFrac[i] = frac;
+        poolProgress();
+      }) : () => {};
 
       for (let p = 0; p < poolN; p++) {
         const lo = Math.floor(p * K / poolN);
@@ -7581,6 +7663,7 @@ runBtn.addEventListener("click", async () => {
             const ix = state.workers.indexOf(w);
             if (ix >= 0) state.workers.splice(ix, 1);
             if (--remaining === 0) {
+              stopTicker();
               // Second density normalisation (per-ref /N happened worker-side).
               for (let i = 0; i < N; i++) density[i] /= N;
               const energy = new Float32Array(N);
@@ -7589,10 +7672,14 @@ runBtn.addEventListener("click", async () => {
               }
               resolve({ energy, passes: density, matrix });
             }
+          } else if (m.kind === "engine-fallback") {
+            stopTicker();
+            noteEngineFallback(m);
           } else if (m.kind === "error") {
+            stopTicker();
             computeFailed(m.message);
           }
-        });
+        }, engine ? WASM_WORKER_URL : WORKER_URL);
         const { height, mask, transfer } = buildComputeGrid();
         const networkMask = useNetwork ? new Uint8Array(state.networkMask) : null;
         if (networkMask) transfer.push(networkMask.buffer);
@@ -7609,22 +7696,40 @@ runBtn.addEventListener("click", async () => {
             matrixCells: matrix ? matrixCells : null,
             // Interp (if any) runs after the merge, never per-slice.
             wantNetworkInterp: false,
+            // The compiled engine (structured clone shares the code).
+            ...(wasmSpec ? { wasm: wasmSpec } : {}),
           },
           transfer,
         );
       }
     });
+  };
 
-  const startSingleWorker = () => {
-    // Single worker: regular from/to/round runs, top-N, maximize, and
-    // density with one ref (or when memory caps the pool at 1).
+  const startSingleWorker = async () => {
+    // Single worker: regular from/to/round runs, top-N, maximize. The plain
+    // energy field (no destination / top-N / maximize) may run on the wasm
+    // engine (v80); callers never reach here for the compare pair.
+    let engine = singleEngine({
+      N, mode, nDirs, hasNet: constrainNet, wantTopN, maximize,
+      wantPath: !!state.dst, graph: graphModeActive(), compare: false,
+    });
+    const wasmSpec = engine ? await loadWasmEngine(engine) : null;
+    if (gen !== state.computeGen) return;
+    if (!wasmSpec) engine = null;
+    noteRunEngine(engine);
+    const stopTicker = engine ? wasmTicker(reportProgress) : () => {};
     const w = spawnWorker((m) => {
       if (m.kind === "progress") {
         reportProgress(m.progress);
       } else if (m.kind === "done") {
+        stopTicker();
         computeDone(m);
       } else if (m.kind === "error") {
+        stopTicker();
         computeFailed(m.message);
+      } else if (m.kind === "engine-fallback") {
+        stopTicker();
+        noteEngineFallback(m);
       } else if (m.kind === "warning") {
         // Non-fatal — the worker is still going and will follow up with
         // a `done` message. Yellow-tint the status; the next progress
@@ -7632,9 +7737,9 @@ runBtn.addEventListener("click", async () => {
         console.warn("[worker]", m.message);
         status.innerHTML = `<span style="color:#ffb86b">${escapeHtml(workerWarningText(m))}</span>`;
       }
-    });
+    }, engine ? WASM_WORKER_URL : WORKER_URL);
     const { height, mask, networkMask, transfer } = demPayload();
-    w.postMessage({ ...baseMsg, height, mask, networkMask }, transfer);
+    w.postMessage({ ...baseMsg, height, mask, networkMask, ...(wasmSpec ? { wasm: wasmSpec } : {}) }, transfer);
   };
 
   // ---- Optional native backend (density only, OFF by default) --------------
@@ -10178,7 +10283,9 @@ function memBudgetBytes() {
 // energyCount 4 = 16) ≈ 38 B/cell, ~55 in round mode (a second search
 // resident). The optional #max-workers input lets a user on a big-RAM machine
 // (which deviceMemory can't see) force more, still clamped by K.
-function densityPoolSize({ N, K, round, nDirs = 8 }) {
+// `engine` ("wasm32"/"wasm64", default null = the JS worker) switches the
+// per-worker footprint to wasmJobBytes — the wasm engine holds more per worker.
+function densityPoolSize({ N, K, round, nDirs = 8, hasNet = false, engine = null }) {
   if (!K) return 1;
   const cores = Math.max(1, (navigator.hardwareConcurrency || 4) - 1);
   // nDirs > 8: densityField precomputes f64 long-edge cost tables per worker
@@ -10187,13 +10294,144 @@ function densityPoolSize({ N, K, round, nDirs = 8 }) {
   // a big DEM OOMs the pool that 38 B/cell would have allowed.
   const nLong = { 16: 8, 32: 24, 64: 56, 128: 120 }[nDirs] || 0;
   const tableBytes = 8 * nLong * (round ? 2 : 1);
-  const bytesPerWorker = ((round ? 55 : 38) + tableBytes) * N;
+  const bytesPerWorker = engine
+    ? wasmJobBytes({ N, density: true, round, nDirs, hasNet }).total
+    : ((round ? 55 : 38) + tableBytes) * N;
   const memCap = Math.max(1, Math.floor(memBudgetBytes() / bytesPerWorker));
-  const userMax = parseInt(document.getElementById("max-workers")?.value, 10);
-  const overrideN = Number.isFinite(userMax) && userMax > 0 ? userMax : 0;
+  const overrideN = maxWorkersOverride();
   return overrideN
     ? Math.max(1, Math.min(K, overrideN))
     : Math.max(1, Math.min(K, cores, memCap));
+}
+
+// The #max-workers override (0 = auto). A set value is also the user vouching
+// for a big-RAM machine that navigator.deviceMemory (capped at 8) can't see.
+function maxWorkersOverride() {
+  const v = parseInt(document.getElementById("max-workers")?.value, 10);
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+// ---- WebAssembly engine selection (v80) ------------------------------------
+// Shared by the runner AND the time estimate (currentRunOpts) so they can't
+// drift — the same rule as densityPoolSize.
+
+// Measured per-worker speedups of the wasm engine over the JS worker (Chrome
+// 151 / Firefox 155 on the SP DTMs, 0.55–8.5 M cells, best-vs-best): density
+// 1.9–2.4× at 8 directions and 1.45–2.1× at 16; single-source 1.4–1.5× at 8
+// and 1.3–1.46× at 16. Conservative round numbers — the corrWasm online
+// correction absorbs the per-machine residual.
+function wasmSpeedup(density, nDirs = 8) {
+  const classic = nDirs <= 8;
+  return density ? (classic ? 2.0 : 1.5) : (classic ? 1.4 : 1.3);
+}
+
+// Bytes/cell ONE wasm job holds, mirroring backend/src/main.rs's buffers (keep
+// in sync with Scratch/Acc/compute_single there). `linear` = the module's
+// linear memory: parsed inputs (height 4 + mask 1, + the effective network
+// mask 1) + the engine's working set + ~2 B/cell of radix-heap frontier;
+// `total` adds the worker's JS-side copies of the outputs and the message's
+// own DEM arrays.
+//   density slice: Scratch 17 (+1 parent_long with long moves) + Acc 20
+//     (density f64 + energy_sum f64 + energy_count u32); round keeps a second
+//     Scratch + the include mask; long-edge tables 8 B per long move per
+//     travel direction. Outputs copied out: 20.
+//   single: Scratch 17(+1) + passes f64 8 + energy copy 4; round: two Scratch
+//     + energy 4 + include 1 + three f64 passes arrays 24 (no tables — long
+//     moves integrate on demand). Outputs copied out: 12.
+// The linear-memory high-water mark never shrinks, and a pool worker is
+// terminated after its slice, so these are per-worker peaks.
+function wasmJobBytes({ N, density, round, nDirs = 8, hasNet = false }) {
+  const nLong = { 16: 8, 32: 24, 64: 56, 128: 120 }[nDirs] || 0;
+  const scratch = 17 + (nLong ? 1 : 0);
+  const inputs = 5 + (hasNet ? 1 : 0);
+  let work, copies;
+  if (density) {
+    work = (round ? 2 * scratch + 1 : scratch) + 20 + 8 * nLong * (round ? 2 : 1);
+    copies = 20;
+  } else {
+    work = round ? 2 * scratch + 4 + 1 + 24 : scratch + 8 + 4;
+    copies = 12;
+  }
+  const linear = (inputs + work + 2) * N;
+  return { linear, total: linear + (copies + inputs) * N };
+}
+
+// wasm32 addresses 4 GiB; keep headroom for allocator fragmentation. wasm64
+// (Memory64, Chrome ≥ 133 / Firefox ≥ 143) is built with a declared 16 GiB max.
+const WASM32_MAX_LINEAR = 3.75 * 2 ** 30;
+const WASM64_MAX_LINEAR = 15 * 2 ** 30;
+
+// A 13-byte module declaring one i64-indexed memory: validates iff Memory64.
+const MEMORY64_PROBE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 5, 3, 1, 4, 1]);
+let memory64Supported_ = null;
+function memory64Supported() {
+  if (memory64Supported_ === null) {
+    try { memory64Supported_ = WebAssembly.validate(MEMORY64_PROBE); } catch { memory64Supported_ = false; }
+  }
+  return memory64Supported_;
+}
+
+function wasmEnabled() {
+  return typeof WebAssembly === "object" && !!document.getElementById("use-wasm")?.checked;
+}
+
+// Which wasm engine should run one job — or null for the JS engine. Past the
+// conservative browser budget the JS engine (smaller footprint) keeps the job,
+// unless #max-workers vouches for a big-RAM machine; wasm32 when it fits,
+// else wasm64 where the browser has Memory64. A module that failed to load
+// is skipped for the rest of the session.
+function wasmEngineFor(job) {
+  if (!wasmEnabled()) return null;
+  const { linear, total } = wasmJobBytes(job);
+  if (!maxWorkersOverride() && total > memBudgetBytes()) return null;
+  if (linear <= WASM32_MAX_LINEAR && !state.wasm.failed.wasm32) return "wasm32";
+  if (linear <= WASM64_MAX_LINEAR && memory64Supported() && !state.wasm.failed.wasm64) return "wasm64";
+  return null;
+}
+
+// Density pools: a wasm worker is ~1.5–2× faster but holds more memory, so on
+// a big DEM the budget can fit fewer wasm workers than JS ones. Use wasm only
+// when its pool's throughput (workers × speedup) matches or beats the JS pool.
+function densityEngine({ N, K, round, nDirs = 8, hasNet = false }) {
+  const engine = wasmEngineFor({ N, density: true, round, nDirs, hasNet });
+  if (!engine) return null;
+  const pJs = densityPoolSize({ N, K, round, nDirs, hasNet });
+  const pWasm = densityPoolSize({ N, K, round, nDirs, hasNet, engine });
+  return pWasm * wasmSpeedup(true, nDirs) >= pJs ? engine : null;
+}
+
+// Single-source runs take the wasm engine only for the plain energy field —
+// the same gate as the native backend's /single (no destination path, top-N
+// or maximize; graph mode and the constrained-vs-free compare stay JS).
+function singleEngine({ N, mode, nDirs = 8, hasNet = false, wantTopN, maximize, wantPath, graph, compare }) {
+  if (wantTopN || maximize || wantPath || graph || compare) return null;
+  if (!["from", "to", "round"].includes(mode)) return null;
+  return wasmEngineFor({ N, density: false, round: mode === "round", nDirs, hasNet });
+}
+
+// Compile an engine module once per session; every worker gets the compiled
+// WebAssembly.Module (structured clone shares the code, no recompile).
+// Resolves { module, is64 }, or null when it can't be fetched/compiled — the
+// failure is remembered, so later runs (and the estimate) fall to the next
+// engine or the JS worker straight away.
+function loadWasmEngine(engine) {
+  if (!state.wasm.loading[engine]) {
+    state.wasm.loading[engine] = (async () => {
+      const resp = await fetch(WASM_ENGINE_URLS[engine]);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      let module;
+      // compileStreaming needs Content-Type application/wasm; fall back to bytes.
+      try { module = await WebAssembly.compileStreaming(resp.clone()); }
+      catch { module = await WebAssembly.compile(await resp.arrayBuffer()); }
+      return { module, is64: engine === "wasm64" };
+    })().catch((err) => {
+      console.warn(`[wasm] ${engine} unavailable — using the JS engine:`, err);
+      state.wasm.failed[engine] = String(err?.message || err);
+      estimateRunTime();
+      return null;
+    });
+  }
+  return state.wasm.loading[engine];
 }
 
 // Interp worker-pool size, shared by runInterp AND the time estimate
@@ -10582,7 +10820,7 @@ function startCalibrationProbe() {
       // PHASE/engine (the backend's native-speedup × slice-contention factor,
       // the graph engine's per-edge cost, and the interp fill rate are all
       // scale-/network-dependent, so we learn them rather than guess).
-      corrBrowser: 1, corrBackend: 1, corrGraph: 1, corrInterp: 1,
+      corrBrowser: 1, corrBackend: 1, corrGraph: 1, corrInterp: 1, corrWasm: 1,
     };
     estimateRunTime();
   };
@@ -10759,9 +10997,13 @@ function predictComputeMs(cal, opts, applyCorr) {
     } else {
       // Browser worker pool: per-ref work splits across poolN; each worker
       // pays its own alloc, overlapping in wall-clock (so allocMsN once).
-      const poolN = densityPoolSize({ N, K: refs, round: mode === "round", nDirs: opts.nDirs || 8 });
-      ms = cal.allocMsN + (refs / poolN) * perRef * dijk;
-      corr = cal.corrBrowser || 1;
+      // opts.wasm (v80): the pool runs the wasm engine — its own pool size
+      // (more memory per worker), per-ref speedup and learned correction.
+      const nd = opts.nDirs || 8;
+      const poolN = densityPoolSize({ N, K: refs, round: mode === "round", nDirs: nd, hasNet: !!opts.hasNet, engine: opts.wasm || null });
+      const speedup = opts.wasm ? wasmSpeedup(true, nd) : 1;
+      ms = cal.allocMsN + (refs / poolN) * (perRef / speedup) * dijk;
+      corr = opts.wasm ? (cal.corrWasm || 1) : (cal.corrBrowser || 1);
     }
   } else if (backend && !wantTopN && !opts.maximize && !opts.wantPath) {
     // Native backend single-source (POST /single) — same dispatch gate as the
@@ -10771,15 +11013,19 @@ function predictComputeMs(cal, opts, applyCorr) {
     ms = (perRef / NATIVE_SPEEDUP) * dijk;
     corr = cal.corrBackend || 1;
   } else {
-    // Single-point modes (from/to/round) — one Dijkstra (two for round).
-    ms = cal.allocMsN + perRef * dijk;
+    // Single-point modes (from/to/round) — one Dijkstra (two for round); the
+    // plain field may run on the wasm engine (opts.wasm — never with top-N).
+    ms = cal.allocMsN + perRef * dijk / (opts.wasm ? wasmSpeedup(false, opts.nDirs || 8) : 1);
     if (wantTopN) {
       const k = Math.max(1, Math.min(20, parseInt(document.getElementById("n-routes")?.value, 10) || 3));
       const rep = document.getElementById("repulsion-mode")?.value || "per-cell";
       const perIter = rep === "per-cell" ? 0.5 : 0.8;
       ms += perRef * perIter * k;
     }
-    corr = cal.corrBrowser || 1;
+    // corrWasm is trained by wasm density runs (the online correction skips
+    // the fast single-point modes by design) — the same proxy the backend's
+    // single-source arm uses with corrBackend.
+    corr = opts.wasm ? (cal.corrWasm || 1) : (cal.corrBrowser || 1);
   }
   return applyCorr ? ms * corr : ms;
 }
@@ -10796,7 +11042,7 @@ function currentRunOpts(cal, N) {
   // either a raster constraint or graph mode (graph energy is IDW-filled too).
   const interp = !!document.getElementById("net-interp")?.checked
     && (networkConstraintActive() || graph);
-  return {
+  const opts = {
     N,
     wantDensity: !!document.getElementById("want-density")?.checked,
     wantTopN: !!document.getElementById("want-topn")?.checked,
@@ -10826,6 +11072,17 @@ function currentRunOpts(cal, N) {
     interpMaxDist: Math.max(1, parseInt(document.getElementById("net-interp-max-dist")?.value, 10) || 50),
     smoothIters: Math.max(0, parseInt(document.getElementById("net-interp-smoothing")?.value, 10) || 0),
   };
+  // Engine the in-browser path will use (v80) — the runner makes the SAME
+  // call (densityEngine / singleEngine) at dispatch, then re-tags lastRun.wasm
+  // with what actually ran (noteRunEngine). Backend and graph runs: no wasm.
+  opts.hasNet = networkConstraintActive();
+  const compare = opts.hasNet && !!document.getElementById("vec-compare")?.checked;
+  opts.wasm = (opts.backend || graph) ? null
+    : opts.wantDensity
+      ? densityEngine({ N, K: opts.refs, round: mode === "round", nDirs: opts.nDirs, hasNet: opts.hasNet })
+      : singleEngine({ N, mode, nDirs: opts.nDirs, hasNet: opts.hasNet, wantTopN: opts.wantTopN,
+                       maximize: opts.maximize, wantPath: opts.wantPath, graph, compare });
+  return opts;
 }
 
 function estimateRunTime() {
@@ -10897,8 +11154,9 @@ function updateEstimateCorrection(computeMs, interpMs) {
   // Correct the compute phase only for the perf-critical paths (density and
   // graph), not the fast single-point modes — they share corrBrowser but have
   // a different cost shape, so learning from them would muddy the density one.
-  if (computeMs > 0 && (lr.wantDensity || lr.graph)) {
-    const key = lr.graph ? "corrGraph" : (lr.backend ? "corrBackend" : "corrBrowser");
+  // A run that fell back mid-way (wasm → JS) timed a mix of engines: skip it.
+  if (computeMs > 0 && (lr.wantDensity || lr.graph) && !lr.skipCorrection) {
+    const key = lr.graph ? "corrGraph" : (lr.backend ? "corrBackend" : (lr.wasm ? "corrWasm" : "corrBrowser"));
     nudge(key, computeMs, predictComputeMs(cal, lr, false));
   }
   if (interpMs > 0 && lr.interp) {
