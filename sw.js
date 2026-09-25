@@ -735,7 +735,14 @@
 //              density (8 dirs), ~1.5× (16), ~1.3–1.5× single-source.
 //              Precache gains wasm-worker.js + engine32.wasm (engine64.wasm
 //              is runtime-cached on first use — only big DEMs need it).
-const VERSION  = "v80";
+//   v80 → v81: Viário/água FlatGeobufs served from Cloudflare R2
+//              (fabdem.pedalhidrografi.co/viario/) instead of GCS — R2 has no
+//              egress fees; every byte the browser range-read from GCS was
+//              paid. Measured no throttling via R2 (20 MB range 0.7–1.4 s vs
+//              0.5–0.85 s direct GCS). >500 MB files are Cache-Control:
+//              private so Cloudflare passes the Range (else a cold key got a
+//              full-file 200). No code-path change otherwise.
+const VERSION  = "v81";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

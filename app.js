@@ -4337,9 +4337,17 @@ async function loadOsmNetwork() {
 // CORS-safelisted (sem preflight). O telhas segue servindo os tiles XYZ
 // (pequenos e cacheáveis — lá a Cloudflare ajuda). NÃO "arrumar" de volta
 // pro host bonito sem re-medir.
-const VIARIO_FGB_URL = "https://storage.googleapis.com/telhas/viario/south-america-viario.fgb";
-const WATER_AREAS_FGB_URL  = "https://storage.googleapis.com/telhas/viario/south-america-water-areas.fgb";
-const WATER_RIVERS_FGB_URL = "https://storage.googleapis.com/telhas/viario/south-america-water-rivers.fgb";
+// v81: os FGB saem do R2 (bucket `fabdem`, fabdem.pedalhidrografi.co/viario/),
+// que NÃO cobra download — do GCS, cada byte que o navegador lia era egress
+// pago. O R2 também passa pela Cloudflare, mas SEM o estrangulamento do telhas:
+// medido 25/09/2026, o mesmo range de 20 MB do viário: 0,7–1,4 s pelo R2 vs
+// 0,5–0,85 s direto do GCS vs até 60 s+ pelo telhas. Os > 500 MB estão com
+// `Cache-Control: private` — senão a Cloudflare, a cada chave fria, ignora o
+// Range e devolve 200 com o arquivo INTEIRO (1,7–4,5 GB). CORS do bucket: `*`
+// (GET/HEAD, Range liberado); o CSP já permite fabdem.pedalhidrografi.co.
+const VIARIO_FGB_URL = "https://fabdem.pedalhidrografi.co/viario/south-america-viario.fgb";
+const WATER_AREAS_FGB_URL  = "https://fabdem.pedalhidrografi.co/viario/south-america-water-areas.fgb";
+const WATER_RIVERS_FGB_URL = "https://fabdem.pedalhidrografi.co/viario/south-america-water-rivers.fgb";
 // Teto de janela dos pulls FGB = o MESMO teto do FABDEM (v71): a área em
 // graus² que o cap do loader FABDEM permite (bytes ÷ 4 células ×
 // (1″)² por célula — hoje 10°², via FABDEM_MAX_DEG2). Derivado das constantes do

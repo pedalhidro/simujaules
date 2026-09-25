@@ -9,6 +9,17 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v81 — 2026-09-25
+
+**Viário e água servidos do R2 (sem custo de download).** Os FlatGeobuf do
+viário e das águas (`south-america-*.fgb`, 0,4–4,5 GB) passam a ser lidos de
+`fabdem.pedalhidrografi.co/viario/` (Cloudflare R2, o mesmo bucket do FABDEM)
+em vez do GCS: o R2 não cobra egress, e cada byte que o navegador lia do GCS
+era pago. Sem mudança de velocidade perceptível (range de 20 MB: 0,7–1,4 s pelo
+R2 vs 0,5–0,85 s direto do GCS). Os arquivos acima de 500 MB estão com
+`Cache-Control: private`, pra Cloudflare repassar o Range (senão, a cada chave
+fria, ela devolvia o arquivo inteiro).
+
 ## v80 — 2026-09-22
 
 **Motor WebAssembly nos workers do navegador.** A densidade multi-referência
