@@ -192,3 +192,9 @@ another ~2–4× per Dijkstra (Rust release, fat LTO) and saturates all cores. F
 huge DEMs (e.g. the 135 M-cell case) memory, not CPU, is the ceiling — see
 [backend/README.md](backend/README.md) and `docs/runtime_estimate.md` for the
 slice/memory model and the in-app run-time estimator.
+
+## License
+
+Simujaules is free software under the **GNU Affero General Public License
+v3.0** (AGPL-3.0) — see [`LICENSE`](LICENSE). If you run a modified copy for
+other people over a network, you must offer them its source.
