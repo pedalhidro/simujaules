@@ -1,0 +1,16 @@
+{
+  "name": "simujaules-landuse",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Land-use simulation for a self-sustaining São Paulo (Alto Tietê vs Alto Tietê + Paraíba Valley). Bakes FABDEM + MapBiomas + IBGE census into compact grid layers for a static page. Dev tooling, never deployed with the app.",
+  "scripts": {
+    "bake": "node bake.mjs all",
+    "build": "node build-page.mjs",
+    "test": "node test-landuse.mjs"
+  },
+  "dependencies": {
+    "flatgeobuf": "3.36.0",
+    "geotiff": "3.0.5"
+  }
+}

@@ -65,6 +65,15 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   (`densityPartial`) and plain single-source fields on the module when the
   page attaches one (`msg.wasm = {module, is64}`) and hands every other
   message — and any wasm failure — to the JS engine. See `wasm/README.md`.
+- `landuse/` — "Closed-Loop São Paulo", a land-use simulation (Alto Tietê vs
+  Alto Tietê + Paraíba Valley) on the app's FABDEM mirror + MapBiomas 2023 +
+  the census FGB. Dev tooling like `census/` (own `package.json`, never
+  deployed): `bake.mjs` (cached stages → `data/*.png`, gitignored),
+  `model.js` (pure allocation + networks, shared by the page's `worker.js`
+  and the test — no mirror), `index.src.html` → `build-page.mjs` →
+  `index.html`. Uses the exported `smoothHeightsInPlace` (σ30 auto rule) and
+  hand-copies `G_SP` for pumping heads — part of the `9.7864` grep set.
+  Gate: traced basin areas within 5 % of UGRHI-6/-2. See `landuse/README.md`.
 - `sw.js` — service worker (precache + runtime cache). `index.html`,
   `manifest.webmanifest`, `icons/` are the PWA shell.
 - `deploy.sh` — stages and rsyncs to `gs://simujaules`, served at
@@ -361,8 +370,8 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   two disagreed, the sibling applet's `v2Edge` readout differed from this app's
   by exactly the gravity ratio. The constant lives in `app.js`'s `readCost`
   chain (the origin, with the long note) and is hand-copied into
-  `census/census-density.mjs`, `test-energy-v2.mjs` and every
-  `docs/grid-*.mjs` harness — the `readCost` mirror chain. **Grep `9.7864`
+  `census/census-density.mjs`, `test-energy-v2.mjs`, `landuse/model.js`
+  (pumping heads only) and every `docs/grid-*.mjs` harness — the `readCost` mirror chain. **Grep `9.7864`
   and change every hit together**; a mirror at a different gravity silently
   computes different physics than the app (the sibling repo hit exactly that,
   running two gravities inside one computation). `backend/src/main.rs` needs NO
@@ -390,6 +399,7 @@ node test-water-raster.mjs                 # OSM water-mask rasterisation (areas
 node census/test-census-sampler.mjs        # in-browser census sampler helpers (mirrors app.js)
 node census/test-census-density.mjs        # census density harness end-to-end (needs npm install in census/)
 node mcp/test-mcp.mjs                      # MCP server over real stdio vs direct engine runs (needs npm install in census/ AND mcp/)
+node landuse/test-landuse.mjs              # land-use sim: PNG codec, hydrology, basin gate, model invariants (data tests need `node bake.mjs all`)
 cd backend && cargo build --release && node test-backend.mjs
 node wasm/test-wasm.mjs                    # wasm-worker.js + engine32/64.wasm vs energy-worker.js (after wasm/build.sh)
 ```

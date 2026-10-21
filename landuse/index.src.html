@@ -1,0 +1,700 @@
+<title>Closed-Loop São Paulo</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Land-use simulation of a self-sustaining São Paulo: the Alto Tietê basin alone vs Alto Tietê + Paraíba Valley, on FABDEM terrain, MapBiomas land cover and the 2022 census.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a survey map sheet on the left, a field notebook column on the right
+   (scenario → loop status → layers → tables → assumptions); stacks on phones. */
+:root {
+  --paper: #e9eeeb;          /* map ground and page */
+  --panel: #fafcfb;          /* notebook column */
+  --ink: #17211c;
+  --muted: #56665e;
+  --line: #d0d9d3;
+  --accent: #c95f22;         /* Simujaules orange, deepened for light paper */
+  --accent-ink: #ffffff;
+  --ok: #2c7a4b; --ok-bg: #dff0e5;
+  --warn: #9a6a12; --warn-bg: #f5ead2;
+  --bad: #ad3427; --bad-bg: #f6e0dc;
+  --track: #dde4df;
+  --water-ink: #1f5f9e;
+  --shadow: 0 1px 2px rgba(23, 33, 28, .08), 0 4px 16px rgba(23, 33, 28, .08);
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0f1115; --panel: #161a20; --ink: #e8e8ea; --muted: #959ba4; --line: #2a2f37;
+    --accent: #ff8c42; --accent-ink: #1a1206;
+    --ok: #6fd39a; --ok-bg: #173323; --warn: #f0b75a; --warn-bg: #3a2c12; --bad: #f0806f; --bad-bg: #3d1d19;
+    --track: #262b33; --water-ink: #9ccaf5; --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 16px rgba(0, 0, 0, .35);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0f1115; --panel: #161a20; --ink: #e8e8ea; --muted: #959ba4; --line: #2a2f37;
+  --accent: #ff8c42; --accent-ink: #1a1206;
+  --ok: #6fd39a; --ok-bg: #173323; --warn: #f0b75a; --warn-bg: #3a2c12; --bad: #f0806f; --bad-bg: #3d1d19;
+  --track: #262b33; --water-ink: #9ccaf5; --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 16px rgba(0, 0, 0, .35);
+  color-scheme: dark;
+}
+
+/*LEAFLET_CSS*/
+
+html, body { height: 100%; }
+body { background: var(--paper); color: var(--ink); font: 15px/1.5 var(--font-body); }
+.app { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 420px); height: 100%; }
+.map-wrap { position: relative; min-width: 0; min-height: 0; }
+#map { position: absolute; inset: 0; background: var(--paper); }
+.panel {
+  overflow-y: auto; background: var(--panel); border-left: 1px solid var(--line);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 18px 32px; display: flex; flex-direction: column; gap: 22px; min-width: 0;
+}
+@media (max-width: 820px) {
+  .app { display: block; height: auto; }
+  .map-wrap { height: min(64svh, 560px); }
+  .panel { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+}
+
+h1 { font: 600 1.7rem/1.1 var(--font-display); letter-spacing: .005em; margin: 0; text-wrap: balance; }
+h2 { font: 600 .78rem/1.2 var(--font-display); text-transform: uppercase; letter-spacing: .09em; color: var(--muted); margin: 0 0 10px; }
+.lede { margin: 6px 0 0; color: var(--muted); font-size: .9rem; max-width: 62ch; }
+.mono, .num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+
+/* segmented switches */
+.switch { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border: 1px solid var(--line); border-radius: 8px; padding: 3px; background: var(--paper); gap: 3px; }
+.switch button {
+  font: 500 .86rem/1.2 var(--font-body); color: var(--muted); background: transparent; border: 0; border-radius: 6px;
+  padding: 8px 10px; cursor: pointer; text-align: center;
+}
+.switch button[aria-pressed="true"] { background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
+.switch button:focus-visible, .btn:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.controls { display: grid; gap: 10px; }
+.ctl-label { font: 500 .74rem/1.2 var(--font-display); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+
+/* sliders */
+.slider { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; }
+.slider label { font-size: .86rem; }
+.slider output { font: 500 .82rem var(--font-data); font-variant-numeric: tabular-nums; color: var(--ink); }
+.slider input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 2px 0 0; }
+.slider .hint { grid-column: 1 / -1; font-size: .76rem; color: var(--muted); }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: .86rem; }
+.check input { accent-color: var(--accent); margin-top: 3px; }
+
+/* loop status */
+.loops { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.loop { border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px 12px; display: grid; gap: 6px; align-content: start; min-width: 0; background: var(--panel); }
+.loop-head { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+.loop-name { font: 600 .95rem/1.1 var(--font-display); letter-spacing: .02em; }
+.chip { font: 500 .7rem/1 var(--font-data); padding: 4px 6px; border-radius: 999px; white-space: nowrap; }
+.chip.ok { color: var(--ok); background: var(--ok-bg); }
+.chip.warn { color: var(--warn); background: var(--warn-bg); }
+.chip.bad { color: var(--bad); background: var(--bad-bg); }
+.big { font: 500 1.45rem/1.05 var(--font-data); font-variant-numeric: tabular-nums; }
+.big small { font-size: .72rem; color: var(--muted); font-weight: 400; margin-left: 3px; }
+.kv { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; font-size: .8rem; color: var(--muted); }
+.kv b { font: 400 .78rem var(--font-data); font-variant-numeric: tabular-nums; color: var(--ink); text-align: right; }
+.bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--track); }
+.bar span { display: block; height: 100%; }
+
+/* layers */
+.layers { display: grid; gap: 2px; }
+.layer { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; padding: 8px 6px; border-radius: 8px; cursor: pointer; align-items: start; }
+.layer:hover { background: var(--paper); }
+.layer input { accent-color: var(--accent); margin: 3px 0 0; }
+.layer-title { font-weight: 500; font-size: .9rem; }
+.layer-keys { grid-column: 2; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .74rem; color: var(--muted); }
+.key { display: inline-flex; align-items: center; gap: 5px; }
+.sw { width: 11px; height: 11px; border-radius: 2px; flex: none; }
+.sw.line { height: 3px; border-radius: 2px; width: 14px; }
+.sw.dot { border-radius: 50%; }
+.note { font-size: .78rem; color: var(--muted); margin: 6px 0 0; }
+
+/* tables */
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .8rem; }
+th, td { text-align: right; padding: 5px 6px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; white-space: normal; }
+th { font: 500 .72rem var(--font-display); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+td.num { font-family: var(--font-data); }
+details { border-top: 1px solid var(--line); padding-top: 12px; }
+summary { cursor: pointer; font: 600 .78rem/1.2 var(--font-display); text-transform: uppercase; letter-spacing: .09em; color: var(--muted); list-style-position: outside; }
+details[open] summary { margin-bottom: 12px; }
+details .controls { gap: 14px; }
+.subhead { font: 600 .82rem var(--font-display); letter-spacing: .03em; margin: 6px 0 -4px; color: var(--ink); }
+.btn { font: 500 .82rem var(--font-body); border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 7px 12px; cursor: pointer; justify-self: start; }
+.prose { font-size: .84rem; color: var(--muted); display: grid; gap: 8px; }
+.prose p { margin: 0; max-width: 64ch; }
+.prose b { color: var(--ink); font-weight: 500; }
+
+/* map chrome */
+.status {
+  position: absolute; z-index: 500; top: calc(10px + env(safe-area-inset-top, 0px)); left: max(54px, calc(env(safe-area-inset-left, 0px) + 54px));
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px;
+  font: 500 .78rem var(--font-data); box-shadow: var(--shadow); max-width: calc(100% - 80px);
+}
+.status[data-state="idle"] { color: var(--muted); }
+.inspect {
+  position: absolute; z-index: 500; left: max(10px, env(safe-area-inset-left, 0px)); bottom: max(22px, calc(env(safe-area-inset-bottom, 0px) + 22px));
+  width: min(300px, calc(100% - 20px)); background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; box-shadow: var(--shadow); font-size: .78rem; display: grid; gap: 4px; pointer-events: none;
+}
+.inspect .use { font: 600 .92rem var(--font-display); display: flex; gap: 7px; align-items: center; }
+.inspect .kv { font-size: .74rem; }
+.lu-raster { image-rendering: pixelated; image-rendering: crisp-edges; }
+.leaflet-container { font-family: var(--font-body); background: var(--paper); }
+.leaflet-bar a, .leaflet-bar a:hover { background: var(--panel); color: var(--ink); border-color: var(--line); }
+.leaflet-control-attribution { background: color-mix(in srgb, var(--panel) 85%, transparent) !important; color: var(--muted); font-size: 10px; }
+.leaflet-control-attribution a { color: var(--muted); }
+.leaflet-tooltip { background: var(--panel); color: var(--ink); border: 1px solid var(--line); box-shadow: var(--shadow); font: .76rem/1.35 var(--font-body); padding: 6px 8px; max-width: 280px; white-space: normal; }
+.leaflet-tooltip-top:before { border-top-color: var(--line); }
+.leaflet-tooltip-bottom:before { border-bottom-color: var(--line); }
+.place { background: transparent; border: 0; box-shadow: none; padding: 0; font: 600 .74rem var(--font-display); letter-spacing: .04em; color: var(--ink);
+  text-shadow: 0 0 3px var(--paper), 0 0 3px var(--paper), 0 0 2px var(--paper); white-space: nowrap; }
+.place.water { color: var(--water-ink); font-style: italic; font-weight: 500; }
+.place:before { display: none; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="app">
+  <div class="map-wrap">
+    <div id="map" role="application" aria-label="Land-use map of the Alto Tietê and Paraíba do Sul basins"></div>
+    <div class="status" id="status" role="status" data-state="busy">Loading basin data…</div>
+    <div class="inspect" id="inspect" aria-live="polite">
+      <div class="use">Point at the map</div>
+      <div class="kv"><span>Each cell is 6″ (about 170 × 185 m) and has one main use. Some cells add a second use, such as rooftop solar or fertigation.</span></div>
+    </div>
+  </div>
+
+  <aside class="panel" aria-label="Scenario controls and results">
+    <header>
+      <h1>Closed-Loop São Paulo</h1>
+      <p class="lede">Where water, energy, food and materials could close inside the Alto Tietê basin, with or without the Paraíba Valley. Terrain from FABDEM, land cover from MapBiomas 2023, people from the 2022 census.</p>
+    </header>
+
+    <section class="controls" aria-label="Scenario">
+      <div class="ctl-label" id="lbl-scenario">Region</div>
+      <div class="switch" role="group" aria-labelledby="lbl-scenario">
+        <button type="button" id="sc-at" data-scenario="AT" aria-pressed="true">Alto Tietê</button>
+        <button type="button" id="sc-atpv" data-scenario="ATPV" aria-pressed="false">+ Paraíba Valley</button>
+      </div>
+      <div class="ctl-label" id="lbl-city">City</div>
+      <div class="switch" role="group" aria-labelledby="lbl-city">
+        <button type="button" id="cm-compact" data-city="compact" aria-pressed="true">Keep today's footprint</button>
+        <button type="button" id="cm-redesign" data-city="redesign" aria-pressed="false">Redesign from scratch</button>
+      </div>
+      <div class="slider" id="row-compaction">
+        <label for="p-compaction">Free the least-dense urban land</label><output id="o-compaction" for="p-compaction"></output>
+        <input type="range" id="p-compaction" min="0" max="0.6" step="0.05">
+        <span class="hint">Freed land becomes parks or solar; its residents move into the rest of the city.</span>
+      </div>
+      <div class="slider" id="row-density" hidden>
+        <label for="p-density">Density of the new city</label><output id="o-density" for="p-density"></output>
+        <input type="range" id="p-density" min="6000" max="30000" step="1000">
+      </div>
+      <div class="slider" id="row-centers" hidden>
+        <label for="p-centers">Urban centres</label><output id="o-centers" for="p-centers"></output>
+        <input type="range" id="p-centers" min="1" max="16" step="1">
+        <span class="hint">New centres prefer 3–30 % slopes, stay off floodplains and spring catchments, and avoid prime farmland.</span>
+      </div>
+    </section>
+
+    <section aria-label="Loop status">
+      <h2>Do the loops close?</h2>
+      <div class="loops" id="loops"></div>
+    </section>
+
+    <section aria-label="Map layers">
+      <h2>Map layers</h2>
+      <div class="layers" id="layers"></div>
+      <p class="note">When a cell's main layer is hidden, its second use shows in a lighter tone: rooftop solar on the city, floating solar on reservoirs, fertigated farms.</p>
+    </section>
+
+    <section aria-label="Land use by basin">
+      <h2>Land use, km²</h2>
+      <div class="tablewrap"><table id="t-landuse"></table></div>
+      <p class="note">Allocated in this order: water and quarries → city → timber → vegetables → staples → ground solar → terraces → reforestation → what's left.</p>
+    </section>
+
+    <details id="d-assume">
+      <summary>Assumptions</summary>
+      <div class="controls" id="assumptions"></div>
+    </details>
+
+    <details>
+      <summary>Phosphorus reaching drinking-water reservoirs</summary>
+      <div class="tablewrap"><table id="t-phos"></table></div>
+      <p class="note">Each row is the farmland in the reservoir's own catchment, at the phosphorus loss set in Assumptions, diluted in that catchment's runoff. The limit is 0.030 mg/L, Brazil's standard for reservoirs used for drinking water (CONAMA 357, class 2).</p>
+    </details>
+
+    <details>
+      <summary>Treatment plants and storage</summary>
+      <div class="tablewrap"><table id="t-plants"></table></div>
+      <div class="tablewrap" style="margin-top:12px"><table id="t-storage"></table></div>
+    </details>
+
+    <details>
+      <summary>Method and sources</summary>
+      <div class="prose" id="method"></div>
+    </details>
+  </aside>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script type="module">
+import { decodePngAsync, USE, USE_INFO, FLAG, DEFAULTS } from "./model.js";
+
+const $ = (s) => document.querySelector(s);
+const fmt = (v, d = 0) => (Number.isFinite(v) ? v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }) : "–");
+const pct = (v) => `${Math.round(v * 100)}%`;
+const statusEl = $("#status");
+const setStatus = (text, busy = false) => { statusEl.textContent = text; statusEl.dataset.state = busy ? "busy" : "idle"; };
+
+// ---- groups (the requested categories + nature) ------------------------------
+const GROUPS = [
+  { key: "human", title: "Living and circulation", desc: "City, reclaimed parks, rail and e-bike trunk corridors" },
+  { key: "energy", title: "Energy production", desc: "Ground solar, rooftop and floating solar, pumped storage" },
+  { key: "food", title: "Food production", desc: "Vegetables near the city, staples on gentle land, terraces" },
+  { key: "water", title: "Water and irrigation", desc: "Reservoirs, floodplain parks, treated-water mains, recycled-water mains, fertigation" },
+  { key: "sewage", title: "Sewage network", desc: "Gravity trunks along the drainage, treatment and reuse plants" },
+  { key: "recycling", title: "Recycling centres", desc: "One hub per ~200k people; composting and biogas at the plants" },
+  { key: "extraction", title: "Extraction centres", desc: "Quarries and sand pits, limestone, sea salt, timber for building" },
+  { key: "nature", title: "Forest and reforestation", desc: "Forest kept, reforestation on steep cleared land, natural grassland and wetland" },
+  { key: "other", title: "Reserve", desc: "Cleared land with no use assigned" },
+];
+const LINE = { sewer: "#8b5a2b", reuse: "#0f8b8d", mains: "#2c6fbb", irrigation: "#4aa35a", corridor: "#3b3f46", psh: "#8a5cc7" };
+const DOT = { plant: "#6b4220", recycling: "#d39a00", aggregate: "#5b5b5b", sand: "#c9a46a", limestone: "#e7e2d3", salt: "#ffffff" };
+
+// ---- assumptions (slider definitions) -------------------------------------------
+const ASSUME = [
+  { head: "Food" },
+  { id: "cropEff", label: "Sunlight → food efficiency", min: 0.001, max: 0.007, step: 0.0005, show: (v) => `${(v * 100).toFixed(2)} %`, hint: "Whole diet at harvest. Today's yields ≈ 0.15 %; top farms 0.4–0.5 %." },
+  { id: "kcal", label: "Food energy eaten", min: 2000, max: 3000, step: 50, show: (v) => `${fmt(v)} kcal/day` },
+  { id: "loss", label: "Lost between harvest and plate", min: 0.05, max: 0.4, step: 0.05, show: pct },
+  { id: "allowTerraces", type: "check", label: "Terrace 12–30 % slopes for fruit, cassava and agroforestry (60 % of field yield)" },
+  { id: "allowForestClearing", type: "check", label: "Allow clearing forest on gentle land" },
+  { id: "farmFloodplains", type: "check", label: "Farm the floodplains (otherwise they stay as flood storage)" },
+  { id: "protectMananciais", type: "check", label: "No farming in drinking-water catchments" },
+  { id: "pLossKgHa", label: "Phosphorus lost from farms", min: 0.05, max: 1.0, step: 0.05, show: (v) => `${v.toFixed(2)} kg/ha/yr` },
+  { head: "Energy" },
+  { id: "energyMWhPerCap", label: "Electricity per person", min: 3, max: 8, step: 0.1, show: (v) => `${v.toFixed(1)} MWh/yr`, hint: "Car-free, electrified, no exports ≈ 5.1" },
+  { id: "roofGWhPerKm2", label: "Rooftop solar per km² of city", min: 8, max: 40, step: 1, show: (v) => `${v} GWh/yr` },
+  { id: "floatCover", label: "Reservoir surface under floating solar", min: 0, max: 0.6, step: 0.05, show: pct },
+  { id: "pvEff", label: "Ground solar: electricity per sunlight on land", min: 0.05, max: 0.14, step: 0.005, show: (v) => `${(v * 100).toFixed(1)} %` },
+  { head: "Water and sewage" },
+  { id: "waterLpcd", label: "Water per person, all urban uses", min: 120, max: 260, step: 5, show: (v) => `${v} L/day` },
+  { id: "firmAT", label: "Alto Tietê drought-firm reservoir supply", min: 10, max: 45, step: 1, show: (v) => `${v} m³/s`, hint: "Today's in-basin systems give ~40 m³/s in a normal year, much less in a 2014-type drought." },
+  { id: "plantCap", label: "Largest treatment plant", min: 250000, max: 6000000, step: 250000, show: (v) => `${fmt(v / 1e6, 2)} M people` },
+  { id: "fertigate", type: "check", label: "Fertigate farms with the effluent not recycled for drinking" },
+  { head: "Services" },
+  { id: "recyclePop", label: "People per recycling hub", min: 50000, max: 600000, step: 25000, show: (v) => `${fmt(v / 1000)}k` },
+  { id: "transitPop", label: "People per transit centre", min: 300000, max: 2000000, step: 50000, show: (v) => `${fmt(v / 1e6, 2)} M` },
+  { id: "reforest", type: "check", label: "Reforest steep cleared land (≥ 30 % slope)" },
+];
+
+// ---- load data -------------------------------------------------------------------
+const meta = await (await fetch("data/meta.json")).json();
+const G = meta.grid, W = G.W, H = G.H, N = W * H;
+const files = {};
+let loaded = 0;
+await Promise.all(meta.files.map(async (f) => {
+  const buf = await (await fetch(`data/${f}`)).arrayBuffer();
+  files[f] = await decodePngAsync(buf);
+  setStatus(`Decoding layers ${++loaded}/${meta.files.length}…`, true);
+}));
+const elev = files["elev.png"].planes[0], pop = files["pop.png"].planes[0];
+const [, hand, basin, resCatch] = files["hydro.png"].planes;
+const lc = {};
+[["lc1.png", ["urban", "forest", "natOpen", "plantation"]], ["lc2.png", ["pasture", "agri", "mosaic", "water"]], ["lc3.png", ["mining", "bare", "total"]]]
+  .forEach(([f, ks]) => ks.forEach((k, i) => (lc[k] = files[f].planes[i])));
+const sl = [...files["slope.png"].planes, files["slope2.png"].planes[0], files["slope2.png"].planes[1]];
+const svN = files["slope2.png"].planes[3];
+const latOf = (o) => G.north - (((o / W) | 0) + 0.5) * G.step;
+const lonOf = (o) => G.west + ((o % W) + 0.5) * G.step;
+const ll = (o) => [latOf(o), lonOf(o)];
+const resName = Object.fromEntries(meta.reservoirs.map((r) => [r.id, r.name]));
+
+// hillshade (NW light, 45°, ×2 relief) and basin borders, once
+const hs = new Uint8Array(N), border = new Uint8Array(N);
+{
+  const rad = Math.PI / 180, dy = G.step * rad * 6371008.8;
+  const az = 315 * rad, alt = 45 * rad, zf = 2;
+  for (let r = 1; r < H - 1; r++) {
+    const dx = dy * Math.cos(latOf(r * W) * rad);
+    for (let c = 1; c < W - 1; c++) {
+      const o = r * W + c;
+      if (!elev[o]) continue;
+      const e = (k) => (elev[k] || elev[o]);
+      const dzdx = zf * ((e(o + 1) - e(o - 1)) / (2 * dx)), dzdy = zf * ((e(o - W) - e(o + W)) / (2 * dy));
+      const slope = Math.atan(Math.hypot(dzdx, dzdy)), aspect = Math.atan2(dzdy, -dzdx);
+      const v = Math.sin(alt) * Math.cos(slope) + Math.cos(alt) * Math.sin(slope) * Math.cos(az - Math.PI / 2 - aspect);
+      hs[o] = Math.max(0, Math.min(255, Math.round(255 * v)));
+      const b = basin[o];
+      if ((b === 1 || b === 2) && (basin[o + 1] !== b || basin[o - 1] !== b || basin[o + W] !== b || basin[o - W] !== b)) border[o] = 1;
+    }
+  }
+}
+
+// ---- map ---------------------------------------------------------------------------
+// Local plate carrée scaled by cos(lat₀): the baked grid is regular in lon/lat,
+// so this CRS draws it without resampling, and with the right aspect at -23°.
+const k0 = Math.cos(-23.1 * Math.PI / 180);
+const CRS = L.extend({}, L.CRS.Earth, {
+  code: "SP-PLATE", projection: L.Projection.LonLat,
+  transformation: new L.Transformation(k0 / 180, 1, -1 / 180, 0.5),
+});
+const map = L.map("map", { crs: CRS, zoomSnap: 0.25, zoomDelta: 0.5, minZoom: 6, maxZoom: 15, preferCanvas: true, attributionControl: true });
+map.attributionControl.setPrefix(false).addAttribution("FABDEM V1-2 · MapBiomas Col. 9 · IBGE Censo 2022");
+map.createPane("raster").style.zIndex = 350;      // under vectors (overlayPane 400)
+const gridBounds = L.latLngBounds([G.north - H * G.step, G.west], [G.north, G.west + W * G.step]);
+const canvas = document.createElement("canvas");
+canvas.width = W; canvas.height = H;
+const c2d = canvas.getContext("2d");
+const img = c2d.createImageData(W, H);
+let overlay = null, overlayUrl = null;
+const renderer = L.canvas({ padding: 0.3 });
+const groupLayers = Object.fromEntries(GROUPS.map((g) => [g.key, L.layerGroup()]));
+const placeLayer = L.layerGroup().addTo(map);
+const visible = new Set(GROUPS.map((g) => g.key));
+GROUPS.forEach((g) => groupLayers[g.key].addTo(map));
+
+const PLACES = [
+  ["São Paulo", -23.55, -46.63], ["Guarulhos", -23.45, -46.53], ["Osasco", -23.53, -46.79], ["Santo André", -23.66, -46.53],
+  ["Mogi das Cruzes", -23.52, -46.19], ["Suzano", -23.54, -46.31], ["São José dos Campos", -23.18, -45.88], ["Jacareí", -23.30, -45.97],
+  ["Taubaté", -23.03, -45.56], ["Pindamonhangaba", -22.92, -45.46], ["Guaratinguetá", -22.82, -45.19], ["Lorena", -22.73, -45.12],
+  ["Cruzeiro", -22.58, -44.96], ["Paraibuna", -23.39, -45.66], ["Salesópolis", -23.53, -45.85],
+];
+for (const [name, lat, lon] of PLACES) L.tooltip({ permanent: true, direction: "center", className: "place", interactive: false }).setLatLng([lat, lon]).setContent(name).addTo(placeLayer);
+for (const r of meta.reservoirs) if (!r.context && r.waterKm2 >= 10) L.tooltip({ permanent: true, direction: "center", className: "place water", interactive: false }).setLatLng([r.lat, r.lon]).setContent(r.name).addTo(placeLayer);
+
+// ---- controls ------------------------------------------------------------------------
+const params = structuredClone(DEFAULTS);
+params.firmAT = DEFAULTS.firmSupply[1];
+const assumeEl = $("#assumptions");
+for (const a of ASSUME) {
+  if (a.head) { const h = document.createElement("div"); h.className = "subhead"; h.textContent = a.head; assumeEl.append(h); continue; }
+  if (a.type === "check") {
+    const l = document.createElement("label"); l.className = "check";
+    l.innerHTML = `<input type="checkbox" id="p-${a.id}"><span></span>`;
+    l.querySelector("span").textContent = a.label;
+    const inp = l.querySelector("input"); inp.checked = !!params[a.id];
+    inp.addEventListener("change", () => { params[a.id] = inp.checked; schedule(); });
+    assumeEl.append(l);
+  } else {
+    const d = document.createElement("div"); d.className = "slider";
+    d.innerHTML = `<label for="p-${a.id}"></label><output id="o-${a.id}" for="p-${a.id}"></output><input type="range" id="p-${a.id}" min="${a.min}" max="${a.max}" step="${a.step}">${a.hint ? '<span class="hint"></span>' : ""}`;
+    d.querySelector("label").textContent = a.label;
+    if (a.hint) d.querySelector(".hint").textContent = a.hint;
+    const inp = d.querySelector("input"), out = d.querySelector("output");
+    inp.value = params[a.id]; out.textContent = a.show(+inp.value);
+    inp.addEventListener("input", () => { params[a.id] = +inp.value; out.textContent = a.show(+inp.value); schedule(); });
+    assumeEl.append(d);
+  }
+}
+{
+  const b = document.createElement("button"); b.className = "btn"; b.type = "button"; b.id = "reset"; b.textContent = "Reset all assumptions";
+  b.addEventListener("click", () => {
+    Object.assign(params, structuredClone(DEFAULTS), { scenario: params.scenario, cityMode: params.cityMode }); params.firmAT = DEFAULTS.firmSupply[1];
+    for (const a of ASSUME) {
+      if (a.head) continue;
+      const inp = $(`#p-${a.id}`);
+      if (a.type === "check") inp.checked = !!params[a.id];
+      else { inp.value = params[a.id]; $(`#o-${a.id}`).textContent = a.show(+inp.value); }
+    }
+    syncTop(); schedule();
+  });
+  assumeEl.append(b);
+}
+const topSliders = [
+  ["compaction", (v) => (v ? `${Math.round(v * 100)} % freed` : "none")],
+  ["density", (v) => `${fmt(v)} /km²`],
+  ["centers", (v) => `${v}`],
+];
+for (const [id, show] of topSliders) {
+  const inp = $(`#p-${id}`), out = $(`#o-${id}`);
+  inp.addEventListener("input", () => { params[id] = +inp.value; out.textContent = show(+inp.value); schedule(); });
+}
+function syncTop() {
+  for (const [id, show] of topSliders) { $(`#p-${id}`).value = params[id]; $(`#o-${id}`).textContent = show(params[id]); }
+  document.querySelectorAll("[data-scenario]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.scenario === params.scenario)));
+  document.querySelectorAll("[data-city]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.city === params.cityMode)));
+  $("#row-compaction").hidden = params.cityMode !== "compact";
+  $("#row-density").hidden = $("#row-centers").hidden = params.cityMode !== "redesign";
+}
+document.querySelectorAll("[data-scenario]").forEach((b) => b.addEventListener("click", () => { params.scenario = b.dataset.scenario; syncTop(); schedule(true); }));
+document.querySelectorAll("[data-city]").forEach((b) => b.addEventListener("click", () => { params.cityMode = b.dataset.city; syncTop(); schedule(); }));
+syncTop();
+
+// layer toggles with their keys
+const layersEl = $("#layers");
+for (const g of GROUPS) {
+  const keys = USE_INFO.filter((u) => u.group === g.key).map((u) => `<span class="key"><span class="sw" style="background:${u.color}"></span>${u.label}</span>`);
+  const extra = {
+    human: [["line", LINE.corridor, "Rail and e-bike trunk corridors"]],
+    energy: [["dot", LINE.psh, "Pumped storage"]],
+    water: [["line", LINE.mains, "Treated-water mains"], ["line", LINE.reuse, "Recycled water to reservoir"], ["line", LINE.irrigation, "Fertigation"]],
+    sewage: [["line", LINE.sewer, "Gravity trunk sewers"], ["dot", DOT.plant, "Treatment and reuse plant"]],
+    recycling: [["dot", DOT.recycling, "Recycling hub"]],
+    extraction: [["dot", DOT.aggregate, "Quarry"], ["dot", DOT.sand, "Sand pit"], ["dot", DOT.limestone, "Limestone"], ["dot", DOT.salt, "Sea salt"]],
+  }[g.key] || [];
+  for (const [kind, col, label] of extra) keys.push(`<span class="key"><span class="sw ${kind}" style="background:${col};${kind === "dot" ? "outline:1px solid var(--muted)" : ""}"></span>${label}</span>`);
+  const row = document.createElement("label"); row.className = "layer";
+  row.innerHTML = `<input type="checkbox" id="lay-${g.key}" checked><span><span class="layer-title"></span></span><span class="layer-keys">${keys.join("")}</span>`;
+  row.querySelector(".layer-title").textContent = g.title;
+  row.title = g.desc;
+  row.querySelector("input").addEventListener("change", (e) => {
+    if (e.target.checked) { visible.add(g.key); groupLayers[g.key].addTo(map); } else { visible.delete(g.key); groupLayers[g.key].remove(); }
+    renderRaster();
+  });
+  layersEl.append(row);
+}
+
+// ---- worker ----------------------------------------------------------------------------
+let worker = null, fallback = null, runId = 0, lastShown = 0, result = null, timer = null;
+async function startEngine() {
+  try {
+    worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+    await new Promise((res, rej) => {
+      worker.onmessage = (e) => (e.data.kind === "ready" ? res() : rej(new Error(e.data.message)));
+      worker.onerror = (e) => rej(new Error(e.message || "worker failed"));
+      worker.postMessage({ kind: "init", meta, files });
+    });
+    worker.onmessage = (e) => onResult(e.data);
+    worker.onerror = (e) => setStatus(`The model stopped: ${e.message}`);
+  } catch {
+    worker = null;
+    const m = await import("./model.js");
+    const ctx = m.prepare(meta, files);
+    fallback = (p) => m.simulate(ctx, p);
+  }
+}
+function run() {
+  const p = { ...params, firmSupply: { 1: params.firmAT, 2: DEFAULTS.firmSupply[2] } };
+  const id = ++runId;
+  setStatus("Allocating…", true);
+  if (worker) worker.postMessage({ kind: "run", id, params: p });
+  else setTimeout(() => { try { const r = fallback(p); onResult({ kind: "result", id, ...r }); } catch (err) { onResult({ kind: "error", id, message: String(err) }); } }, 0);
+}
+let refit = true;
+function schedule(fit = false) { if (fit) refit = true; clearTimeout(timer); timer = setTimeout(run, 220); }
+function onResult(m) {
+  if (m.kind === "error") { setStatus(`The model failed: ${m.message.split("\n")[0]}`); return; }
+  if (m.id < lastShown) return;
+  lastShown = m.id;
+  result = m;
+  renderRaster(); renderVectors(); renderStats();
+  if (refit) { fitScenario(); refit = false; }
+  setStatus(m.id === runId ? `Allocated in ${fmt(m.stats.ms)} ms` : "Allocating…", m.id !== runId);
+}
+function fitScenario() {
+  let s = 90, n = -90, w = 180, e = -180;
+  for (let o = 0; o < N; o++) {
+    const b = basin[o];
+    if (!(b === 1 || (params.scenario === "ATPV" && b === 2))) continue;
+    const la = latOf(o), lo = lonOf(o);
+    if (la < s) s = la; if (la > n) n = la; if (lo < w) w = lo; if (lo > e) e = lo;
+  }
+  map.fitBounds([[s, w], [n, e]], { padding: [12, 12] });
+}
+
+// ---- raster ----------------------------------------------------------------------------
+const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+const RGB = USE_INFO.map((u) => (u.color ? hex(u.color) : null));
+const PV_TINT = hex("#c9b2ea"), IRR_TINT = hex("#bfe6d8"), FLOAT_TINT = hex("#8fa7d9");
+const isDark = () => {
+  const t = document.documentElement.getAttribute("data-theme");
+  return t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+};
+function renderRaster() {
+  if (!result) return;
+  const d = img.data, dark = isDark();
+  const use = result.use, flags = result.flags;
+  for (let o = 0; o < N; o++) {
+    const i = o * 4;
+    if (!elev[o]) { d[i + 3] = 0; continue; }
+    const u = use[o], h = hs[o], fl = flags[o];
+    let col = null;
+    if (u) {
+      const info = USE_INFO[u];
+      if (visible.has(info.group)) col = RGB[u];
+      else if ((fl & FLAG.ROOF_PV) && visible.has("energy")) col = PV_TINT;
+      else if ((fl & FLAG.FLOAT_PV) && visible.has("energy")) col = FLOAT_TINT;
+      else if ((fl & FLAG.IRRIGATED) && visible.has("water")) col = IRR_TINT;
+    }
+    if (border[o]) { const v = dark ? 235 : 25; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255; continue; }
+    if (col) {
+      const s = 0.7 + 0.3 * (h / 255);
+      d[i] = col[0] * s; d[i + 1] = col[1] * s; d[i + 2] = col[2] * s; d[i + 3] = 255;
+    } else {
+      const inB = basin[o] === 1 || basin[o] === 2;
+      const v = dark ? (inB ? 30 : 18) + h * (inB ? 0.32 : 0.18) : (inB ? 150 : 190) + h * (inB ? 0.38 : 0.22);
+      d[i] = v; d[i + 1] = v + (dark ? 2 : 3); d[i + 2] = v; d[i + 3] = inB ? 255 : 170;
+    }
+  }
+  c2d.putImageData(img, 0, 0);
+  canvas.toBlob((blob) => {
+    const url = URL.createObjectURL(blob);
+    if (!overlay) overlay = L.imageOverlay(url, gridBounds, { className: "lu-raster", interactive: false, pane: "raster" }).addTo(map);
+    else overlay.setUrl(url);
+    if (overlayUrl) setTimeout(((u) => () => URL.revokeObjectURL(u))(overlayUrl), 1000);
+    overlayUrl = url;
+  });
+}
+new MutationObserver(() => renderRaster()).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => renderRaster());
+
+// ---- vectors -----------------------------------------------------------------------------
+function renderVectors() {
+  for (const g of GROUPS) groupLayers[g.key].clearLayers();
+  const { networks: nw, points: pt } = result;
+  // sewers, three widths by people served
+  const cls = [[], [], []];
+  for (const [o, j, u] of nw.sewers) cls[u < 1e5 ? 0 : u < 1e6 ? 1 : 2].push([ll(o), ll(j)]);
+  cls.forEach((segs, k) => segs.length && L.polyline(segs, { renderer, color: LINE.sewer, weight: [1, 2, 3.5][k], opacity: 0.85, interactive: false }).addTo(groupLayers.sewage));
+  for (const p of nw.plants) {
+    L.circleMarker(ll(p.cell), { renderer, radius: 3 + 7 * Math.sqrt(p.pop / 2e6), color: "#ffffff", weight: 1.2, fillColor: DOT.plant, fillOpacity: 0.95 })
+      .bindTooltip(`<b>Treatment and reuse plant</b><br>${fmt(p.pop / 1e6, 2)} M people · ${fmt(p.flow, 2)} m³/s of sewage<br>Composting and biogas from sludge and food waste`)
+      .addTo(groupLayers.sewage);
+  }
+  for (const l of nw.reuse) {
+    L.polyline(l.path.map(ll), { renderer, color: LINE.reuse, weight: 2.4, dashArray: "6 5", opacity: 0.95 })
+      .bindTooltip(`<b>Recycled water → ${l.to}</b><br>${fmt(l.flow, 2)} m³/s · lift ${fmt(l.headM)} m<br>${fmt(l.kWhPerM3, 2)} kWh/m³ incl. ~1 kWh/m³ treatment`)
+      .addTo(groupLayers.water);
+  }
+  for (const l of nw.mains) {
+    L.polyline(l.path.map(ll), { renderer, color: LINE.mains, weight: 2, opacity: 0.85 })
+      .bindTooltip(`<b>Treated-water main</b><br>From ${l.from} to a centre of ${fmt(l.pop / 1e6, 2)} M people`)
+      .addTo(groupLayers.water);
+  }
+  for (const l of nw.irrigation) {
+    L.polyline(l.path.map(ll), { renderer, color: LINE.irrigation, weight: 2, dashArray: "2 4", opacity: 0.95 })
+      .bindTooltip(`<b>Fertigation</b><br>${fmt(l.km2)} km² of farms watered with treated effluent`)
+      .addTo(groupLayers.water);
+  }
+  for (const c of nw.corridors) {
+    L.polyline(c.path.map(ll), { renderer, color: isDark() ? "#e8e8ea" : LINE.corridor, weight: 2.6, opacity: 0.9 })
+      .bindTooltip(`<b>Trunk corridor</b><br>${fmt(c.km, 1)} km of rail, bus and e-bike way, routed to keep grades near 3 %`)
+      .addTo(groupLayers.human);
+  }
+  for (const c of pt.transit) L.circleMarker(ll(c.cell), { renderer, radius: 3.5, color: isDark() ? "#0f1115" : "#ffffff", weight: 1.5, fillColor: isDark() ? "#e8e8ea" : LINE.corridor, fillOpacity: 1 })
+    .bindTooltip(`<b>Transit centre</b><br>${fmt(c.pop / 1e6, 2)} M people`).addTo(groupLayers.human);
+  for (const c of pt.recycling) L.circleMarker(ll(c.cell), { renderer, radius: 2.6, color: "#ffffff", weight: 0.8, fillColor: DOT.recycling, fillOpacity: 1 })
+    .bindTooltip(`<b>Recycling hub</b><br>~${fmt(c.pop / 1000)}k people · dry recyclables, rubble to aggregate, repair`).addTo(groupLayers.recycling);
+  for (const s of pt.extraction) {
+    const col = DOT[s.kind] || DOT.aggregate;
+    L.circleMarker(ll(s.cell), { renderer, radius: s.km2 ? 3 + Math.sqrt(s.km2) * 3 : 6, color: s.kind === "salt" ? "#2c6fbb" : "#333", weight: 1.2, fillColor: col, fillOpacity: 1 })
+      .bindTooltip(`<b>${s.name}</b>${s.km2 ? `<br>${fmt(s.km2, 1)} km² mapped as mining (MapBiomas)` : ""}${s.offMap ? "<br>A single site outside the region; small enough to count" : ""}`)
+      .addTo(groupLayers.extraction);
+  }
+  for (const s of pt.storage) {
+    if (s.lowLat) L.polyline([[s.lat, s.lon], [s.lowLat, s.lowLon]], { renderer, color: LINE.psh, weight: 3, opacity: 0.9 }).addTo(groupLayers.energy);
+    L.circleMarker([s.lat, s.lon], { renderer, radius: 7, color: LINE.psh, weight: 3, fillColor: "#ffffff", fillOpacity: 1 })
+      .bindTooltip(`<b>${s.name}</b><br>~${fmt(s.gwh)} GWh of daily storage assumed`).addTo(groupLayers.energy);
+  }
+}
+
+// ---- stats ------------------------------------------------------------------------------
+function chip(kind, text) { return `<span class="chip ${kind}">${text}</span>`; }
+function renderStats() {
+  const s = result.stats, pr = result.params;
+  const e = s.energy, f = s.food, w = s.water.basins;
+  // water
+  const wb = Object.entries(w);
+  const wOK = wb.every(([, x]) => x.closes);
+  const wRows = wb.map(([b, x]) => `<span>${b === "1" ? "Alto Tietê" : "Paraíba (SP)"} demand</span><b>${fmt(x.demand, 1)} m³/s</b>
+    <span>reservoirs + reuse</span><b>${fmt(x.firm)} + ${fmt(x.reuse, 1)}</b>`).join("");
+  // energy
+  const supply = e.roofTWh + e.floatTWh + e.biogasTWh + e.groundTWh;
+  const need = e.demandTWh * (1 + pr.storageLoss);
+  const eOK = supply >= need * 0.995;
+  const seg = (v, col) => `<span style="width:${(100 * v / Math.max(need, supply)).toFixed(1)}%;background:${col}"></span>`;
+  // food
+  const fShare = f.share;
+  const fKind = fShare >= 0.95 ? "ok" : fShare >= 0.5 ? "warn" : "bad";
+  // materials
+  const tOK = s.timber.km2 >= s.timber.targetKm2 * 0.98;
+  $("#loops").innerHTML = `
+    <div class="loop"><div class="loop-head"><span class="loop-name">Water</span>${wOK ? chip("ok", "closes") : chip("bad", "short")}</div>
+      <div class="big">${fmt(s.reuse.reusedM3s, 1)}<small>m³/s recycled</small></div>
+      <div class="kv">${wRows}<span>treatment + pumping</span><b>${fmt(s.reuse.energyTWh, 2)} TWh</b></div></div>
+    <div class="loop"><div class="loop-head"><span class="loop-name">Energy</span>${eOK ? chip("ok", "closes") : chip("bad", `short ${fmt(need - supply, 0)} TWh`)}</div>
+      <div class="big">${fmt(e.demandTWh, 0)}<small>TWh/yr demand</small></div>
+      <div class="bar" role="img" aria-label="Supply by source against demand">${seg(e.roofTWh, "#c9b2ea")}${seg(e.floatTWh, "#8fa7d9")}${seg(e.biogasTWh, DOT.plant)}${seg(e.groundTWh, "#8a5cc7")}</div>
+      <div class="kv"><span><span class="sw" style="display:inline-block;background:#c9b2ea"></span> rooftop solar</span><b>${fmt(e.roofTWh)} TWh</b>
+      <span><span class="sw" style="display:inline-block;background:#8fa7d9"></span> floating solar</span><b>${fmt(e.floatTWh)} TWh · ${fmt(e.floatKm2)} km²</b>
+      <span><span class="sw" style="display:inline-block;background:${DOT.plant}"></span> biogas</span><b>${fmt(e.biogasTWh, 1)} TWh</b>
+      <span><span class="sw" style="display:inline-block;background:#8a5cc7"></span> ground solar</span><b>${fmt(e.groundTWh)} TWh · ${fmt(e.pvKm2)} km²</b>
+      <span>storage need</span><b>${fmt(e.storageNeedGWhDay)} GWh/day</b><span>pumped · batteries</span><b>${fmt(e.pumpedGWh)} · ${fmt(e.batteryGWh)} GWh</b></div></div>
+    <div class="loop"><div class="loop-head"><span class="loop-name">Food</span>${chip(fKind, fShare >= 0.95 ? "closes" : `${pct(fShare)} of calories`)}</div>
+      <div class="big">${pct(fShare)}<small>of calories</small></div>
+      <div class="bar" role="img" aria-label="Calories covered">${`<span style="width:${(100 * Math.min(1, f.stapleKm2 / f.needKm2)).toFixed(1)}%;background:#e3c53a"></span><span style="width:${(100 * Math.min(1 - Math.min(1, f.stapleKm2 / f.needKm2), f.terraceKm2 * pr.terraceFactor / f.needKm2)).toFixed(1)}%;background:#b59a2f"></span>`}</div>
+      <div class="kv"><span>fields needed</span><b>${fmt(f.needKm2)} km²</b><span>staples · terraces</span><b>${fmt(f.stapleKm2)} · ${fmt(f.terraceKm2)}</b><span>vegetables</span><b>${pct(f.vegShare)}</b></div></div>
+    <div class="loop"><div class="loop-head"><span class="loop-name">Materials</span>${tOK ? chip("ok", "bulk closes") : chip("warn", "timber short")}</div>
+      <div class="big">${fmt(s.materials.recyclingCentres)}<small>recycling hubs</small></div>
+      <div class="kv"><span>timber kept</span><b>${fmt(s.timber.km2)} / ${fmt(s.timber.targetKm2)} km²</b><span>extraction sites</span><b>${fmt(s.materials.extractionSites)}</b>
+      <span>trunk corridors</span><b>${fmt(s.transit.km)} km</b><span>city</span><b>${fmt(s.cityKm2)} km² · ${fmt(s.density)}/km²</b></div></div>`;
+  // land use table
+  const two = pr.scenario === "ATPV";
+  const rows = USE_INFO.map((u, k) => ({ u, a: s.byUse[k][1] || 0, b: s.byUse[k][2] || 0 })).filter((r) => r.u.color && (r.a + r.b) >= 0.5);
+  $("#t-landuse").innerHTML = `<thead><tr><th>Use</th><th>Alto Tietê</th>${two ? "<th>Paraíba</th><th>Total</th>" : ""}</tr></thead><tbody>` +
+    rows.map((r) => `<tr><td><span class="key"><span class="sw" style="background:${r.u.color}"></span>${r.u.label}</span></td><td class="num">${fmt(r.a)}</td>${two ? `<td class="num">${fmt(r.b)}</td><td class="num">${fmt(r.a + r.b)}</td>` : ""}</tr>`).join("") + "</tbody>";
+  // phosphorus
+  $("#t-phos").innerHTML = `<thead><tr><th>Reservoir</th><th>Catchment</th><th>Farms</th><th>P, mg/L</th></tr></thead><tbody>` +
+    s.phosphorus.map((r) => `<tr><td>${r.name}</td><td class="num">${fmt(r.catchKm2)}</td><td class="num">${fmt(r.farmKm2)}</td><td>${chip(r.ok ? "ok" : "bad", r.mgL.toFixed(3))}</td></tr>`).join("") + "</tbody>";
+  // plants and storage
+  const plants = result.networks.plants.slice().sort((a, b) => b.pop - a.pop);
+  $("#t-plants").innerHTML = `<thead><tr><th>Largest plants (${plants.length} total)</th><th>People</th><th>m³/s</th></tr></thead><tbody>` +
+    plants.slice(0, 8).map((p) => `<tr><td class="mono">${latOf(p.cell).toFixed(3)}, ${lonOf(p.cell).toFixed(3)}</td><td class="num">${fmt(p.pop / 1e6, 2)} M</td><td class="num">${fmt(p.flow, 2)}</td></tr>`).join("") + "</tbody>";
+  $("#t-storage").innerHTML = `<thead><tr><th>Storage</th><th>GWh</th></tr></thead><tbody>` +
+    result.points.storage.map((x) => `<tr><td>${x.name}</td><td class="num">${fmt(x.gwh)}</td></tr>`).join("") +
+    `<tr><td>Sodium-ion batteries (the rest)</td><td class="num">${fmt(e.batteryGWh)}</td></tr></tbody>`;
+}
+
+// ---- inspector --------------------------------------------------------------------------
+const insp = $("#inspect");
+function inspectAt(latlng) {
+  if (!result) return;
+  const r = Math.floor((G.north - latlng.lat) / G.step), c = Math.floor((latlng.lng - G.west) / G.step);
+  if (r < 0 || c < 0 || r >= H || c >= W) return;
+  const o = r * W + c;
+  if (!elev[o]) return;
+  const u = result.use[o], fl = result.flags[o], info = USE_INFO[u];
+  const tot = lc.total[o] || 1, sv = svN[o] || 1;
+  const covers = ["urban", "forest", "pasture", "mosaic", "agri", "plantation", "water", "natOpen", "mining", "bare"]
+    .map((k) => [k, lc[k][o] / tot]).filter(([, v]) => v >= 0.1).sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `${{ urban: "urban", forest: "forest", pasture: "pasture", mosaic: "mixed farm", agri: "crops", plantation: "plantation", water: "water", natOpen: "grass/wetland", mining: "mining", bare: "bare" }[k]} ${pct(v)}`).join(", ");
+  const gentle = (sl[0][o] + sl[1][o]) / sv, mod = sl[2][o] / sv, steep = (sl[3][o] + sl[4][o] + sl[5][o]) / sv;
+  const second = [fl & FLAG.ROOF_PV && "rooftop solar", fl & FLAG.FLOAT_PV && "floating solar", fl & FLAG.IRRIGATED && "fertigated", fl & FLAG.MANANCIAL && "drains to a drinking-water reservoir"].filter(Boolean).join(" · ");
+  const bname = { 1: "Alto Tietê", 2: "Paraíba do Sul (SP)", 3: "Paraíba do Sul, outside SP" }[basin[o]] || "Outside the basins";
+  const cid = resCatch[o] & 127;
+  insp.innerHTML = `<div class="use">${info.color ? `<span class="sw" style="background:${info.color}"></span>` : ""}${u ? info.label : bname}</div>
+    ${second ? `<div>${second}</div>` : ""}
+    <div class="kv"><span>${bname}</span><b>${latlng.lat.toFixed(3)}, ${latlng.lng.toFixed(3)}</b>
+    <span>elevation · above drainage</span><b>${fmt(elev[o])} m · ${hand[o] === 255 ? "–" : fmt(hand[o])} m</b>
+    <span>slope &lt;12 · 12–30 · ≥30 %</span><b>${pct(gentle)} · ${pct(mod)} · ${pct(steep)}</b>
+    <span>cover (MapBiomas 2023)</span><b>${covers || "–"}</b>
+    <span>people today · in this plan</span><b>${fmt(pop[o])} · ${fmt(result.cityPop[o])}</b>
+    ${cid ? `<span>drains to</span><b>${resName[cid] || "–"}</b>` : ""}</div>`;
+}
+map.on("mousemove", (e) => inspectAt(e.latlng));
+map.on("click", (e) => inspectAt(e.latlng));
+
+// ---- method -------------------------------------------------------------------------------
+$("#method").innerHTML = `
+  <p><b>Basins.</b> Drainage was traced on FABDEM at 6″ after the same 30 m smoothing Simujaules applies. Billings was routed north through Pedreira, its natural outlet. The traced Alto Tietê is ${fmt(meta.basins[1].areaKm2)} km² (published: ${fmt(meta.published[1].areaKm2)}). The Paraíba do Sul inside São Paulo state is ${fmt(meta.basins[2].areaKm2)} km² (published: ${fmt(meta.published[2].areaKm2)}).</p>
+  <p><b>Land.</b> Slope comes from the 1″ FABDEM, counted in classes inside each cell. FABDEM's noise biases slopes steep, so gentle land is if anything undercounted. Land cover is MapBiomas Collection 9 (2023), as fractions of each cell. Cover and slope are combined as if independent within a cell.</p>
+  <p><b>People.</b> IBGE 2022 census tracts: ${fmt(meta.basins[1].pop / 1e6, 2)} M in the Alto Tietê and ${fmt(meta.basins[2].pop / 1e6, 2)} M in the Paraíba Valley (SP).</p>
+  <p><b>Rules.</b> Slopes above 45° are protected and 25–45° are restricted (Forest Code arts. 4 and 11). Riverbank strips are 30–200 m by river size. Floodplains are land under 4 m above rivers that drain at least 200 km². Cities stay below 30 % slope (Lei 6.766/79). Staples take machine-farmable land under 12 %. Terraces take 12–30 % at 60 % of field yield.</p>
+  <p><b>Food</b> is sized from calories: people × kcal ÷ (1 − loss), divided by the sunlight-to-food efficiency × 1,733 kWh/m²/yr. <b>Energy</b> is closed in this order: rooftops, floating solar, biogas, then ground solar on north-facing moderate slopes and reclaimed urban land. <b>Sewage</b> follows the traced drainage by gravity. A plant goes where the load reaches the size cap, where a trunk leaves the city, or before a drinking-water reservoir. Pumping heads use São Paulo's measured gravity, 9.7864 m/s².</p>
+  <p><b>Limits.</b> This is a screening model on 3-hectare cells, not a plan. Rivers in the 2023 land cover are partly counted as water. The Paraíba's outflow to Rio de Janeiro is treated as an obligation, not as supply.</p>`;
+
+// ---- go -------------------------------------------------------------------------------------
+setStatus("Starting the model…", true);
+await startEngine();
+fitScenario();
+run();
+</script>
