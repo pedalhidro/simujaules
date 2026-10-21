@@ -544,8 +544,10 @@ function renderRaster() {
     overlayUrl = url;
   });
 }
-new MutationObserver(() => renderRaster()).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => renderRaster());
+// theme switches recolour the raster and the theme-dependent vector colours
+const retheme = () => { renderRaster(); if (result) renderVectors(); };
+new MutationObserver(retheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", retheme);
 
 // ---- vectors -----------------------------------------------------------------------------
 function renderVectors() {

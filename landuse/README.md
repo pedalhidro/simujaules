@@ -54,7 +54,12 @@ needed and both are listed in `meta.json`:
 | Alto Tietê, outlet at Rasgão | 5,878 km² | 5,868 km² (UGRHI-6) | 20.39 M |
 | Paraíba do Sul ∩ SP, outlet below Volta Redonda | 13,828 km² | 14,444 km² (UGRHI-2), −4.3 % | 2.32 M |
 
-`test-landuse.mjs` fails if either drifts more than 5 %.
+`test-landuse.mjs` fails if either drifts more than 5 %. Published areas:
+CORHI (2004), as listed in the state water plan's UGRHI profiles
+(PERH 2004–2007). The 2024 CBH-PS work plan gives 14,491 km² for UGRHI-2
+(IPT 2011). Reservoir names in `RESERVOIRS` are nearest-centroid matches of
+the bake's water components; the small Alto Tietê system ones are the
+likeliest to need a swap.
 
 ## The slope-map answer (`node bake.mjs report`)
 

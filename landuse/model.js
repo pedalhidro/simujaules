@@ -12,8 +12,10 @@
 // co-location — so a cell's productive area is area × f_cover × f_slope.
 //
 // Priority order (the legend shows it): fixed (water, quarries) → city →
-// timber → vegetables → staples → terraces → ground solar → reforestation →
-// what is left (forest, floodplain parks, natural, reserve).
+// timber → vegetables → staples → ground solar → terraces → reforestation →
+// what is left (forest, floodplain parks, natural, reserve). Solar comes
+// before terraces: it needs 10–100× less land per unit of energy than the
+// lowest-yield food does per calorie.
 
 // ---- PNG decoding (exact; mirrors landuse/lib.mjs decodePng) ---------------
 // Uses DecompressionStream("deflate") — the zlib-wrapped stream PNG's IDAT
