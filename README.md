@@ -92,6 +92,9 @@ first load).
 - `mcp/` — MCP server (stdio) so an agent (Claude Code / Desktop) can load a DEM
   and ask for energy fields, routes and density through the same engine; see
   [mcp/README.md](mcp/README.md). Dev tooling, never deployed.
+- `e2e/` — browser smoke harness: drives the real page in headless Chromium and
+  hashes what it renders and exports, for CI and for before/after comparisons.
+  Dev tooling, never deployed.
 - `census/` — headless population-weighted density harness (node); see
   [census/README.md](census/README.md).
 - `deploy.sh` — stages and rsyncs the deployable files to `gs://simujaules`.
@@ -168,6 +171,7 @@ CI (`.github/workflows/deploy.yml`) runs these on PRs and on pushes to `deploy`;
     node mcp/test-mcp.mjs                     # MCP server vs direct engine runs (npm install in census/ and mcp/)
     cd backend && cargo build --release && node test-backend.mjs   # JS↔Rust parity
     node wasm/test-wasm.mjs                   # wasm engines vs JS worker (+ stale-.wasm guard)
+    (cd e2e && npm ci) && node e2e/smoke.mjs  # the real page in headless Chromium (65 steps, ~30 s)
 
 `backend/src/main.rs` is a line-for-line port of `energy-worker.js`'s cost model
 and density math — `test-backend.mjs` enforces energy bit-parity (passes may

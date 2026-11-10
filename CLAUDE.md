@@ -97,6 +97,21 @@ hashes.
   `test-worker-pool.mjs`, `epsEstimate` in `test-energy-v2.mjs`, the
   turn-factor table in `test-maxseg.mjs`; plus the dated `docs/grid-*.mjs` copies of
   `flatEqSpeed`/`deriveCost`/`smoothHeightsInPlace`.
+- `e2e/` — the browser smoke harness (`smoke.mjs` + `fixtures.mjs`; dev
+  tooling with its own `package.json`, never deployed). It serves a tree,
+  drives the REAL page in headless Chromium through 65 steps (fields,
+  routes, top-N, density pools on both engines, GeoPackage network + graph
+  mode, Geoman drawing, config / dataset / bundle round trips, GPX overlay,
+  a canned Overpass pull) and writes a report of deterministic digests —
+  every overlay image, vector layer and exported bundle file hashed. Two
+  uses: (1) CI pass/fail (`browser-smoke` job); (2) proving a refactor
+  changes nothing — run it on the tree before and after and `diff` the two
+  reports (same machine and Chromium only; never commit a report). It is
+  the only check that exercises `app/` end to end: USE IT for any change to
+  `app/`, the workers' message protocol, `index.html` or `sw.js`. The app's
+  code is module-scoped, so the harness hooks the page from outside
+  (`L.Map.addInitHook`, a `Worker` wrapper, MutationObservers) — nothing in
+  `app/` exists for its sake.
 - `sw.js` — service worker (precache + runtime cache). `index.html`,
   `manifest.webmanifest`, `icons/` are the PWA shell.
 - `deploy.sh` — stages and rsyncs to `gs://simujaules`, served at
@@ -508,7 +523,12 @@ node census/test-census-density.mjs        # census density harness end-to-end (
 node mcp/test-mcp.mjs                      # MCP server over real stdio vs direct engine runs (needs npm install in census/ AND mcp/)
 cd backend && cargo build --release && node test-backend.mjs
 node wasm/test-wasm.mjs                    # wasm-worker.js + engine32/64.wasm vs energy-worker.js (after wasm/build.sh)
+(cd e2e && npm ci) && node e2e/smoke.mjs   # the real page in headless Chromium, 65 steps, ~30 s (needs Playwright's Chromium)
 ```
+
+`e2e/smoke.mjs --root <dir> --out <report.json>` on two trees + `diff` is the
+before/after proof for refactors (the v82 split of `app.js` and the v83
+changes were verified that way). `--only <letters>` runs single groups.
 
 `census/test-census-sampler.mjs` tests the app's own census-sampling helpers
 (`pointInPolygon`, `ringArea`/`polyArea`, `clipRingToBbox`/`clippedPolyArea`,

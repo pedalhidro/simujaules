@@ -1,0 +1,18 @@
+{
+  "name": "simujaules-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "End-to-end browser smoke harness for Simujaules (dev tooling, never deployed).",
+  "type": "module",
+  "scripts": {
+    "smoke": "node smoke.mjs"
+  },
+  "dependencies": {
+    "geotiff": "3.0.5",
+    "jszip": "3.10.1",
+    "sql.js": "1.10.3"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}
