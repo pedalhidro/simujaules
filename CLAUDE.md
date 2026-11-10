@@ -129,7 +129,9 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   keep in parity (the pre-v11 Wasm engine was a separate reimplementation —
   that is why it was dropped). Never put engine logic in `wasm/src/lib.rs`.
   Consequences: (a) EVERY change to `main.rs` must be followed by
-  `wasm/build.sh`, committing BOTH `.wasm` files, and `node
+  `wasm/build.sh`, committing BOTH `.wasm` files plus
+  `wasm/engine-sources.sha256` (the build.sh-recorded hashes of its inputs;
+  `test-wasm.mjs` fails if they are stale), and `node
   wasm/test-wasm.mjs` — a stale module silently serves the old engine in the
   browser; (b) wasm results equal the native backend's, so vs the JS worker
   they differ exactly like the backend does — passes on exact f64 ties
@@ -386,6 +388,7 @@ node test-worker-pool.mjs                  # worker regression suite
 node test-energy-v2.mjs                    # v2 closed form + refEnergyKJ/epsGeom mirrors
 node test-dem-smoothing.mjs                # DEM pre-smoothing transform (mirrors app.js)
 node test-graph-engine.mjs                 # vector-network graph engine
+node test-maxseg.mjs                       # max-density segment search + app-side coarsening
 node test-water-raster.mjs                 # OSM water-mask rasterisation (areas/sea/rivers)
 node census/test-census-sampler.mjs        # in-browser census sampler helpers (mirrors app.js)
 node census/test-census-density.mjs        # census density harness end-to-end (needs npm install in census/)
@@ -417,6 +420,8 @@ and each self-validates its 8-move engine bit-identical against
 `energy-worker.js` before reporting, so they double as an independent
 cross-check when touching the engines.
 
-There is no CI; run them before committing engine changes. Style knob
+CI (`.github/workflows/deploy.yml`) runs the node suites, the backend parity
+suite and the wasm suite on PRs to `main`/`deploy` and on pushes to `deploy`;
+still run them locally before committing engine changes. Style knob
 changes (colormap, ranges, gamma, blend) re-render cached arrays and must
 never trigger a recompute.

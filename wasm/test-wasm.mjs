@@ -8,11 +8,42 @@
 // plus the fallback paths (jobs the wasm engine must hand to the JS engine).
 // Usage (after ./build.sh): node wasm/test-wasm.mjs
 import { readFileSync } from "fs";
+import { createHash } from "crypto";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
+
+// ---- staleness guard: the committed .wasm must come from the current sources ----
+// wasm/build.sh records the SHA-256 of its inputs; a mismatch means main.rs (or
+// another input) changed without a rebuild, so the modules would silently serve
+// the old engine.
+{
+  let recorded;
+  try { recorded = readFileSync(join(here, "engine-sources.sha256"), "utf8"); }
+  catch { recorded = null; }
+  if (recorded === null) {
+    console.error("FAIL: wasm/engine-sources.sha256 is missing. Run wasm/build.sh and commit engine32.wasm, engine64.wasm and wasm/engine-sources.sha256.");
+    process.exit(1);
+  }
+  const expected = new Map();
+  for (const line of recorded.split("\n")) {
+    const m = /^([0-9a-f]{64}) [ *](.+)$/.exec(line.trim());
+    if (m) expected.set(m[2], m[1]);
+  }
+  const inputs = ["backend/src/main.rs", "wasm/src/lib.rs", "wasm/Cargo.toml", "wasm/Cargo.lock"];
+  const changed = inputs.filter((f) => {
+    let h = null;
+    try { h = createHash("sha256").update(readFileSync(join(root, f))).digest("hex"); } catch {}
+    return h !== expected.get(f);
+  });
+  if (changed.length) {
+    console.error(`FAIL: stale WebAssembly engines — changed since the last build: ${changed.join(", ")}.\n` +
+      "Run wasm/build.sh and commit engine32.wasm, engine64.wasm and wasm/engine-sources.sha256.");
+    process.exit(1);
+  }
+}
 
 // ---- workers, driven through their real onmessage handlers ----
 // wasm-worker.js importScripts energy-worker.js into ONE shared global scope;
@@ -52,7 +83,14 @@ const MEMORY64_PROBE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 5, 3, 1, 4, 
 const engines = [{ name: "wasm32", is64: false, file: "engine32.wasm" }];
 if (WebAssembly.validate(MEMORY64_PROBE)) engines.push({ name: "wasm64", is64: true, file: "engine64.wasm" });
 else console.log("(this runtime has no Memory64 — skipping engine64.wasm)");
-for (const e of engines) e.module = new WebAssembly.Module(readFileSync(join(root, e.file)));
+for (const e of [...engines]) {
+  try { e.module = new WebAssembly.Module(readFileSync(join(root, e.file))); }
+  catch (err) {
+    if (!e.is64) throw err; // engine32 is what every browser uses: never skip it
+    console.log(`(Node ${process.version} / V8 ${process.versions.v8} cannot compile engine64.wasm: ${err.message} — skipping it)`);
+    engines.splice(engines.indexOf(e), 1);
+  }
+}
 
 // ---- fixtures: identical to backend/test-backend.mjs ----
 const H = 256, W = 256, N = H * W;

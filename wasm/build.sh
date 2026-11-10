@@ -10,8 +10,10 @@
 #                     measured quadratic, 256 MiB of 1 MiB grows = 24 s — while
 #                     a declared maximum lets it reserve and grow in place.
 #
-# Rebuild (and commit both .wasm files) whenever backend/src/main.rs changes,
-# then run `node wasm/test-wasm.mjs`.
+# Rebuild (and commit both .wasm files PLUS wasm/engine-sources.sha256)
+# whenever backend/src/main.rs changes, then run `node wasm/test-wasm.mjs`.
+# engine-sources.sha256 records the hashes of the build inputs; test-wasm.mjs
+# fails when they no longer match, i.e. when the committed modules are stale.
 #
 # One-time toolchain setup:
 #   rustup target add wasm32-unknown-unknown
@@ -28,6 +30,12 @@ RUSTFLAGS="-C link-arg=--max-memory=17179869184" \
   cargo +nightly build -Zbuild-std=std,panic_abort --release \
   --target wasm64-unknown-unknown --target-dir target/w64
 cp target/w64/wasm64-unknown-unknown/release/simujaules_wasm.wasm ../engine64.wasm
+
+# Record the build inputs (repo-relative, fixed order) for the staleness guard.
+cd ..
+if command -v sha256sum >/dev/null 2>&1; then SHA=(sha256sum); else SHA=(shasum -a 256); fi
+"${SHA[@]}" backend/src/main.rs wasm/src/lib.rs wasm/Cargo.toml wasm/Cargo.lock > wasm/engine-sources.sha256
+cd wasm
 
 chmod 644 ../engine32.wasm ../engine64.wasm   # cargo marks cdylibs executable
 ls -la ../engine32.wasm ../engine64.wasm

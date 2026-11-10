@@ -146,15 +146,17 @@ etc.) drop the same set of files manually. No backend required.
 
 ## Verification & tests
 
-There is no CI; run these before committing engine changes:
+CI (`.github/workflows/deploy.yml`) runs these on PRs and on pushes to `deploy`; run them locally before committing engine changes:
 
     node test-worker-pool.mjs                 # worker regression suite
+    node test-maxseg.mjs                      # max-density segment search
     node test-water-raster.mjs                # OSM water-mask rasterisation
     node test-graph-engine.mjs                # graph-mode engine
     node test-dem-smoothing.mjs               # DEM pre-smoothing mirror
     node census/test-census-density.mjs       # headless density harness (npm install in census/)
     node mcp/test-mcp.mjs                     # MCP server vs direct engine runs (npm install in census/ and mcp/)
     cd backend && cargo build --release && node test-backend.mjs   # JS↔Rust parity
+    node wasm/test-wasm.mjs                   # wasm engines vs JS worker (+ stale-.wasm guard)
 
 `backend/src/main.rs` is a line-for-line port of `energy-worker.js`'s cost model
 and density math — `test-backend.mjs` enforces energy bit-parity (passes may
