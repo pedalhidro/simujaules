@@ -28,12 +28,12 @@ function v2Edge(dist, dh, c) {
   return e < 0 ? 0 : e;
 }
 // G_SP — Sao Paulo's local gravity (IAG-USP absolute gravimetry), NOT the
-// textbook 9.81: mirrors app.js's G_SP, re-baselined in v63 (long note there).
+// textbook 9.81: imported from lib/cost.js (the app's G_SP, long note there).
 // The Entry 23/25/26 numbers in the research notes were produced at 9.81, so a
 // re-run now reads ~0.24% lower in absolute energy; the ratios they conclude on
 // are gravity-insensitive. Kept in step with the app deliberately: a mirror at a
 // different gravity would no longer describe what the app computes.
-const G_SP = 9.7864;
+import { G_SP } from "../lib/cost.js";   // the one definition
 function flatEqSpeed(P, m, crr, cda, rho, keff) {
   const a = crr * m * G_SP, b = 0.5 * rho * cda;
   let lo = 0, hi = 40;

@@ -1,14 +1,15 @@
 // Headless Simujaules — the library behind mcp/server.mjs (and usable from
-// node scripts directly). Everything that decides a NUMBER is imported from
-// the existing hand-kept mirrors of app.js rather than copied a third time:
+// node scripts directly). Everything that decides a NUMBER is imported rather
+// than copied:
+//   - lib/cost.js (via census/census-density.mjs's re-export): deriveCost, the
+//     same physics → cost-bundle function app.js readCost() calls (it carries
+//     the one G_SP; this file adds NO copy);
 //   - census/census-density.mjs: loadDem (app-identical GeoTIFF read),
-//     deriveCost (readCost mirror — carries its own hand-copied G_SP like the
-//     other mirrors; see app.js's GRAVITY note / CLAUDE.md "grep 9.7864".
-//     This file adds NO copy), loadWorker (sync engine shim), runDensity (the
+//     loadWorker (sync engine shim), runDensity (the
 //     app's pool merge with poolN = 1 — it builds its OWN run message, so a
 //     new engine field must land there as well as in buildRunMessage below),
 //     tiffMetadataForDem / writeRasterAsGeoTIFF / writeBundle;
-//   - test-dem-smoothing.mjs: smoothHeightsInPlace (byte-identical mirror).
+//   - lib/dem-smoothing.js: smoothHeightsInPlace (the function app.js runs).
 // What this file adds is the app's DEM-load smoothing rule, the run-message
 // construction app.js does in baseMsg (no network / bridges / impassable
 // layers — those stay browser-only for now), worker_threads runners for the
@@ -23,7 +24,7 @@ import {
   runDensity as runDensityHarness,
   writeBundle, writeRasterAsGeoTIFF, ENERGY_NODATA_MD, SIMU_CONTEXT,
 } from "../census/census-density.mjs";
-import { smoothHeightsInPlace } from "../test-dem-smoothing.mjs";
+import { smoothHeightsInPlace } from "../lib/dem-smoothing.js";
 
 export { deriveCost, loadWorker, SIMU_CONTEXT };
 
@@ -54,7 +55,7 @@ export const DEM_SMOOTH_MENU = ["auto", "0", "10", "20", "30"];
 // overrides the guard (re-smooths even a tagged file, like the app's select).
 // Runs in place BEFORE any engine sees the heights — never inside an engine.
 // `onStage("decode" | "smooth")` fires at the two coarse boundaries (the
-// smoothing mirror itself is never instrumented).
+// shared smoothHeightsInPlace itself is never instrumented).
 export async function loadDemSmoothed(path, { label, smooth = "auto", onStage } = {}) {
   onStage?.("decode");
   const dem = await loadDemRaw(path, label);

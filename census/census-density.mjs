@@ -9,8 +9,9 @@
 // Parity notes (mirrors app.js exactly):
 //   - density workers receive dx/dy = dxM/dyM (METRES) for the cost model
 //     (app.js baseMsg, ~app.js:2624);
-//   - the worker takes a v2 `cost` bundle derived from the physics inputs —
-//     deriveCost() below is the hand-kept mirror of app.js readCost();
+//   - the worker takes a v2 `cost` bundle derived from the physics inputs by
+//     deriveCost() from lib/cost.js — the same function app.js readCost() calls
+//     (re-exported below for mcp/ and the census test);
 //   - exported GeoTIFFs use NATIVE dx/dy + originX/originY (degrees) for
 //     georeferencing (tiffMetadataForDem, ~app.js:4361);
 //   - runDensity sends ONE `densityPartial: true` message and does what
@@ -24,6 +25,7 @@ import { fileURLToPath } from "url";
 import { basename, dirname, join, resolve } from "path";
 import * as GeoTIFF from "geotiff";
 import JSZip from "jszip";
+import { deriveCost, flatEqSpeed } from "../lib/cost.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ENGINE = join(here, "..", "energy-worker.js");
@@ -43,48 +45,12 @@ export function loadWorker(enginePath = ENGINE) {
   };
 }
 
-// ---- v2 cost bundle: mirror of app.js flatEqSpeed() + readCost() ------------
-// PURE MIRRORS of app.js's flatEqSpeed()/readCost() (physics inputs → kJ-based
-// v2 cost bundle {aRoll, aAero, beta, climbThr, abRatio, epsOffset}), cribbed
-// from test-energy-v2.mjs's deriveCost — the repo-root mirror of the same two
-// originals. app.js is a browser module and can't be imported here; keep all
-// three in step by hand (same rule as the test-water-raster.mjs mirrors).
-// Clamps and defaults match readCost exactly (the app's UI defaults).
-// G_SP — São Paulo's local gravity (IAG-USP absolute gravimetry), NOT the
-// textbook 9.81. Mirrors app.js's G_SP; re-baselined in v63 (long note there).
-const G_SP = 9.7864;
-export function flatEqSpeed(P, m, crr, cda, rho, keff) {
-  const a = crr * m * G_SP, b = 0.5 * rho * cda;
-  let lo = 0, hi = 40;
-  for (let k = 0; k < 60; k++) {
-    const v = (lo + hi) / 2;
-    const wheel = (a + b * v * v) * v;
-    if (wheel < keff * P) lo = v; else hi = v;
-  }
-  return (lo + hi) / 2;
-}
-export function deriveCost(p = {}) {
-  const num = (v, dflt) => (Number.isFinite(v) ? v : dflt);
-  const m    = Math.max(1, num(p.mass, 75));
-  const crr  = Math.max(0, num(p.crr, 0.008));
-  const cda  = Math.max(0, num(p.cda, 0.45));
-  const rho  = Math.max(0, num(p.rho, 1.1));    // ~750 m asl (São Paulo)
-  const keff = Math.min(1, Math.max(0.1, num(p.keff, 0.97)));
-  const pFlat = Math.max(1, num(p.pFlat, 80));  // W — rider power on the flat
-  const vf   = flatEqSpeed(pFlat, m, crr, cda, rho, keff);  // m/s, derived
-  const climbThr = Math.max(0, num(p.climbThrPct, 2)) / 100;  // % → grade
-  const kSmooth = Math.min(1, Math.max(0, num(p.kSmooth, 1)));
-  const g = G_SP, mg = m * g, KJ = 1000;   // local SP gravity — see G_SP above
-  const aeroCoef = 0.5 * rho * cda * vf * vf;               // ½ρCdA·v_f² (J/ground-m, pre-/keff)
-  return {
-    aRoll: mg * crr / keff / KJ,
-    aAero: aeroCoef / keff / KJ,
-    beta: mg * kSmooth / keff / KJ,
-    climbThr,
-    abRatio: crr + aeroCoef / mg,   // un-smoothed flat-resistance grade (for ε); k_eff & kJ scale cancel
-    epsOffset: 0.13,
-  };
-}
+// ---- v2 cost bundle: lib/cost.js (shared with app.js readCost) -------------
+// deriveCost(p) folds the physics inputs into the kJ-based v2 cost bundle
+// {aRoll, aAero, beta, climbThr, abRatio, epsOffset} with the app's UI defaults
+// and clamps (and São Paulo's local G_SP). Re-exported so existing importers of
+// this module (mcp/lib.mjs, test-census-density.mjs) keep working.
+export { deriveCost, flatEqSpeed };
 
 // ---- DEM load: port of app.js loadDemFromArrayBuffer (georef bits only) -----
 // Mirrors the app's loader line for line where it affects numbers: band-0

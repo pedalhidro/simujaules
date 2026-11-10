@@ -35,6 +35,24 @@ arquivo. `index.html` 190 → 131 kB, `sw.js` 64 → 11 kB. Novo
 `sw.js`, toda versão precisa do resumo, e nenhuma marcação além das três
 passa.
 
+**Módulos compartilhados (`lib/`) no lugar das cópias à mão.** O `app.js` não
+pode ser importado pelo Node, então os testes e as ferramentas headless
+carregavam cópias manuais das funções puras dele, mantidas em sincronia por
+disciplina — a gravidade local (`G_SP`) estava escrita em dez arquivos. Essas
+funções agora moram em módulos ES puros (sem DOM, sem `state`) que o app, os
+testes, o `census/`, o `mcp/` e os harnesses de `docs/` importam: `cost.js`
+(`G_SP`, `flatEqSpeed`, `deriveCost` — o `readCost()` do app só lê os campos
+e chama `deriveCost`), `ref-energy.js` (`refEnergyKJ`, `deadband`),
+`dem-smoothing.js` (`smoothHeightsInPlace`), `water-raster.js`,
+`census-sampler.js` e `maxseg-coarsen.js`. Os corpos das funções foram
+movidos literalmente; nos dois casos em que uma função misturava leitura de
+campos com conta (`readCost`, `refEnergyKJ`), o antigo e o novo foram
+comparados bit a bit (1 002 conjuntos de parâmetros e 2 000 trajetos
+aleatórios, zero diferenças). Seguem como cópias, por o `energy-worker.js`
+ser um script clássico: `v2Edge` (`test-worker-pool.mjs`), `epsEstimate`
+(`test-energy-v2.mjs`) e a tabela de curvas (`test-maxseg.mjs`). O
+`lib/package.json` só diz ao Node que são módulos ES e não é publicado.
+
 ## v81 — 2026-09-25
 
 > **Viário e água sem custo de download.** Os arquivos do viário e das águas

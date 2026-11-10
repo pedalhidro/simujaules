@@ -82,6 +82,9 @@ first load).
   multi-ref density, layered-DP max-cost path, IDW network fill. Pure JS on typed
   arrays. **This is the reference implementation** the Rust backend must mirror.
 - `graph-engine.js` — the graph-mode engine (OSM vector graph).
+- `lib/` — small pure ES modules (cost bundle, DEM smoothing, water-mask
+  rasterisers, census sampler, changelog parser…) imported by the app AND by
+  the node tests / headless tools, so there is one definition of each.
 - `sw.js`, `manifest.webmanifest`, `icons/` — the PWA shell.
 - `backend/` — optional native compute server (Rust + rayon). Off by default; see
   [backend/README.md](backend/README.md).
@@ -154,7 +157,7 @@ CI (`.github/workflows/deploy.yml`) runs these on PRs and on pushes to `deploy`;
     node test-app-shell.mjs                   # imports ≡ sw.js precache ≡ deploy.sh staging
     node test-changelog.mjs                   # CHANGELOG.md parser, newest entry ≡ sw.js VERSION
     node test-graph-engine.mjs                # graph-mode engine
-    node test-dem-smoothing.mjs               # DEM pre-smoothing mirror
+    node test-dem-smoothing.mjs               # DEM pre-smoothing transform (lib/dem-smoothing.js)
     node census/test-census-density.mjs       # headless density harness (npm install in census/)
     node mcp/test-mcp.mjs                     # MCP server vs direct engine runs (npm install in census/ and mcp/)
     cd backend && cargo build --release && node test-backend.mjs   # JS↔Rust parity
@@ -162,9 +165,10 @@ CI (`.github/workflows/deploy.yml`) runs these on PRs and on pushes to `deploy`;
 
 `backend/src/main.rs` is a line-for-line port of `energy-worker.js`'s cost model
 and density math — `test-backend.mjs` enforces energy bit-parity (passes may
-differ only on exact f64 cost ties). Likewise `test-water-raster.mjs` holds pure
-mirrors of `app.js`'s OSM water-mask helpers (app.js can't be imported in node).
-Keep the mirrors in sync — a change to one engine must land in the other.
+differ only on exact f64 cost ties) — a change to one engine must land in the
+other. The app's pure helpers (cost bundle, DEM smoothing, water-mask
+rasterisers, census sampler…) live in `lib/` and are imported by the app, the
+tests and the headless tools alike, so those need no copies to keep in sync.
 
 Per the project convention, bump `sw.js` `VERSION` (with an entry in
 `CHANGELOG.md` — the only changelog; the help modal renders it) on every deploy

@@ -17,14 +17,15 @@
 //      trailing-anchor terms), and on a U-shaped corridor the straightness
 //      ρ = chord/length (1 − circular variance of the headings) rises
 //      monotonically with the knob;
-//   6. the app-side block-mean coarsening (mirror of app.js
-//      coarsenFieldForMaxseg — hand-kept-in-sync) handles masked/NaN cells
-//      and partial edge blocks;
+//   6. the app-side block-mean coarsening (coarsenFieldForMaxseg, imported
+//      from lib/maxseg-coarsen.js — the module app.js uses) handles
+//      masked/NaN cells and partial edge blocks;
 //   7. the too_short guard errors instead of returning garbage.
 // Run: node test-maxseg.mjs
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { coarsenFieldForMaxseg } from "./lib/maxseg-coarsen.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -463,33 +464,9 @@ for (const { name, dx, dy } of [
   }
 }
 
-// ---- 6. app-side coarsening (MIRROR of app.js coarsenFieldForMaxseg —
-//         hand-kept-in-sync, same rule as the test-water-raster mirrors) ----
-function coarsenFieldForMaxseg(field, mask, H, W, f) {
-  const Hc = Math.ceil(H / f), Wc = Math.ceil(W / f);
-  const sum = new Float64Array(Hc * Wc);
-  const cnt = new Int32Array(Hc * Wc);
-  for (let r = 0; r < H; r++) {
-    const rowBase = r * W;
-    const cBase = ((r / f) | 0) * Wc;
-    for (let c = 0; c < W; c++) {
-      if (!mask[rowBase + c]) continue;
-      const v = field[rowBase + c];
-      if (!Number.isFinite(v)) continue;
-      const ci = cBase + ((c / f) | 0);
-      sum[ci] += v;
-      cnt[ci]++;
-    }
-  }
-  const density = new Float32Array(Hc * Wc);
-  const allowed = new Uint8Array(Hc * Wc);
-  for (let i = 0; i < Hc * Wc; i++) {
-    if (cnt[i] > 0) { density[i] = sum[i] / cnt[i]; allowed[i] = 1; }
-  }
-  return { density, allowed, Hc, Wc };
-}
+// ---- 6. app-side coarsening (lib/maxseg-coarsen.js coarsenFieldForMaxseg) ----
 {
-  console.log("block-mean coarsening (app.js mirror)");
+  console.log("block-mean coarsening (lib/maxseg-coarsen.js)");
   const H = 5, W = 7, f = 3; // partial blocks on both edges
   const field = new Float64Array(H * W);
   const mask = new Uint8Array(H * W).fill(1);

@@ -2,7 +2,7 @@
 // synthesises small GeoTIFFs (like census/test-census-density.mjs), then
 // asserts three layers, each against the SAME engine driven directly:
 //   1. lib.mjs: the DEM load reproduces the app's pre-smoothing byte for byte
-//      (raw load + smoothHeightsInPlace mirror ≡ loadDemSmoothed, tag guard,
+//      (raw load + lib/dem-smoothing.js smoothHeightsInPlace ≡ loadDemSmoothed, tag guard,
 //      explicit override), and the worker-thread runner is bit-identical to
 //      the synchronous shim;
 //   2. the server over real stdio: tools list, load_dem, energy_field,
@@ -27,7 +27,7 @@ import {
   loadDemSmoothed, loadDemInThread, buildRunMessage, runEngine, runDensity, cellCentre, loadWorker, fieldStats, fcForWire,
 } from "./lib.mjs";
 import { loadDem as loadDemRaw } from "../census/census-density.mjs";
-import { smoothHeightsInPlace } from "../test-dem-smoothing.mjs";
+import { smoothHeightsInPlace } from "../lib/dem-smoothing.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SERVER = join(here, "server.mjs");
@@ -112,7 +112,7 @@ const main = async () => {
   {
     const raw = await loadDemRaw(demPath);
     smoothHeightsInPlace(raw.height, raw.mask, raw.H, raw.W, raw.dxM, raw.dyM, 30);
-    assert(countDiff(raw.height, dem.height) === 0, "smoothed heights ≡ raw load + smoothHeightsInPlace mirror (0 mismatches)");
+    assert(countDiff(raw.height, dem.height) === 0, "smoothed heights ≡ raw load + smoothHeightsInPlace (0 mismatches)");
     const raw0 = await loadDemSmoothed(demPath, { smooth: 0 });
     const rawRef = await loadDemRaw(demPath);
     assert(countDiff(raw0.height, rawRef.height) === 0 && raw0.smoothSigmaM === 0, "smooth: 0 keeps the raw heights");

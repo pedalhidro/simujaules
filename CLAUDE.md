@@ -41,10 +41,10 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 - `mcp/` — MCP server (stdio) exposing the engine to agents (Claude Code /
   Desktop): `load_dem`, `energy_field`, `route` (+ top-N, string pull),
   `energy_at`, `density`. Dev tooling like `census/` — its own
-  `package.json`, never deployed. It imports the existing mirrors instead of
-  copying them: `census/census-density.mjs` (`loadDem`, `deriveCost`,
-  `runDensity`, the GeoTIFF/bundle writers) and `test-dem-smoothing.mjs`
-  (`smoothHeightsInPlace`), and hosts `energy-worker.js` in a
+  `package.json`, never deployed. It imports existing code instead of
+  copying it: `census/census-density.mjs` (`loadDem`, `runDensity`, the
+  GeoTIFF/bundle writers, and `deriveCost` re-exported from `lib/cost.js`)
+  and `lib/dem-smoothing.js` (`smoothHeightsInPlace`), and hosts `energy-worker.js` in a
   `worker_threads` Worker (`mcp/engine-thread.mjs`, the threaded twin of the
   census `loadWorker()` shim). `mcp/lib.mjs` `buildRunMessage` is the
   headless mirror of app.js `baseMsg` (no network / bridges / impassable
@@ -68,8 +68,21 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 - `lib/` — small PURE ES modules (no DOM, no `state`, no CDN globals) that
   `app.js` imports and Node can import too, so tests and headless tools use
   the app's own code instead of a hand-kept copy. `lib/package.json` only
-  marks them as ESM for Node and does not ship. Currently
-  `lib/changelog.js` (the `CHANGELOG.md` parser behind the help modal).
+  marks them as ESM for Node and does not ship. `cost.js` (`G_SP`,
+  `flatEqSpeed`, `deriveCost` — the physics → kJ cost bundle; app.js
+  `readCost()` only reads the inputs and calls it), `ref-energy.js`
+  (`refEnergyKJ`, `deadband` — the GPX-overlay closed form),
+  `dem-smoothing.js` (`smoothHeightsInPlace`), `water-raster.js` (the OSM
+  water-mask rasterisers), `census-sampler.js` (Sobol/Halton + polygon
+  helpers), `maxseg-coarsen.js`, `changelog.js` (the `CHANGELOG.md` parser
+  behind the help modal). RULE: a pure helper that a test or headless tool
+  needs goes HERE and is imported — never copy a function out of `app/` or
+  `app.js` into a test again. What still IS hand-mirrored, because
+  `energy-worker.js` is a classic `importScripts` script: `v2Edge` in
+  `test-worker-pool.mjs`, `epsEstimate` in `test-energy-v2.mjs`, the
+  turn-factor table in `test-maxseg.mjs`; plus `mcp/lib.mjs`
+  `buildRunMessage` (below) and the dated `docs/grid-*.mjs` copies of
+  `flatEqSpeed`/`deriveCost`/`smoothHeightsInPlace`.
 - `sw.js` — service worker (precache + runtime cache). `index.html`,
   `manifest.webmanifest`, `icons/` are the PWA shell.
 - `deploy.sh` — stages and rsyncs to `gs://simujaules`, served at
@@ -362,11 +375,10 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   already-smoothed re-imports via the exported dem.tif's `ImageDescription`
   tag. It runs BEFORE heights ship to the engines, so JS/graph/Rust
   bit-parity is untouched — never move smoothing INTO an engine
-  (path-history state, forbidden above). `test-dem-smoothing.mjs` holds the
-  byte-identical mirror and reference tests (hand-kept-in-sync; the mirror
-  is exported for `mcp/lib.mjs`, which applies the same auto rule at
-  headless DEM load — keep the function body verbatim, the `export` is a
-  trailing statement); the σ
+  (path-history state, forbidden above). The function lives in
+  `lib/dem-smoothing.js` — ONE definition, imported by the app, by
+  `test-dem-smoothing.mjs` (the reference tests) and by `mcp/lib.mjs`
+  (which applies the same auto rule at headless DEM load); the σ
   choices are only valid for THIS transform — don't swap in a plain blur or
   change σ/the auto rule without re-running the journal validation (Entry 74
   is the validation behind the current σ30 rule). Accuracy itself is carried by per-rider
@@ -374,18 +386,19 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   validated med|Δ%| 3.7/2.7/4.9 with bias < ±1% on three independent riders,
   meeting the ±5%/±2% product goal); smoothing alone does NOT rescue
   uncalibrated fine-DEM accuracy.
-- **GRAVITY IS LOCAL, and it is hand-copied.** `G_SP = 9.7864`
+- **GRAVITY IS LOCAL, and it is defined once.** `G_SP = 9.7864`
   m/s² (São Paulo, IAG-USP absolute gravimetry) — NOT the textbook 9.81, which
   is ≈0.24% high here. Re-baselined in v63 to re-sync with
   `bicycling-energy-model` (its journal Entry 27), which moved first; while the
   two disagreed, the sibling applet's `v2Edge` readout differed from this app's
-  by exactly the gravity ratio. The constant lives in `app.js`'s `readCost`
-  chain (the origin, with the long note) and is hand-copied into
-  `census/census-density.mjs`, `test-energy-v2.mjs` and every
-  `docs/grid-*.mjs` harness — the `readCost` mirror chain. **Grep `9.7864`
-  and change every hit together**; a mirror at a different gravity silently
-  computes different physics than the app (the sibling repo hit exactly that,
-  running two gravities inside one computation). `backend/src/main.rs` needs NO
+  by exactly the gravity ratio. The constant lives in `lib/cost.js`
+  (with the long note) and everything else IMPORTS it: `app.js` via
+  `deriveCost`, `census/census-density.mjs`, `test-energy-v2.mjs` and every
+  `docs/grid-*.mjs` harness (it used to be hand-copied into ten files — a
+  copy at a different gravity silently computes different physics than the
+  app; the sibling repo hit exactly that, running two gravities inside one
+  computation). `grep 9.7864` must show exactly one definition; never
+  reintroduce a literal. `backend/src/main.rs` needs NO
   copy and never will: it receives the derived `{aRoll, aAero, beta, abRatio,
   …}` bundle over the wire, so **JS↔Rust bit-parity is gravity-blind** — which
   also means `test-backend.mjs` (synthetic bundle, `aRoll: 1, beta: 30`) does
@@ -403,31 +416,31 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 
 ```sh
 node test-worker-pool.mjs                  # worker regression suite
-node test-energy-v2.mjs                    # v2 closed form + refEnergyKJ/epsGeom mirrors
-node test-dem-smoothing.mjs                # DEM pre-smoothing transform (mirrors app.js)
+node test-energy-v2.mjs                    # v2 closed form + lib/cost.js deriveCost, lib/ref-energy.js
+node test-dem-smoothing.mjs                # DEM pre-smoothing transform (lib/dem-smoothing.js)
 node test-graph-engine.mjs                 # vector-network graph engine
 node test-maxseg.mjs                       # max-density segment search + app-side coarsening
 node test-water-raster.mjs                 # OSM water-mask rasterisation (areas/sea/rivers)
 node test-app-shell.mjs                    # imports ≡ sw.js precache ≡ deploy.sh staging + stamps (needs bash)
 node test-changelog.mjs                    # CHANGELOG.md parser + newest entry ≡ sw.js VERSION
-node census/test-census-sampler.mjs        # in-browser census sampler helpers (mirrors app.js)
+node census/test-census-sampler.mjs        # in-browser census sampler helpers (lib/census-sampler.js)
 node census/test-census-density.mjs        # census density harness end-to-end (needs npm install in census/)
 node mcp/test-mcp.mjs                      # MCP server over real stdio vs direct engine runs (needs npm install in census/ AND mcp/)
 cd backend && cargo build --release && node test-backend.mjs
 node wasm/test-wasm.mjs                    # wasm-worker.js + engine32/64.wasm vs energy-worker.js (after wasm/build.sh)
 ```
 
-`census/test-census-sampler.mjs` holds PURE MIRRORS of `app.js`'s census-sampling
-helpers (`pointInPolygon`, `ringArea`/`polyArea`, `clipRingToBbox`/`clippedPolyArea`,
-`sobolScalar1D`) — same hand-kept-in-sync rule as below. It checks population
+`census/test-census-sampler.mjs` tests the app's own census-sampling helpers
+(`pointInPolygon`, `ringArea`/`polyArea`, `clipRingToBbox`/`clippedPolyArea`,
+`sobolScalar1D`), imported from `lib/census-sampler.js`. It checks population
 weighting, in-polygon placement, and the clip-area ratio. The cloud `.fgb`
 (`census/build_fgb.py` → GCS) is built/uploaded out-of-band, never shipped.
 
-`test-water-raster.mjs` holds PURE MIRRORS of `app.js`'s OSM water-mask helpers
+`test-water-raster.mjs` tests the app's own OSM water-mask helpers
 (`fillRingsEvenOdd`, `rasterPolylineSupercover`, `assembleRings`,
-`fillSeaFromCoastlines`) — `app.js` is a browser module and can't be imported in
-node, so the copies must be kept in sync (like `backend/main.rs` mirrors
-`energy-worker.js`). The SEA fill is the load-bearing case: OSM gives only
+`fillSeaFromCoastlines`), imported from `lib/water-raster.js`. The async
+`…Chunked` variants the app actually calls for big masks stay in the app and
+are NOT under test — keep them line-for-line with the lib versions. The SEA fill is the load-bearing case: OSM gives only
 `natural=coastline` lines (land-left/water-right), filled by a horizontal+vertical
 orientation SWEEP (sea/land set per span, never flood-filled — coastline gaps
 would otherwise leak the sea into all land).

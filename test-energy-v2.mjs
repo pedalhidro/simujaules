@@ -6,102 +6,26 @@
 // still mirrors the v2Edge/energy-worker.js formula, unchanged by WI-1.
 // Run: node test-energy-v2.mjs
 //
-// These are PURE MIRRORS of app.js's readCost()/refEnergyKJ() math (same
-// hand-kept-in-sync rule as test-water-raster.mjs / census mirrors — app.js is a
-// browser module and can't be imported here). Keep them in step with app.js.
+// readCost()'s math (deriveCost, G_SP) and refEnergyKJ's closed form (plus its
+// deadband) are IMPORTED from lib/ — the same modules app.js runs — so this file
+// tests the real implementation, not a copy. epsEstimate below is still a local
+// mirror: it is the per-edge grade-local ε of energy-worker.js v2Edge (a classic
+// worker script, not importable here), used only by the clamp-neutrality sweep.
+import { G_SP as G, deriveCost } from "./lib/cost.js";
+import { deadband, refEnergyKJ } from "./lib/ref-energy.js";
 
 let failures = 0;
 const approx = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
 function ok(name, cond, extra = "") { console.log(`${cond ? "  ok  " : "FAIL  "}${name}${extra ? "  — " + extra : ""}`); if (!cond) failures++; }
 
-// São Paulo's local gravity (IAG-USP absolute gravimetry), not the textbook
-// 9.81 — mirrors app.js's G_SP; re-baselined in v63 (long note there). The
-// assertions below are written in terms of G, so they track it automatically.
-const G = 9.7864;
+// G is São Paulo's local gravity (lib/cost.js G_SP — the long note is there);
+// the assertions below are written in terms of G, so they track it automatically.
 
-// ── mirror of app.js flatEqSpeed() + readCost() (physics → kJ cost bundle) ────
-function flatEqSpeed(P, m, crr, cda, rho, keff) {
-  const a = crr * m * G, b = 0.5 * rho * cda;
-  let lo = 0, hi = 40;
-  for (let k = 0; k < 60; k++) {
-    const v = (lo + hi) / 2;
-    const wheel = (a + b * v * v) * v;
-    if (wheel < keff * P) lo = v; else hi = v;
-  }
-  return (lo + hi) / 2;
-}
-function deriveCost({ mass, crr, cda, rho, keff, pFlat, climbThrPct, kSmooth = 1 }) {
-  const vf = flatEqSpeed(pFlat, mass, crr, cda, rho, keff), mg = mass * G, KJ = 1000;
-  const aeroCoef = 0.5 * rho * cda * vf * vf;
-  return {
-    aRoll: mg * crr / keff / KJ,
-    aAero: aeroCoef / keff / KJ,
-    beta: mg * kSmooth / keff / KJ,   // k_smooth multiplies the gravity term
-    climbThr: climbThrPct / 100,
-    abRatio: crr + aeroCoef / mg,     // un-smoothed (independent of kSmooth)
-    epsOffset: 0.13,
-  };
-}
-
-// ── mirror of the deadband + closed-form evaluator (refEnergyKJ) ──────────────
-function deadband(h, tau) {
-  const out = new Float64Array(h.length);
-  let y = h[0]; out[0] = y;
-  for (let i = 1; i < h.length; i++) {
-    if (h[i] > y + tau) y = h[i] - tau; else if (h[i] < y - tau) y = h[i] + tau;
-    out[i] = y;
-  }
-  return out;
-}
+// ── mirror of energy-worker.js v2Edge's per-edge grade-local ε ────────────────
 function epsEstimate(c, sbar) {
   if (!(sbar > 0)) return 0;
   let eps = Math.min(1, c.abRatio / sbar) - c.epsOffset;
   return eps < 0 ? 0 : eps > 1 ? 1 : eps;
-}
-// epsGeomAgg — mirror of bicycling-energy-model regime_compare.mjs epsGeom
-// (journal Entry 18/WI-1), ported into refEnergyKJ: resample the RAW
-// (pre-deadband) profile into 30 m cells, accumulate the drop-weighted
-// Σ drop_k·min(1, abRatio/(drop_k/30)) over descending cells, divide by the
-// total drop, THEN subtract epsOffset and clamp₀₁ ONCE on that aggregate
-// (never per-cell). x/h are the RAW cumulative distance/elevation arrays
-// (same length, index-aligned) — NOT the τ-deadbanded hS used by the walk
-// below.
-function epsGeomAgg(x, h, abRatio, epsOffset) {
-  const N = x.length - 1, DX = 30, x0 = x[0], totalM = x[N] - x0, nc = Math.floor(totalM / DX);
-  if (nc < 2) return 0;
-  let j = 0;
-  const hAt = (d) => {
-    while (j < N - 1 && x[j + 1] < d) j++;
-    const seg = x[j + 1] - x[j], f = seg > 1e-9 ? (d - x[j]) / seg : 0;
-    return h[j] * (1 - f) + h[j + 1] * f;
-  };
-  const cellH = new Float64Array(nc + 1);
-  for (let k = 0; k <= nc; k++) cellH[k] = hAt(x0 + k * DX);
-  let Hd = 0, epsW = 0;
-  for (let k = 0; k < nc; k++) {
-    const dh = cellH[k + 1] - cellH[k];
-    if (dh < 0) { const drop = -dh; Hd += drop; epsW += drop * Math.min(1, abRatio / (drop / DX)); }
-  }
-  if (Hd < 1) return 0;
-  return Math.max(0, Math.min(1, epsW / Hd - epsOffset));
-}
-// segs: [{ d, dh }]. Returns leg energy in kJ (coefficients are kJ-based).
-function refEnergyKJ(segs, c, tau = 2) {
-  const n = segs.length;
-  const x = new Float64Array(n + 1);
-  const h = new Float64Array(n + 1);
-  for (let i = 0; i < n; i++) { x[i + 1] = x[i] + segs[i].d; h[i + 1] = h[i] + segs[i].dh; }
-  const hS = deadband(h, tau);
-  let X = 0, Xnc = 0, hPlus = 0, hMinus = 0;
-  for (let i = 0; i < n; i++) {
-    const d = segs[i].d; if (!(d > 0)) continue;
-    const dh = hS[i + 1] - hS[i];
-    X += d;
-    if (dh >= 0) { hPlus += dh; if (dh < c.climbThr * d) Xnc += d; }
-    else { hMinus += -dh; Xnc += d; }
-  }
-  const eps = epsGeomAgg(x, h, c.abRatio, c.epsOffset);   // drop-weighted 30 m-cell ε on the RAW profile
-  return c.aRoll * X + c.aAero * Xnc + c.beta * (hPlus - eps * hMinus);
 }
 
 // ── 1. ε estimator — the notas.md worked example (RMC200 Mogi) ────────────────
@@ -144,7 +68,7 @@ function refEnergyKJ(segs, c, tau = 2) {
   // so Δ=[0,+18,−16]: X=1200, Xnc=1000(flat)+100(desc)=1100, hPlus=18, hMinus=16.
   // ε (WI-1) instead resamples the RAW (undeadbanded) profile — same h=[0,0,20,0]
   // at raw x=[0,1000,1100,1200] — into 30 m cells. Reimplemented here
-  // independently of epsGeomAgg: the peak at x=1100 doesn't land on a 30 m
+  // independently of refEnergyKJ's ε block: the peak at x=1100 doesn't land on a 30 m
   // boundary (nearest are 1080/1110), so it straddles into cell [1080,1110]
   // (net +2 m, still net-ascending there) — only the 3 cells from 1110 to 1200
   // are net-descending, each dropping 6 m (30 m·0.2 grade), so the aggregate
@@ -158,7 +82,7 @@ function refEnergyKJ(segs, c, tau = 2) {
     return rawH[jj] * (1 - f) + rawH[jj + 1] * f;
   };
   // hAtRaw's cursor `jj` only moves forward, so cells must be precomputed in
-  // ascending d order (as epsGeomAgg does) — evaluating a later cell before an
+  // ascending d order (as refEnergyKJ's ε block does) — evaluating a later cell before an
   // earlier one would advance jj past where the earlier one needs it.
   const cellH3 = new Float64Array(41);   // nc = floor(1200/30) = 40
   for (let k = 0; k <= 40; k++) cellH3[k] = hAtRaw(k * 30);
@@ -210,7 +134,7 @@ function refEnergyKJ(segs, c, tau = 2) {
     { d: 300, dh: -30 },  // steep: grade 0.10, drop 30 m
     { d: 300, dh: -6 },   // gentle: grade 0.02, drop 6 m
   ];
-  // Independent expectation (NOT via epsGeomAgg): each 300 m stretch splits
+  // Independent expectation (NOT via refEnergyKJ's ε block): each 300 m stretch splits
   // into 10 uniform 30 m cells of its own constant grade, so the cell-weighted
   // sum reduces to per-segment drop·min(1, abRatio/segmentGrade).
   const dA = 30, sA = 0.10, dB = 6, sB = 0.02;

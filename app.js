@@ -1,6 +1,14 @@
 // app.js — wires up DEM loading, map UI, worker dispatch, result overlay
 
 import { parseChangelog } from "./lib/changelog.js";
+import { deriveCost } from "./lib/cost.js";
+import { refEnergyKJ as refEnergyKJFromCost } from "./lib/ref-energy.js";
+import { smoothHeightsInPlace } from "./lib/dem-smoothing.js";
+import { fillRingsEvenOdd, rasterPolylineSupercover, assembleRings } from "./lib/water-raster.js";
+import {
+  sobolPoint2D, haltonPoint2D, sobolScalar1D, pointInPolygon, polyArea, clippedPolyArea,
+} from "./lib/census-sampler.js";
+import { coarsenFieldForMaxseg } from "./lib/maxseg-coarsen.js";
 
 // ============================================================================
 // i18n
@@ -873,70 +881,16 @@ function associateOrphanLabels() {
 const PERSIST_KEY = "simu-params";
 
 // ── v2 leg-energy cost bundle ────────────────────────────────────────────────
-// The compute engines (energy-worker.js v2Edge, graph-engine.js stepCost, the
-// Rust backend v2_edge) are parameterised by this bundle, derived ONCE here from
-// the physics inputs and shipped identically to all three so they stay
-// bit-parity. See bicycling-energy-model/notas.md (v2). Coefficients are in
-// kJ-based units (energy field / budget / legend stay kJ, as before α/β/η).
-// epsOffset is the empirical −0.13 descent-recovery offset (a constant, not a
-// UI knob) — originally fit on 44 rides, now cross-validated on 3 independent
-// riders + the author's full export (bicycling-energy-model journal Entries
-// 12/14/16). abRatio = crr + aeroCoef/mg is the dimensionless flat-resistance
-// grade (= α/β) used by the per-grade descent recovery ε — deliberately
-// UN-smoothed (it equals (aRoll+aAero)/beta only when kSmooth = 1; ε is a
-// grade-geometry factor, not an energy one, so it must not scale with k_smooth).
-// Flat reference speed v_f (m/s) from the rider's power on the flat: solve the
-// steady wheel-power balance keff·P = (Crr·m·g + ½ρCdA·v²)·v by bisection.
-// Mirrors bicycling-energy-model compare.mjs flatEqSpeed (wind = 0).
-//
-// GRAVITY — local, not textbook. 9.7864 m/s² is São Paulo's value from IAG-USP
-// absolute gravimetry; 9.81 (the old constant) is ~0.24% high here. Every DEM
-// this app ships and every ride the model was calibrated on sits in the SP
-// metropolitan region, so the local value is the physical one. Re-baselined in
-// v63 to re-sync with bicycling-energy-model (journal Entry 27), which moved
-// first: while the two disagreed, the sibling applet's v2Edge readout differed
-// from this app's by exactly the gravity ratio. Consequence: β (and every
-// energy) falls by ≈0.24%.
-// HAND-COPIED into census/census-density.mjs, test-energy-v2.mjs and
-// docs/grid-*.mjs (the readCost mirror chain — grep 9.7864 to find them all).
-// The Rust backend needs NO copy: it receives the derived {aRoll, aAero, beta,
-// abRatio, …} bundle over the wire, so JS↔Rust bit-parity is gravity-blind.
-const G_SP = 9.7864;
-function flatEqSpeed(P, m, crr, cda, rho, keff) {
-  const a = crr * m * G_SP, b = 0.5 * rho * cda;
-  let lo = 0, hi = 40;
-  for (let k = 0; k < 60; k++) {
-    const v = (lo + hi) / 2;
-    const wheel = (a + b * v * v) * v;
-    if (wheel < keff * P) lo = v; else hi = v;
-  }
-  return (lo + hi) / 2;
-}
+// The physics → kJ cost-bundle math (deriveCost, flatEqSpeed) and the local
+// gravity constant G_SP live in lib/cost.js (shared with census/, mcp/ and
+// test-energy-v2.mjs; the long GRAVITY note is there). readCost() only reads
+// the Parameters inputs; deriveCost applies the defaults and clamps.
 function readCost() {
-  const num = (id, dflt) => { const v = parseFloat(document.getElementById(id)?.value); return Number.isFinite(v) ? v : dflt; };
-  const m    = Math.max(1, num("mass", 75));
-  const crr  = Math.max(0, num("crr", 0.008));
-  const cda  = Math.max(0, num("cda", 0.45));
-  const rho  = Math.max(0, num("rho", 1.1));    // ~750 m asl (São Paulo)
-  const keff = Math.min(1, Math.max(0.1, num("keff", 0.97)));
-  const pFlat = Math.max(1, num("pflat", 80));  // W — rider power on the flat
-  const vf   = flatEqSpeed(pFlat, m, crr, cda, rho, keff);  // m/s, derived
-  const climbThr = Math.max(0, num("climb-thr", 2)) / 100;  // % → grade
-  // k_smooth: profile-smoothing factor (notas v2). 1 = no smoothing (the per-edge
-  // engine pays roller momentum implicitly; the notas' ≈0.74 is the FABDEM value
-  // for the LOW-COMPUTE closed form). Multiplies the gravity term (climb + the
-  // descent credit); ε stays computed from the UN-smoothed abRatio.
-  const kSmooth = Math.min(1, Math.max(0, num("ksmooth", 1)));
-  const g = G_SP, mg = m * g, KJ = 1000;   // local SP gravity — see G_SP above
-  const aeroCoef = 0.5 * rho * cda * vf * vf;               // ½ρCdA·v_f² (J/ground-m, pre-/keff)
-  return {
-    aRoll: mg * crr / keff / KJ,
-    aAero: aeroCoef / keff / KJ,
-    beta: mg * kSmooth / keff / KJ,
-    climbThr,
-    abRatio: crr + aeroCoef / mg,   // un-smoothed flat-resistance grade (for ε); k_eff & kJ scale cancel
-    epsOffset: 0.13,
-  };
+  const num = (id) => parseFloat(document.getElementById(id)?.value);
+  return deriveCost({
+    mass: num("mass"), crr: num("crr"), cda: num("cda"), rho: num("rho"), keff: num("keff"),
+    pFlat: num("pflat"), climbThrPct: num("climb-thr"), kSmooth: num("ksmooth"),
+  });
 }
 // The v2 analogue of v1's `alpha` (per-ground-metre distance cost) — used by the
 // runtime estimator's reach model (flat reach ∝ eMax/alpha).
@@ -3081,75 +3035,9 @@ async function loadFabdemForView() {
   }
 }
 
-// Static DEM pre-smoothing (v55, journal Entry 20's validated mitigation for the
-// Entry-19 fine-DEM over-charge): sequential per-axis mask-normalized Gaussian
-// (rows then columns), truncation 3σ, per-axis σ_px from the geotransform, in
-// place, O(rows) temp memory (~10 s at 135 M cells). Runs app-side at DEM load
-// only — heights then ship identically to the JS worker, graph engine and Rust
-// backend, so there are NO engine/parity implications. test-dem-smoothing.mjs
-// holds the verbatim mirror + reference tests (hand-kept-in-sync, like the
-// other engine mirrors); the Entry-20 harness (goal_calibration.mjs Phase A)
-// validated this exact scheme, so σ choices are only meaningful for THIS
-// transform — don't swap in a plain gaussian blur.
-function smoothHeightsInPlace(height, mask, H, W, dxM, dyM, sigmaM) {
-  if (!(sigmaM > 0)) return;
-  const passes = [
-    { sigPx: sigmaM / dxM, horizontal: true },
-    { sigPx: sigmaM / dyM, horizontal: false },
-  ];
-  for (const p of passes) {
-    const R = Math.ceil(3 * p.sigPx);
-    if (!(R >= 1)) continue;
-    const w = new Float64Array(R + 1);
-    for (let k = 0; k <= R; k++) w[k] = Math.exp(-(k * k) / (2 * p.sigPx * p.sigPx));
-    if (p.horizontal) {
-      const buf = new Float64Array(W);
-      for (let r = 0; r < H; r++) {
-        const base = r * W;
-        for (let c = 0; c < W; c++) {
-          const idx = base + c;
-          if (!mask[idx]) continue;
-          let num = w[0] * height[idx], den = w[0];
-          for (let k = 1; k <= R; k++) {
-            const a = c - k, b = c + k;
-            if (a >= 0 && mask[base + a]) { num += w[k] * height[base + a]; den += w[k]; }
-            if (b < W && mask[base + b]) { num += w[k] * height[base + b]; den += w[k]; }
-          }
-          buf[c] = num / den;
-        }
-        for (let c = 0; c < W; c++) if (mask[base + c]) height[base + c] = buf[c];
-      }
-    } else {
-      // Vertical pass, row-major streaming: for output row r, accumulate the
-      // (2R+1) source rows r±k sequentially into num/den, then defer the
-      // write by R rows via a ring buffer (source rows must stay unmodified
-      // while they can still appear in a later output row's window).
-      const num = new Float64Array(W), den = new Float64Array(W);
-      const ring = []; // { row, vals: Float64Array }
-      const flushRow = (entry) => {
-        const base = entry.row * W;
-        for (let c = 0; c < W; c++) if (mask[base + c]) height[base + c] = entry.vals[c];
-      };
-      for (let r = 0; r < H; r++) {
-        num.fill(0); den.fill(0);
-        const k0 = Math.max(0, r - R), k1 = Math.min(H - 1, r + R);
-        for (let rr = k0; rr <= k1; rr++) {
-          const wk = w[Math.abs(rr - r)], base = rr * W;
-          for (let c = 0; c < W; c++) {
-            if (mask[base + c]) { num[c] += wk * height[base + c]; den[c] += wk; }
-          }
-        }
-        const vals = new Float64Array(W);
-        const base = r * W;
-        for (let c = 0; c < W; c++) vals[c] = mask[base + c] ? num[c] / den[c] : height[base + c];
-        ring.push({ row: r, vals });
-        // Flush rows whose window can no longer include any unwritten source row.
-        while (ring.length && ring[0].row <= r - R) flushRow(ring.shift());
-      }
-      while (ring.length) flushRow(ring.shift());
-    }
-  }
-}
+// Static DEM pre-smoothing (v55, journal Entry 20) — smoothHeightsInPlace lives
+// in lib/dem-smoothing.js (shared with test-dem-smoothing.mjs and mcp/lib.mjs);
+// it runs app-side at DEM load only, before heights ship to any engine.
 
 // 1A — crop the loaded DEM to the current map viewport. Implemented as an
 // in-memory export→reimport: writeRasterAsGeoTIFF on the sub-grid window, then
@@ -5130,161 +5018,19 @@ function llToGridFrac(lat, lng) {
   return [(lng - originX) / dx, (originY - lat) / dy];
 }
 
-// Even-odd scanline fill of a BODY's rings (each [[gx,gy],…]) into `out`
-// (1=impassable). All rings of one body fill together, so inner rings (islands)
-// cut holes by crossing parity. Clamped to the body's row span; edges/vertices
-// outside the grid still contribute correct crossings (only the marks clip).
-function fillRingsEvenOdd(rings, out, W, H) {
-  let yMin = Infinity, yMax = -Infinity;
-  for (const r of rings) for (const p of r) { if (p[1] < yMin) yMin = p[1]; if (p[1] > yMax) yMax = p[1]; }
-  if (!Number.isFinite(yMin)) return;
-  const r0 = Math.max(0, Math.floor(yMin)), r1 = Math.min(H - 1, Math.floor(yMax));
-  const xs = [];
-  for (let ry = r0; ry <= r1; ry++) {
-    const yc = ry + 0.5;
-    xs.length = 0;
-    for (const ring of rings) {
-      const n = ring.length;
-      if (n < 3) continue;
-      for (let i = 0, j = n - 1; i < n; j = i++) {
-        const yi = ring[i][1], yj = ring[j][1];
-        if ((yi > yc) !== (yj > yc)) xs.push(ring[i][0] + (yc - yi) / (yj - yi) * (ring[j][0] - ring[i][0]));
-      }
-    }
-    if (xs.length < 2) continue;
-    xs.sort((a, b) => a - b);
-    const base = ry * W;
-    for (let k = 0; k + 1 < xs.length; k += 2) {
-      const cA = Math.max(0, Math.ceil(xs[k] - 0.5));
-      const cB = Math.min(W - 1, Math.floor(xs[k + 1] - 0.5));
-      for (let c = cA; c <= cB; c++) out[base + c] = 1;
-    }
-  }
-}
-
-// Supercover (4-connected) rasterisation of a polyline — every cell the line
-// crosses (Amanatides–Woo), so an 8-connected route can't slip across it.
-function rasterPolylineSupercover(pts, out, W, H) {
-  const mark = (cx, cy) => { if (cx >= 0 && cx < W && cy >= 0 && cy < H) out[cy * W + cx] = 1; };
-  for (let s = 0; s + 1 < pts.length; s++) {
-    const x0 = pts[s][0], y0 = pts[s][1], x1 = pts[s + 1][0], y1 = pts[s + 1][1];
-    const dX = x1 - x0, dY = y1 - y0;
-    let ix = Math.floor(x0), iy = Math.floor(y0);
-    const ixe = Math.floor(x1), iye = Math.floor(y1);
-    const stepX = dX > 0 ? 1 : (dX < 0 ? -1 : 0);
-    const stepY = dY > 0 ? 1 : (dY < 0 ? -1 : 0);
-    const tdX = dX !== 0 ? Math.abs(1 / dX) : Infinity;
-    const tdY = dY !== 0 ? Math.abs(1 / dY) : Infinity;
-    let tmX = dX !== 0 ? ((stepX > 0 ? ix + 1 : ix) - x0) / dX : Infinity;
-    let tmY = dY !== 0 ? ((stepY > 0 ? iy + 1 : iy) - y0) / dY : Infinity;
-    mark(ix, iy);
-    let guard = Math.abs(ixe - ix) + Math.abs(iye - iy) + 4;
-    while ((ix !== ixe || iy !== iye) && guard-- > 0) {
-      if (tmX < tmY) { tmX += tdX; ix += stepX; } else { tmY += tdY; iy += stepY; }
-      mark(ix, iy);
-    }
-  }
-}
-
-// Stitch open polyline segments (relation members) into closed rings by matching
-// endpoints. Already-closed members pass through; even-odd fill wraps the rest.
-function assembleRings(segments) {
-  const tol = 1e-7;
-  const near = (a, b) => Math.abs(a[0] - b[0]) < tol && Math.abs(a[1] - b[1]) < tol;
-  const rings = [], open = [];
-  for (const s of segments) {
-    if (s.length >= 3 && near(s[0], s[s.length - 1])) rings.push(s);
-    else if (s.length >= 2) open.push(s.slice());
-  }
-  while (open.length) {
-    let chain = open.pop();
-    let grew = true;
-    while (grew && !near(chain[0], chain[chain.length - 1])) {
-      grew = false;
-      for (let i = 0; i < open.length; i++) {
-        const s = open[i], head = chain[0], tail = chain[chain.length - 1];
-        if (near(tail, s[0]))               chain = chain.concat(s.slice(1));
-        else if (near(tail, s[s.length - 1])) chain = chain.concat(s.slice().reverse().slice(1));
-        else if (near(head, s[s.length - 1])) chain = s.slice(0, -1).concat(chain);
-        else if (near(head, s[0]))          chain = s.slice().reverse().slice(0, -1).concat(chain);
-        else continue;
-        open.splice(i, 1); grew = true; break;
-      }
-    }
-    // Only emit a CLOSED ring — an unclosed leftover (broken/truncated relation,
-    // or a member without geometry) is not a valid area boundary; filling it
-    // would fabricate a phantom closing edge and over-mark cells.
-    if (chain.length >= 3 && near(chain[0], chain[chain.length - 1])) rings.push(chain);
-  }
-  return rings;
-}
-
-// The open sea/ocean is NOT a fillable polygon in OSM — it's implied by
-// natural=coastline ways (directed so LAND is on the LEFT, WATER on the RIGHT).
-// Real coastline data has open ends and gaps (river mouths, bbox edges), so a
-// flood-fill leaks catastrophically. Instead, fill the sea with orientation
-// SWEEPS: each crossing SETS the sea/land state on one side from the crossing's
-// travel direction. State is SET locally per span (not toggled), so a missing/
-// extra crossing corrupts at most one span instead of cascading. A single sweep
-// is blind to coast PARALLEL to it (a N–S scanline can't see an E–W beach), so
-// we run BOTH a horizontal and a vertical sweep and UNION them — each resolves
-// the coast perpendicular to it (H → bays, V → open ocean). The shore is stamped
-// impassable too. Pure over grid coords (unit-tested).
-function fillSeaFromCoastlines(coastlines, data, W, H) {
-  if (!coastlines || !coastlines.length) return 0;
-  for (const line of coastlines) rasterPolylineSupercover(line, data, W, H); // shore = impassable edge
-  const xs = []; // crossings of the current scan: { p = position along scan, sea = state past it }
-  // Horizontal sweep: per ROW, a crossing sets the state to its EAST
-  // (north-going coast, grid y decreasing → sea to the east).
-  for (let ry = 0; ry < H; ry++) {
-    const yc = ry + 0.5;
-    xs.length = 0;
-    for (const line of coastlines) for (let i = 0; i + 1 < line.length; i++) {
-      const y0 = line[i][1], y1 = line[i + 1][1];
-      if ((y0 > yc) !== (y1 > yc)) { const x0 = line[i][0], x1 = line[i + 1][0];
-        xs.push({ p: x0 + (yc - y0) / (y1 - y0) * (x1 - x0), sea: y1 < y0 }); }
-    }
-    if (!xs.length) continue;
-    xs.sort((a, b) => a.p - b.p);
-    const base = ry * W;
-    let k = -1;
-    for (let c = 0; c < W; c++) {
-      const cx = c + 0.5;
-      while (k + 1 < xs.length && xs[k + 1].p <= cx) k++;
-      if (k >= 0 ? xs[k].sea : !xs[0].sea) data[base + c] = 1;
-    }
-  }
-  // Vertical sweep: per COLUMN, a crossing sets the state to its SOUTH
-  // (east-going coast, x increasing → sea to the south).
-  for (let cx = 0; cx < W; cx++) {
-    const xc = cx + 0.5;
-    xs.length = 0;
-    for (const line of coastlines) for (let i = 0; i + 1 < line.length; i++) {
-      const x0 = line[i][0], x1 = line[i + 1][0];
-      if ((x0 > xc) !== (x1 > xc)) { const y0 = line[i][1], y1 = line[i + 1][1];
-        xs.push({ p: y0 + (xc - x0) / (x1 - x0) * (y1 - y0), sea: x1 > x0 }); }
-    }
-    if (!xs.length) continue;
-    xs.sort((a, b) => a.p - b.p);
-    let k = -1;
-    for (let r = 0; r < H; r++) {
-      const cy = r + 0.5;
-      while (k + 1 < xs.length && xs[k + 1].p <= cy) k++;
-      if (k >= 0 ? xs[k].sea : !xs[0].sea) data[r * W + cx] = 1;
-    }
-  }
-  let filled = 0; for (let i = 0, N = W * H; i < N; i++) if (data[i]) filled++;
-  return filled;
-}
+// The pure rasterisers (fillRingsEvenOdd, rasterPolylineSupercover,
+// assembleRings, fillSeaFromCoastlines) live in lib/water-raster.js (shared
+// with test-water-raster.mjs).
 
 // Async, chunked re-implementations of fillRingsEvenOdd/fillSeaFromCoastlines
 // for the main-thread caller (rebuildOsmWaterMask): SAME per-row/per-sweep math
-// as the pure functions above, just batched with a TIME-based yield so a
-// single huge body (a reservoir ring with tens of thousands of vertices) or
-// the coastline sweep doesn't block the tab end-to-end. The pure functions
-// themselves are left untouched — they're hand-mirrored in
-// test-water-raster.mjs (same rule as the Rust backend port) and still used
-// directly by rasterizeRingsToMask (drawn-shape masks, small and synchronous)
+// as the pure functions in lib/water-raster.js, just batched with a TIME-based
+// yield so a single huge body (a reservoir ring with tens of thousands of
+// vertices) or the coastline sweep doesn't block the tab end-to-end. The pure
+// functions themselves are left untouched — test-water-raster.mjs tests them
+// directly (the …Chunked copies here are NOT under test, so keep their math in
+// step with lib/water-raster.js by hand) — and still used directly by
+// rasterizeRingsToMask (drawn-shape masks, small and synchronous)
 // and the rivers loop below. A fixed item count (e.g. "every 25 bodies") would
 // miss the actual cost concentration — a 10-vertex pond and a 30,000-vertex
 // reservoir ring differ by orders of magnitude — so the yield cadence here is
@@ -6750,55 +6496,11 @@ function kpiInvalidate() {
 }
 
 // ---- Quasi-Monte-Carlo point sets for reference placement ----------------
-// Low-discrepancy sequences cover the DEM evenly (no clumps/gaps), so the
-// density field converges with fewer reference points than pseudo-random
-// placement. Both generators are indexed (stateless given i), and the app
-// keeps a persistent counter (state.qmcIndex) so successive "Place random"
-// clicks CONTINUE the sequence — re-starting at i=0 every click would drop
-// the same points on top of the previous batch.
-
-// Bit-reversal of a u32 = van der Corput base-2 radical inverse, which is
-// both the Halton base-2 axis and Sobol dimension 1.
-function bitReverse32(x) {
-  x = ((x & 0x55555555) << 1) | ((x >>> 1) & 0x55555555);
-  x = ((x & 0x33333333) << 2) | ((x >>> 2) & 0x33333333);
-  x = ((x & 0x0f0f0f0f) << 4) | ((x >>> 4) & 0x0f0f0f0f);
-  x = ((x & 0x00ff00ff) << 8) | ((x >>> 8) & 0x00ff00ff);
-  return ((x << 16) | (x >>> 16)) >>> 0;
-}
-
-// Sobol dimension-2 direction numbers (primitive polynomial x²+x+1; the
-// recurrence reproduces the canonical m = 1, 3, 5, 15, 17, … table).
-const SOBOL_DIM2_V = (() => {
-  const v = new Uint32Array(32);
-  v[0] = 0x80000000;
-  for (let j = 1; j < 32; j++) v[j] = (v[j - 1] ^ (v[j - 1] >>> 1)) >>> 0;
-  return v;
-})();
-
-// i-th 2-D Sobol point, i ≥ 1 (i = 0 is the degenerate (0,0) corner).
-// First points: (.5,.5) (.25,.75) (.75,.25) (.125,.625) …
-function sobolPoint2D(i) {
-  const u = bitReverse32(i >>> 0) / 2 ** 32;
-  let x = 0;
-  for (let j = 0; j < 32; j++) {
-    if ((i >>> j) & 1) x = (x ^ SOBOL_DIM2_V[j]) >>> 0;
-  }
-  return [u, x / 2 ** 32];
-}
-
-// i-th 2-D Halton point (bases 2 and 3), i ≥ 1.
-function haltonPoint2D(i) {
-  const u = bitReverse32(i >>> 0) / 2 ** 32;
-  let v = 0, f = 1 / 3, k = i;
-  while (k > 0) {
-    v += (k % 3) * f;
-    k = (k / 3) | 0;
-    f /= 3;
-  }
-  return [u, v];
-}
-
+// bitReverse32 / sobolPoint2D / haltonPoint2D (and the census polygon helpers
+// further down) live in lib/census-sampler.js. The app keeps a persistent
+// counter (state.qmcIndex) so successive "Place random" clicks CONTINUE the
+// sequence — re-starting at i=0 every click would drop the same points on top
+// of the previous batch.
 function placeRandomRefPoints(n) {
   if (!state.dem) return;
   const { mask, H, W } = state.dem;
@@ -6860,73 +6562,8 @@ const CENSUS_FGB_URL =
 // possibly intersect the national census coverage.
 const BRAZIL_BBOX = { xmin: -74.5, ymin: -34.5, xmax: -28.5, ymax: 6.0 };
 
-// 1-D Sobol / van der Corput scalar in [0,1) — the first axis of sobolPoint2D.
-function sobolScalar1D(i) { return bitReverse32(i >>> 0) / 2 ** 32; }
-
-// Ray-cast (even-odd) point-in-ring test; ring = [[lng,lat], …].
-function pointInRing(x, y, ring) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
-    if (((yi > y) !== (yj > y)) &&
-        (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi)) inside = !inside;
-  }
-  return inside;
-}
-// A polygon is [outerRing, hole1, …]: inside the outer ring and outside holes.
-function pointInPolygon(x, y, rings) {
-  if (!rings.length || !pointInRing(x, y, rings[0])) return false;
-  for (let h = 1; h < rings.length; h++) if (pointInRing(x, y, rings[h])) return false;
-  return true;
-}
-
-// Shoelace ring area (abs; works on open or closed rings). lon/lat units — we
-// only ever use the clipped/full RATIO, which is valid in any consistent CRS.
-function ringArea(ring) {
-  let a = 0;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++)
-    a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
-  return Math.abs(a) / 2;
-}
-function polyArea(rings) {        // outer − holes
-  let a = rings.length ? ringArea(rings[0]) : 0;
-  for (let h = 1; h < rings.length; h++) a -= ringArea(rings[h]);
-  return Math.max(0, a);
-}
-
-// Sutherland–Hodgman clip of a ring against the axis-aligned DEM bbox; returns
-// the clipped vertex list (possibly empty). Used only for the area ratio.
-function clipRingToBbox(ring, bb) {
-  let poly = ring;
-  if (poly.length > 1) {         // drop the duplicate closing vertex if present
-    const a = poly[0], b = poly[poly.length - 1];
-    if (a[0] === b[0] && a[1] === b[1]) poly = poly.slice(0, -1);
-  }
-  const ix = (p, q, x) => { const t = (x - p[0]) / (q[0] - p[0]); return [x, p[1] + t * (q[1] - p[1])]; };
-  const iy = (p, q, y) => { const t = (y - p[1]) / (q[1] - p[1]); return [p[0] + t * (q[0] - p[0]), y]; };
-  const clip = (pts, inside, cut) => {
-    const out = [];
-    for (let i = 0; i < pts.length; i++) {
-      const cur = pts[i], prev = pts[(i + pts.length - 1) % pts.length];
-      const ci = inside(cur), pi = inside(prev);
-      if (ci) { if (!pi) out.push(cut(prev, cur)); out.push(cur); }
-      else if (pi) out.push(cut(prev, cur));
-    }
-    return out;
-  };
-  poly = clip(poly, (p) => p[0] >= bb.xmin, (p, q) => ix(p, q, bb.xmin)); if (!poly.length) return poly;
-  poly = clip(poly, (p) => p[0] <= bb.xmax, (p, q) => ix(p, q, bb.xmax)); if (!poly.length) return poly;
-  poly = clip(poly, (p) => p[1] >= bb.ymin, (p, q) => iy(p, q, bb.ymin)); if (!poly.length) return poly;
-  poly = clip(poly, (p) => p[1] <= bb.ymax, (p, q) => iy(p, q, bb.ymax));
-  return poly;
-}
-function clippedPolyArea(rings, bb) {
-  if (!rings.length) return 0;
-  let a = ringArea(clipRingToBbox(rings[0], bb));
-  for (let h = 1; h < rings.length; h++) a -= ringArea(clipRingToBbox(rings[h], bb));
-  return Math.max(0, a);
-}
-
+// sobolScalar1D, pointInRing/pointInPolygon, ringArea/polyArea and
+// clipRingToBbox/clippedPolyArea come from lib/census-sampler.js.
 // Place `want` references sampled from census population over the DEM bbox.
 // Async + detached from placeRandomRefPoints (the sync QMC paths are unchanged).
 async function placeCensusRefPoints(want) {
@@ -8885,32 +8522,8 @@ function maxsegPickFactor(H, W, minCellM, targetLenM) {
   return null;
 }
 
-// Block-mean coarsening: coarse cell = mean of its allowed, finite fine cells;
-// allowed iff ≥ 1 such cell. MIRRORED in test-maxseg.mjs (hand-kept-in-sync,
-// same rule as the test-water-raster.mjs mirrors).
-function coarsenFieldForMaxseg(field, mask, H, W, f) {
-  const Hc = Math.ceil(H / f), Wc = Math.ceil(W / f);
-  const sum = new Float64Array(Hc * Wc);
-  const cnt = new Int32Array(Hc * Wc);
-  for (let r = 0; r < H; r++) {
-    const rowBase = r * W;
-    const cBase = ((r / f) | 0) * Wc;
-    for (let c = 0; c < W; c++) {
-      if (!mask[rowBase + c]) continue;
-      const v = field[rowBase + c];
-      if (!Number.isFinite(v)) continue;
-      const ci = cBase + ((c / f) | 0);
-      sum[ci] += v;
-      cnt[ci]++;
-    }
-  }
-  const density = new Float32Array(Hc * Wc);
-  const allowed = new Uint8Array(Hc * Wc);
-  for (let i = 0; i < Hc * Wc; i++) {
-    if (cnt[i] > 0) { density[i] = sum[i] / cnt[i]; allowed[i] = 1; }
-  }
-  return { density, allowed, Hc, Wc };
-}
+// Block-mean coarsening (coarsenFieldForMaxseg) lives in lib/maxseg-coarsen.js
+// (shared with test-maxseg.mjs).
 
 function runMaxseg() {
   const r = state.lastResult;
@@ -10150,66 +9763,13 @@ function buildRefTrack(latlngs, eles) {
   return { latlngs, segs, distM, ascentM, descentM, eleSource, hasEle: !!elev };
 }
 
-// v2 leg energy (kJ) of a route from its {d, dh} segments: the closed form with
-// a 2 m elevation deadband (rejects sub-τ jitter in h±) and the ε descent-
-// recovery estimator — mirrors bicycling-energy-model compare.mjs
-// approximate()+deadband() for the roll/aero/climb walk, and regime_compare.mjs
-// epsGeom (journal Entry 18/WI-1) for ε itself. readCost()'s coefficients are
-// kJ-based, so the sum is in kJ. Aero is charged only OFF climbs; descent gets
-// the drop-weighted ε.
+// v2 leg energy (kJ) of a route from its {d, dh} segments — the closed form in
+// lib/ref-energy.js, evaluated with the live cost bundle and the #deadband τ.
 function refEnergyKJ(segs) {
   const c = readCost();
   const tdv = parseFloat(document.getElementById("deadband")?.value);
-  const TAU = Math.max(0, Number.isFinite(tdv) ? tdv : 2), n = segs.length;  // τ=0 ⇒ identity (no smoothing)
-  // Rebuild the elevation profile from the per-segment Δh and deadband it.
-  const h = new Float64Array(n + 1);
-  for (let i = 0; i < n; i++) h[i + 1] = h[i] + segs[i].dh;
-  let y = h[0];
-  const hS = new Float64Array(n + 1); hS[0] = y;
-  for (let i = 1; i <= n; i++) {
-    if (h[i] > y + TAU) y = h[i] - TAU; else if (h[i] < y - TAU) y = h[i] + TAU;
-    hS[i] = y;
-  }
-  let X = 0, Xnc = 0, hPlus = 0, hMinus = 0;
-  for (let i = 0; i < n; i++) {
-    const d = segs[i].d; if (!(d > 0)) continue;
-    const dh = hS[i + 1] - hS[i];
-    X += d;
-    if (dh >= 0) { hPlus += dh; if (dh < c.climbThr * d) Xnc += d; }  // aero off climbs
-    else { hMinus += -dh; Xnc += d; }                                // descents: full flat aero
-  }
-  // ε (descent-recovery factor): ports bicycling-energy-model regime_compare.mjs
-  // epsGeom EXACTLY (journal Entry 18/WI-1) — every epsGeom call site in that
-  // harness resamples the RAW (pre-deadband) profile, never the τ-smoothed one
-  // the walk above uses, so this resamples `h`/cumulative distance, not `hS`.
-  // Resample into 30 m cells (confirmed load-bearing by Entry 19 — do not
-  // change the cell size), accumulate the drop-weighted
-  // Σ drop_k·min(1, abRatio/(drop_k/30)) over descending cells, divide by the
-  // total drop, THEN subtract epsOffset and clamp₀₁ ONCE on that aggregate
-  // (never per-cell — clamping per-cell is what the old lumped-mean-grade s̄ =
-  // H₋/X₋ estimator effectively approximated, and it collapses under mixed
-  // grades / fine resolution; see Entry 18/19).
-  const xCum = new Float64Array(n + 1);
-  for (let i = 0; i < n; i++) xCum[i + 1] = xCum[i] + segs[i].d;
-  const totalM = xCum[n], DX = 30, nc = Math.floor(totalM / DX);
-  let eps = 0;
-  if (nc >= 2) {
-    let j = 0;
-    const hAt = (d) => {
-      while (j < n - 1 && xCum[j + 1] < d) j++;
-      const seg = xCum[j + 1] - xCum[j], f = seg > 1e-9 ? (d - xCum[j]) / seg : 0;
-      return h[j] * (1 - f) + h[j + 1] * f;
-    };
-    const cellH = new Float64Array(nc + 1);
-    for (let k = 0; k <= nc; k++) cellH[k] = hAt(k * DX);
-    let Hd = 0, epsW = 0;
-    for (let k = 0; k < nc; k++) {
-      const dh = cellH[k + 1] - cellH[k];
-      if (dh < 0) { const drop = -dh; Hd += drop; epsW += drop * Math.min(1, c.abRatio / (drop / DX)); }
-    }
-    if (Hd >= 1) eps = Math.max(0, Math.min(1, epsW / Hd - c.epsOffset));
-  }
-  return c.aRoll * X + c.aAero * Xnc + c.beta * (hPlus - eps * hMinus);
+  const TAU = Math.max(0, Number.isFinite(tdv) ? tdv : 2);  // τ=0 ⇒ identity (no smoothing)
+  return refEnergyKJFromCost(segs, c, TAU);
 }
 
 function refMetricsHtml() {
