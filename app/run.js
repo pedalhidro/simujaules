@@ -52,7 +52,7 @@ runBtn.addEventListener("click", async () => {
   // sane range, so edge weights stay non-negative and the time estimate finite).
   const cost = readCost();
   const eMaxRaw = parseFloat(document.getElementById("e-max")?.value);
-  let eMax = Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0;
+  const eMax = Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0;
   // Round mode only: budget caps each leg ("leg", default — totals reach
   // 2·eMax) or the round-trip sum ("total").
   const eMaxMode = document.getElementById("e-max-mode")?.value || "leg";
@@ -65,27 +65,12 @@ runBtn.addEventListener("click", async () => {
   const nRoutes    = Math.max(1, Math.min(20, parseInt(document.getElementById("n-routes")?.value, 10) || 3));
   const penalty    = Math.max(0, parseFloat(document.getElementById("penalty")?.value) || 2.0);
   const repulsionMode = document.getElementById("repulsion-mode")?.value || "per-cell";
-  // Reverse-optimization: flip the cost function so Dijkstra finds the
-  // most expensive (under the original metric) routes rather than the
-  // cheapest. The worker does the inversion against a precomputed
-  // MAX_EDGE_COST = α·diagonal + β·(maxH − minH).
-  // maximizeLength > 0 activates a length-constrained layered-DP path
-  // search instead of the inverted Dijkstra. Memory-bounded; the worker
-  // refuses if L·H·W exceeds the cap.
-  const maximize       = !!document.getElementById("maximize")?.checked;
-  const maximizeLength = Math.max(0, parseInt(document.getElementById("maximize-length")?.value, 10) || 0);
-  // The budget is in REAL kJ, but under maximize every edge cost is INVERTED
-  // against MAX_EDGE_COST (hundreds of kJ per edge) — a realistic budget
-  // would prune the whole field to empty. The budget does not apply; forcing
-  // 0 here covers every payload built below (baseMsg, backend, graph).
-  if (maximize) eMax = 0;
   // Density follows the global Mode select instead of having its own
   // direction toggle.
   const densityMode  = mode;
   // Move directions (grid neighborhood, docs/grid-connectivity-sensitivity):
   // 8 = the classic engine and the ONLY value the native backend serves —
-  // any other value computes in-browser (gated below, like top-N/maximize).
-  // The worker forces 8 under maximize regardless (inversion degeneracy).
+  // any other value computes in-browser (gated below, like top-N).
   const nDirsRaw = parseInt(document.getElementById("n-dirs")?.value, 10);
   const nDirs = [4, 8, 16, 32, 64, 128].includes(nDirsRaw) ? nDirsRaw : 8;
   // String pulling: post-hoc shortcutting of the displayed route(s).
@@ -338,8 +323,8 @@ runBtn.addEventListener("click", async () => {
   // ---- Accessibility KPI inputs (density only) -----------------------------
   // The density engines sample each ref's energy field at every ref cell,
   // returning the pairwise K×K matrix the KPI block evaluates. Suppressed
-  // under maximize (inverted costs) and graph mode (raster refs only).
-  const wantMatrix = wantDensity && !maximize && !graphModeActive();
+  // in graph mode (raster refs only).
+  const wantMatrix = wantDensity && !graphModeActive();
   const matrixCells = wantMatrix
     ? Int32Array.from(state.refPoints, ([r, c]) => r * W + c)
     : null;
@@ -616,11 +601,11 @@ runBtn.addEventListener("click", async () => {
   };
 
   const startSingleWorker = async () => {
-    // Single worker: regular from/to/round runs, top-N, maximize. The plain
-    // energy field (no destination / top-N / maximize) may run on the wasm
-    // engine (v80); callers never reach here for the compare pair.
+    // Single worker: regular from/to/round runs, top-N. The plain energy
+    // field (no destination / top-N) may run on the wasm engine (v80);
+    // callers never reach here for the compare pair.
     let engine = singleEngine({
-      N, mode, nDirs, hasNet: constrainNet, wantTopN, maximize,
+      N, mode, nDirs, hasNet: constrainNet, wantTopN,
       wantPath: !!state.dst, graph: graphModeActive(), compare: false,
     });
     const wasmSpec = engine ? await loadWasmEngine(engine) : null;
@@ -677,7 +662,8 @@ runBtn.addEventListener("click", async () => {
         densityMode,
         refPoints: state.refPoints.map(([r, c]) => [r, c]),
         hasNetwork: useNetwork,
-        maximize,
+        // The engines still implement maximize, but the app never asks for it.
+        maximize: false,
         // Bridge portal edges appended after the (optional) network mask, in
         // order: portalU (i32×P), portalV (i32×P), portalLenM (f64×P),
         // portalHU (f64×P), portalHV (f64×P). HU/HV are deck-end ele (NaN=use DEM).
@@ -759,8 +745,8 @@ runBtn.addEventListener("click", async () => {
 
   // ---- Optional native backend: single-source energy field ------------------
   // POST /single — one Dijkstra (two for round) on the native server, returning
-  // the raw energy field + optional passes. Maximize/top-N/path stay browser-
-  // only (the backend produces no routes), so the caller only reaches here for
+  // the raw energy field + optional passes. Top-N/path stay browser-only
+  // (the backend produces no routes), so the caller only reaches here for
   // the plain from/to/round energy field. Throws on any failure → browser
   // fallback (a 404 from an old backend without /single lands here too).
   const startSingleBackend = async (baseUrl) => {
@@ -782,7 +768,7 @@ runBtn.addEventListener("click", async () => {
         src: [state.src[0], state.src[1]],
         wantPasses,
         hasNetwork: constrainNet,
-        maximize: false,                   // excluded from the single-source path
+        maximize: false,                   // the engines still implement maximize, but the app never asks for it
         nPortals: portals ? portals.n : 0,
         // Move set (backend ≥ 0.2.0; dispatch is version-gated).
         nDirs,
@@ -960,7 +946,6 @@ runBtn.addEventListener("click", async () => {
           height, mask, networkMask: null,
           wantTopN: false,
           wantNetworkInterp: false,
-          maximizeLength: 0,
         },
         transfer,
       );
@@ -1010,7 +995,7 @@ runBtn.addEventListener("click", async () => {
   const backendUrl = effectiveBackendUrl();
   // Will THIS run actually use the native backend? It only does raster density
   // and backend-eligible single-source (from/to/round); top-N, the destination
-  // path, "maximize", graph mode, AND a non-density compare (which routes to the
+  // path, graph mode, AND a non-density compare (which routes to the
   // browser-only startComparePair) always run in-browser. Used to avoid booting a
   // cloud VM for a run that would compute in-browser anyway.
   // nDirs ≠ 8: served by backend ≥ 0.2.0 (the move-set port). Cloud is
@@ -1021,7 +1006,7 @@ runBtn.addEventListener("click", async () => {
   const nDirsOk = nDirs === 8 ||
     (cloudMode ? true : backendServesNDirs());
   const willUseBackend = backendOn && !graphModeActive() && nDirsOk &&
-    (wantDensity || (!compareOn && !wantTopN && !maximize && !state.dst));
+    (wantDensity || (!compareOn && !wantTopN && !state.dst));
   // Run-scoped engine override. Normally tracks backendOn, but a failed cloud
   // boot flips it to false so the density path (which reads it inside
   // densityField) finishes in-browser like the single path. Assigned in
@@ -1076,7 +1061,7 @@ runBtn.addEventListener("click", async () => {
       // KEEP baseMsg's goalR/goalC so the partner ALSO traces the best TERRAIN
       // route to the destination → the compare route view's blue line.
       w.postMessage(
-        { ...baseMsg, height, mask, networkMask: null, wantTopN: false, maximizeLength: 0, wantNetworkInterp: false },
+        { ...baseMsg, height, mask, networkMask: null, wantTopN: false, wantNetworkInterp: false },
         transfer,
       );
     });
@@ -1210,7 +1195,8 @@ runBtn.addEventListener("click", async () => {
         dstRC: state.dst || null,
         wantPath: !!state.dst,
         wantTopN, nRoutes, penalty,
-        maximize, maximizeLength,
+        // The engines still implement maximize, but the app never asks for it.
+        maximize: false, maximizeLength: 0,
         densityMode: mode,
       };
       if (wantDensity) {
@@ -1270,10 +1256,10 @@ runBtn.addEventListener("click", async () => {
       })();
     } else if (compareOn) {
       startComparePair();
-    } else if (useBackend && !wantTopN && !maximize && !state.dst &&
+    } else if (useBackend && !wantTopN && !state.dst &&
                (nDirs === 8 || cloudMode || backendServesNDirs())) {
       // Single-source energy field on the native backend (energy + optional
-      // passes). Top-N / maximize / a destination path need the browser (the
+      // passes). Top-N / a destination path need the browser (the
       // backend produces no routes); any backend failure falls back too.
       // nDirs ≠ 8: same optimistic-cloud + version-check pattern as density.
       (async () => {
@@ -1331,7 +1317,7 @@ runBtn.addEventListener("click", async () => {
     state.cloud.mode = "browser"; // a prior cloud run must not stop a VM in this run's computeDone
     dispatchCompute(backendOn);
   } else if (!willUseBackend) {
-    // Cloud selected, but THIS run (top-N / destination / maximize / graph)
+    // Cloud selected, but THIS run (top-N / destination / graph)
     // computes in-browser regardless — don't boot a billable VM we won't touch
     // (it would only delay the run ~1 min and bill for nothing). The orchestrator
     // URL is irrelevant for such a run, so don't require it either.

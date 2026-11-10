@@ -52,7 +52,7 @@ hashes.
   the density panel) selects it, and falls back to browser workers on any
   failure. Two endpoints: `POST /density`
   (multi-reference density) and `POST /single` (single-source from/to/round
-  energy field + optional passes). Top-N / destination path / maximize stay
+  energy field + optional passes). Top-N / destination path stay
   browser-only — the backend produces no routes.
 - `mcp/` — MCP server (stdio) exposing the engine to agents (Claude Code /
   Desktop): `load_dem`, `energy_field`, `route` (+ top-N, string pull),
@@ -111,7 +111,7 @@ hashes.
 
 ## Compute architecture
 
-- Regular runs (from/to/round, top-N, maximize): ONE worker per compute.
+- Regular runs (from/to/round, top-N): ONE worker per compute.
 - Multi-reference density: a POOL of workers sized by the shared
   `densityPoolSize()` helper — `min(K, cores−1, memCap)`, where memCap
   budgets each worker (~38 B/cell, ~55 round) against `navigator.deviceMemory`
@@ -182,6 +182,20 @@ hashes.
   `test-app-shell.mjs` checks the chain, the import/export names, the
   setter rule (heuristically) and the precache list.
 
+- MAXIMIZE IS ENGINE-ONLY (v82). "Maximize mode" (inverted costs, plus the
+  layered-DP max-cost path via `maximizeLength`) had no UI control since
+  ~v36; v82 removed the app's dormant plumbing for it (the `#maximize` reads,
+  its strings, the bundle-import handling). What REMAINS, deliberately:
+  `energy-worker.js`, `graph-engine.js`, `backend/src/main.rs` (hence the
+  wasm modules) still implement it and their suites still test it — every
+  engine rule below that mentions maximize describes that path. No sender
+  asks for it: `lib/run-message.js` hard-codes `maximize: false,
+  maximizeLength: 0`, the app's backend/graph params carry the same
+  constants, and exported bundles still write `maximize: false` (schema
+  unchanged; an imported `maximize: true` is ignored). Removing it from the
+  ENGINES is a parity change — `energy-worker.js` and `main.rs` in lockstep,
+  then `wasm/build.sh` — not a cleanup.
+
 - THE RUN MESSAGE HAS ONE BUILDER (v82). `energy-worker.js` destructures the
   `kind: "run"` message and silently DEFAULTS every missing key, so a sender
   that forgets a field does not fail — it runs a different computation.
@@ -224,8 +238,8 @@ hashes.
   `BACKEND_BYTES_PER_CELL`) — the wasm worker holds MORE per worker than the
   JS one, so a pool only switches engine when workers × `wasmSpeedup` beats
   JS, and jobs over `memBudgetBytes()` stay JS unless `#max-workers` is set.
-  The single-source gate mirrors `/single`'s (no destination, top-N,
-  maximize; graph and the compare pair stay JS). Modules compile ONCE on the
+  The single-source gate mirrors `/single`'s (no destination, top-N;
+  graph and the compare pair stay JS). Modules compile ONCE on the
   page (`loadWasmEngine`) and travel to workers as `WebAssembly.Module`s.
   `engine64.wasm` MUST keep `--max-memory`: without a declared maximum
   Firefox copies a Memory64 memory on every grow (measured quadratic —
@@ -337,7 +351,7 @@ hashes.
   anchor stability / admissible-heuristic scope); the estimator scales by
   `DIRS_COST_SINGLE`/`DIRS_COST_DENSITY`.
 - STRING PULLING (`#string-pull`) post-hoc shortens the displayed route(s)
-  (single path + top-N; round and maximize excluded) by windowed DP over
+  (single path + top-N; round excluded) by windowed DP over
   the path's own nodes with profile-integrated straight segments. Viewing ≡
   routing holds by construction: the energy shown for a pulled line is that
   polyline's own per-sub-step v2Edge sum, and the drawn line IS the

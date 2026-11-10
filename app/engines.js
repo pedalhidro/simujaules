@@ -143,10 +143,10 @@ export function densityEngine({ N, K, round, nDirs = 8, hasNet = false }) {
 }
 
 // Single-source runs take the wasm engine only for the plain energy field —
-// the same gate as the native backend's /single (no destination path, top-N
-// or maximize; graph mode and the constrained-vs-free compare stay JS).
-export function singleEngine({ N, mode, nDirs = 8, hasNet = false, wantTopN, maximize, wantPath, graph, compare }) {
-  if (wantTopN || maximize || wantPath || graph || compare) return null;
+// the same gate as the native backend's /single (no destination path or
+// top-N; graph mode and the constrained-vs-free compare stay JS).
+export function singleEngine({ N, mode, nDirs = 8, hasNet = false, wantTopN, wantPath, graph, compare }) {
+  if (wantTopN || wantPath || graph || compare) return null;
   if (!["from", "to", "round"].includes(mode)) return null;
   return wasmEngineFor({ N, density: false, round: mode === "round", nDirs, hasNet });
 }

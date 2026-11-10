@@ -31,8 +31,6 @@
   native Rust backend exists for large runs (off by default).
 - **Energy budgets**: prune the search at a maximum energy; in round-trip
   mode the budget can cap each leg or the out-plus-back total.
-- **Maximize mode**: invert the optimisation to find the most expensive
-  routes, optionally length-constrained (layered dynamic programming).
 
 ## Inputs and outputs
 

@@ -235,31 +235,6 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   // Top-N toggle reveals N + penalty + repulsion inputs
   const topnCheck = document.getElementById("want-topn");
-  // Maximise toggle reveals the L-length input. Sync once on load so the
-  // panel state matches the checkbox after a bundle reload too. #maximize
-  // has had no UI control since v36 (engine + backend still support the
-  // mode; only the toggle was pulled) — this stays dormant (maxCheck null,
-  // guarded below) until/unless the control is restored.
-  const maxCheck = document.getElementById("maximize");
-  const maxExtra = document.getElementById("maximize-extra");
-  if (maxCheck && maxExtra) {
-    const sync = () => {
-      maxExtra.style.display = maxCheck.checked ? "" : "none";
-      // The energy budget (real kJ) has no meaning against maximize's
-      // INVERTED costs (maxEdgeCost units) — the run ignores it, so grey
-      // the input out and say why in its tooltip (via data-i18n-title so a
-      // language toggle keeps the right text).
-      const eMaxInput = document.getElementById("e-max");
-      if (eMaxInput) {
-        eMaxInput.disabled = maxCheck.checked;
-        eMaxInput.dataset.i18nTitle = maxCheck.checked ? "param.budget.maximize_title" : "param.budget.title";
-        eMaxInput.title = t(eMaxInput.dataset.i18nTitle);
-      }
-      estimateRunTime();
-    };
-    maxCheck.addEventListener("change", sync);
-    sync();
-  }
   const topnExtra = document.getElementById("topn-extra");
   if (topnCheck && topnExtra) {
     const sync = () => { topnExtra.style.display = topnCheck.checked ? "" : "none"; estimateRunTime(); };

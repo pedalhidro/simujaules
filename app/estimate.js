@@ -286,7 +286,7 @@ export function predictComputeMs(cal, opts, applyCorr) {
       ms = cal.allocMsN + (refs / poolN) * (perRef / speedup) * dijk;
       corr = opts.wasm ? (cal.corrWasm || 1) : (cal.corrBrowser || 1);
     }
-  } else if (backend && !wantTopN && !opts.maximize && !opts.wantPath) {
+  } else if (backend && !wantTopN && !opts.wantPath) {
     // Native backend single-source (POST /single) — same dispatch gate as the
     // runner. No per-worker browser DEM alloc; native per-Dijkstra speedup.
     // corrBackend is trained by density backend runs (a reasonable proxy — the
@@ -327,14 +327,11 @@ export function currentRunOpts(cal, N) {
     N,
     wantDensity: !!document.getElementById("want-density")?.checked,
     wantTopN: !!document.getElementById("want-topn")?.checked,
-    // maximize / a destination path keep single-source runs in the browser (the
-    // backend produces no routes) — the predictor gates the backend arm on these.
-    maximize: !!document.getElementById("maximize")?.checked,
+    // A destination path keeps single-source runs in the browser (the
+    // backend produces no routes) — the predictor gates the backend arm on it.
     wantPath: !!state.dst,
     refs: state.refPoints?.length || 0,
-    // Mirror the runner: the kJ budget is ignored under maximize (inverted
-    // costs), so the reach model must assume full grid there too.
-    eMax: !document.getElementById("maximize")?.checked && Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0,
+    eMax: Number.isFinite(eMaxRaw) && eMaxRaw > 0 ? eMaxRaw : 0,
     mode, alpha,
     // nDirs ≠ 8 always computes in-browser (the backend serves the classic
     // 8-move engine only) — the predictor must mirror the runner's gate.
@@ -362,7 +359,7 @@ export function currentRunOpts(cal, N) {
     : opts.wantDensity
       ? densityEngine({ N, K: opts.refs, round: mode === "round", nDirs: opts.nDirs, hasNet: opts.hasNet })
       : singleEngine({ N, mode, nDirs: opts.nDirs, hasNet: opts.hasNet, wantTopN: opts.wantTopN,
-                       maximize: opts.maximize, wantPath: opts.wantPath, graph, compare });
+                       wantPath: opts.wantPath, graph, compare });
   return opts;
 }
 

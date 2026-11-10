@@ -50,8 +50,6 @@ first load).
   large runs.
 - **Energy budgets** — prune the search at a maximum energy; in round-trip mode,
   cap each leg or the out-plus-back total.
-- **Maximize mode** — invert the optimisation to find the most *expensive*
-  routes, optionally length-constrained (layered dynamic programming).
 - **Graph mode** ("follow the vectors") — compute on an OSM-derived street graph
   instead of the raster grid, honouring bridges/tunnels by layer; can run a
   full-DEM unconstrained scenario alongside it and expose the difference (the
@@ -125,8 +123,8 @@ density). It's **off by default**:
 Then tick **Use native backend** in the app's parameters panel (URL defaults to
 `http://127.0.0.1:8077`). The app falls back to the browser workers automatically
 if the server isn't reachable. It accelerates `POST /density` (multi-reference)
-and `POST /single` (single-source field); top-N, the destination path, and
-maximize stay browser-only. Memory-budget tuning, the binary protocol, and the
+and `POST /single` (single-source field); top-N and the destination path stay
+browser-only. Memory-budget tuning, the binary protocol, and the
 `energy-worker.js` parity contract are in [backend/README.md](backend/README.md).
 
 > The browser can also run this SAME engine without a server: since v80 the

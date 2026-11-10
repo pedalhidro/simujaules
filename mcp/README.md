@@ -81,8 +81,8 @@ impassable/drawn layers:
   as the app displays and exports them (viewing ≡ routing).
 
 Not (yet) exposed: OSM street networks and graph mode, bridge portals,
-impassable water, drawn barriers, maximize mode, the accessibility matrix /
-KPIs, the Rust backend. Those stay browser-side for now.
+impassable water, drawn barriers, the accessibility matrix / KPIs, the Rust
+backend. Those stay browser-side for now.
 
 ## Layout
 
