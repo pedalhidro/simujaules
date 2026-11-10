@@ -69,7 +69,7 @@ impassable/drawn layers:
   `smoothHeightsInPlace` (imported from `lib/dem-smoothing.js`, the app's
   own function) under the app's auto rule — σ 30 m unless the file
   is an app `dem.tif` export carrying its smoothing tag.
-- The run message is the app's `baseMsg` (`app/run.js`; mirrored by `lib.mjs` `buildRunMessage`): dx/dy
+- The run message comes from `lib/run-message.js`, the builder the app itself calls (`lib.mjs` `buildRunMessage` only chooses the inputs): dx/dy
   in metres, `wantPasses` always on, the v2 cost bundle from `deriveCost`
   (`lib/cost.js`, the function the app's `readCost` calls — São Paulo gravity
   lives there, not here).

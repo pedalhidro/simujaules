@@ -55,6 +55,20 @@ ser um script clássico: `v2Edge` (`test-worker-pool.mjs`), `epsEstimate`
 (`test-energy-v2.mjs`) e a tabela de curvas (`test-maxseg.mjs`). O
 `lib/package.json` só diz ao Node que são módulos ES e não é publicado.
 
+**Mensagem de execução com um só construtor.** O `energy-worker.js` assume
+um valor padrão, em silêncio, para qualquer chave que falte na mensagem
+`kind: "run"` — um remetente que esquece um campo não falha, calcula outra
+coisa. A mensagem era escrita à mão em três lugares (o app, o servidor MCP e
+o harness do censo), e o `CLAUDE.md` admitia que nenhum teste pegava a
+divergência entre eles. Agora os três chamam `lib/run-message.js`
+(`buildRunMessage` e `densitySliceMessage`), que é estrito: toda entrada tem
+de ser dada (`null` para "nenhum") e entradas desconhecidas são erro. Novo
+`test-run-message.mjs`: as chaves que o construtor envia têm de ser
+exatamente as que o worker lê, nos dois sentidos, e nenhum remetente pode
+escrever o literal à mão. As mensagens do MCP saem idênticas; a do censo
+ganha as chaves que antes ficavam no padrão do worker (resultado da densidade
+idêntico bit a bit em quatro configurações).
+
 **`app.js` dividido em 27 módulos (`app/`).** O `app.js` (13 006 linhas, 302
 funções de topo) vira só o ponto de entrada; o código passa a morar em
 `app/`, um módulo ES por assunto, na ordem em que já estava: `i18n`, `panel`,

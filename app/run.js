@@ -1,6 +1,7 @@
 // The Run button: builds the compute message, dispatches to workers / wasm /
 // backend, merges density pools — and renderResult().
 import "./points.js"; // evaluation order — see ../app.js
+import { buildRunMessage, densitySliceMessage } from "../lib/run-message.js";
 import { t, workerWarningText } from "./i18n.js";
 import { readCost, setGroupOpen, syncLoadedHighlights } from "./panel.js";
 import { WASM_WORKER_URL, WORKER_URL } from "./boot.js";
@@ -355,15 +356,15 @@ runBtn.addEventListener("click", async () => {
   } : null;
 
   const portals = buildPortals();
-  const baseMsg = {
-    kind: "run",
+  // The engine's run message is built by lib/run-message.js — the same builder
+  // the MCP server and the census harness call, so a new field cannot reach
+  // one sender and not the others (the worker silently defaults missing keys).
+  const baseMsg = buildRunMessage({
     H, W,
-    dx: state.dem.dxM,
-    dy: state.dem.dyM,
-    seedR: state.src ? state.src[0] : (state.refPoints[0] ? state.refPoints[0][0] : -1),
-    seedC: state.src ? state.src[1] : (state.refPoints[0] ? state.refPoints[0][1] : -1),
-    goalR: state.dst ? state.dst[0] : -1,
-    goalC: state.dst ? state.dst[1] : -1,
+    dxM: state.dem.dxM,
+    dyM: state.dem.dyM,
+    seed: state.src || state.refPoints[0] || null,
+    goal: state.dst || null,
     mode, cost, eMax, eMaxMode,
     wantPasses, wantTopN, nRoutes, penalty, repulsionMode,
     wantDensity,
@@ -372,20 +373,14 @@ runBtn.addEventListener("click", async () => {
     wantNetworkInterp,
     interpMaxDistance,
     interpSmoothing,
-    maximize,
-    maximizeLength,
     nDirs,
     stringPull,
     // Bridge portal edges (hybrid raster overlay). Small arrays — spread into
     // every worker message via baseMsg (structured-cloned, NOT transferred, so
     // the shared arrays survive across the density pool's workers). The native
     // backend path appends them to its Blob separately.
-    portalU: portals ? portals.u : null,
-    portalV: portals ? portals.v : null,
-    portalLenM: portals ? portals.lenM : null,
-    portalHU: portals ? portals.hu : null,   // deck-end ele (NaN = use DEM)
-    portalHV: portals ? portals.hv : null,
-  };
+    portals: portals || null,
+  });
 
   // Shared tail for the density paths (pool and native backend): optional
   // IDW fill as a follow-up worker task (the fill helpers live in the
@@ -601,17 +596,16 @@ runBtn.addEventListener("click", async () => {
         if (networkMask) transfer.push(networkMask.buffer);
         w.postMessage(
           {
-            ...baseMsg,
+            // This slice's refs, raw accumulators back (densityPartial), and
+            // never the IDW fill — interp (if any) runs after the merge.
+            ...densitySliceMessage(baseMsg, {
+              refPoints: state.refPoints.slice(lo, hi),
+              // Accessibility matrix: each slice samples its refs' fields at
+              // ALL K ref cells (matrixCells is structured-cloned, shared
+              // read-only across the pool — like the portal arrays).
+              matrixCells: matrix ? matrixCells : null,
+            }),
             height, mask, networkMask,
-            refPoints: state.refPoints.slice(lo, hi),
-            densityPartial: true,
-            // Accessibility matrix: each slice samples its refs' fields at
-            // ALL K ref cells (matrixCells is structured-cloned, shared
-            // read-only across the pool — like the portal arrays).
-            wantMatrix: !!matrix,
-            matrixCells: matrix ? matrixCells : null,
-            // Interp (if any) runs after the merge, never per-slice.
-            wantNetworkInterp: false,
             // The compiled engine (structured clone shares the code).
             ...(wasmSpec ? { wasm: wasmSpec } : {}),
           },

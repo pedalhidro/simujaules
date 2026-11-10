@@ -62,15 +62,11 @@ hashes.
   GeoTIFF/bundle writers, and `deriveCost` re-exported from `lib/cost.js`)
   and `lib/dem-smoothing.js` (`smoothHeightsInPlace`), and hosts `energy-worker.js` in a
   `worker_threads` Worker (`mcp/engine-thread.mjs`, the threaded twin of the
-  census `loadWorker()` shim). `mcp/lib.mjs` `buildRunMessage` is the
-  headless mirror of the app's `baseMsg` (built in `app/run.js`; no network /
-  bridges / impassable layers yet) — a new run-message field there must land
-  in `buildRunMessage` AND in
-  `census/census-density.mjs` `runDensity`'s own `msg` literal (the `density`
-  tool is the app's pool merge with one slice and builds its message there;
-  the engine silently defaults any missing key, and `test-mcp.mjs` compares
-  `density` against that same harness, so it will not catch drift between
-  the two). See `mcp/README.md`.
+  census `loadWorker()` shim). The engine's run message is NOT mirrored any
+  more: the app (`app/run.js`), `mcp/lib.mjs` and
+  `census/census-density.mjs` `runDensity` all call `lib/run-message.js`
+  (see the RUN MESSAGE invariant below). MCP runs still have no network /
+  bridges / impassable layers. See `mcp/README.md`.
 - `wasm/` + `wasm-worker.js` + `engine32.wasm` / `engine64.wasm` — the v80
   in-browser WebAssembly engine (2C "Motor WebAssembly", default ON).
   `wasm/src/lib.rs` `include!`s `backend/src/main.rs` VERBATIM and adds a
@@ -91,14 +87,14 @@ hashes.
   (`refEnergyKJ`, `deadband` — the GPX-overlay closed form),
   `dem-smoothing.js` (`smoothHeightsInPlace`), `water-raster.js` (the OSM
   water-mask rasterisers), `census-sampler.js` (Sobol/Halton + polygon
-  helpers), `maxseg-coarsen.js`, `changelog.js` (the `CHANGELOG.md` parser
-  behind the help modal). RULE: a pure helper that a test or headless tool
+  helpers), `maxseg-coarsen.js`, `run-message.js` (the engine's run
+  message — one builder for the app, MCP and census), `changelog.js` (the
+  `CHANGELOG.md` parser behind the help modal). RULE: a pure helper that a test or headless tool
   needs goes HERE and is imported — never copy a function out of `app/` or
   `app.js` into a test again. What still IS hand-mirrored, because
   `energy-worker.js` is a classic `importScripts` script: `v2Edge` in
   `test-worker-pool.mjs`, `epsEstimate` in `test-energy-v2.mjs`, the
-  turn-factor table in `test-maxseg.mjs`; plus `mcp/lib.mjs`
-  `buildRunMessage` (below) and the dated `docs/grid-*.mjs` copies of
+  turn-factor table in `test-maxseg.mjs`; plus the dated `docs/grid-*.mjs` copies of
   `flatEqSpeed`/`deriveCost`/`smoothHeightsInPlace`.
 - `sw.js` — service worker (precache + runtime cache). `index.html`,
   `manifest.webmanifest`, `icons/` are the PWA shell.
@@ -185,6 +181,22 @@ hashes.
   modules EARLIER in the chain (functions may reference anything).
   `test-app-shell.mjs` checks the chain, the import/export names, the
   setter rule (heuristically) and the precache list.
+
+- THE RUN MESSAGE HAS ONE BUILDER (v82). `energy-worker.js` destructures the
+  `kind: "run"` message and silently DEFAULTS every missing key, so a sender
+  that forgets a field does not fail — it runs a different computation.
+  `lib/run-message.js` `buildRunMessage` (the base message) and
+  `densitySliceMessage` (one pool slice: raw accumulators, no IDW fill) are
+  the only place the literal is written; the app, the MCP server and the
+  census harness call them and attach their own `height`/`mask`/
+  `networkMask`. The builders are STRICT (every input explicit, `null` for
+  "none"; unknown inputs throw), so adding an engine field means: add it to
+  the worker's destructuring AND to the builder, then make each sender
+  state it — `test-run-message.mjs` fails if the builder's keys and the
+  keys the worker reads differ in either direction, or if a sender writes
+  the literal by hand. The NATIVE backend's request params (`/density`,
+  `/single`) are a separate wire format, still built in `app/run.js` and
+  mirrored by hand in `backend/test-backend.mjs`.
 
 - THE WASM ENGINE IS THE BACKEND ENGINE (v80). `wasm/src/lib.rs`
   `include!`s `backend/src/main.rs` verbatim, so there is no third engine to
@@ -465,6 +477,7 @@ node test-maxseg.mjs                       # max-density segment search + app-si
 node test-water-raster.mjs                 # OSM water-mask rasterisation (areas/sea/rivers)
 node test-app-shell.mjs                    # imports ≡ sw.js precache ≡ deploy.sh staging + stamps (needs bash)
 node test-changelog.mjs                    # CHANGELOG.md parser + newest entry ≡ sw.js VERSION
+node test-run-message.mjs                  # run-message builder ≡ keys the worker reads; every sender uses it
 node census/test-census-sampler.mjs        # in-browser census sampler helpers (lib/census-sampler.js)
 node census/test-census-density.mjs        # census density harness end-to-end (needs npm install in census/)
 node mcp/test-mcp.mjs                      # MCP server over real stdio vs direct engine runs (needs npm install in census/ AND mcp/)

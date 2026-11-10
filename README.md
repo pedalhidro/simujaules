@@ -162,6 +162,7 @@ CI (`.github/workflows/deploy.yml`) runs these on PRs and on pushes to `deploy`;
     node test-water-raster.mjs                # OSM water-mask rasterisation
     node test-app-shell.mjs                   # imports ≡ sw.js precache ≡ deploy.sh staging
     node test-changelog.mjs                   # CHANGELOG.md parser, newest entry ≡ sw.js VERSION
+    node test-run-message.mjs                 # the engine's run message: one builder, keys ≡ what the worker reads
     node test-graph-engine.mjs                # graph-mode engine
     node test-dem-smoothing.mjs               # DEM pre-smoothing transform (lib/dem-smoothing.js)
     node census/test-census-density.mjs       # headless density harness (npm install in census/)

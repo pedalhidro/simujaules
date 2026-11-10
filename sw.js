@@ -145,6 +145,7 @@ const PRECACHE_URLS = [
   "./lib/dem-smoothing.js",
   "./lib/maxseg-coarsen.js",
   "./lib/ref-energy.js",
+  "./lib/run-message.js",
   "./lib/water-raster.js",
   "./energy-worker.js",
   "./graph-engine.js",
