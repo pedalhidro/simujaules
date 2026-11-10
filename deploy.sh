@@ -229,14 +229,31 @@ fi
 #        "/modelo/" URL (the real pages are their own objects).
 #    --checksums-only: compare by CRC32C, not mtime — the staging dir gets
 #    fresh mtimes every run, so without it every file re-uploads.
+#
+#    ORDER (since v82 app.js imports modules from app/ and lib/, so the entry
+#    and the directories are no longer independent):
+#      a. the directories, ADD/UPDATE only — new modules land while the old
+#         index.html/app.js are still live; nothing references them yet;
+#      b. the top-level files — index.html and app.js flip to the new version
+#         with everything they import already in the bucket;
+#      c. the directories again, now WITH delete — prune what the new version
+#         no longer uses (only after nothing live points at it).
+#    Uploading the entry first left a window, and on a failed directory rsync
+#    a standing outage, in which the live app.js imported modules that were
+#    not there. With this order an abort (set -e, pipefail) before (b) leaves
+#    the previous version fully in place.
 echo ">> Uploading to $BUCKET …"
 : > "$RSYNC_LOG"
-gcloud storage rsync --checksums-only --delete-unmatched-destination-objects \
-  "$STAGE" "$BUCKET/" 2>&1 | tee -a "$RSYNC_LOG"
-for d in dem icons vocab app lib; do
-  gcloud storage rsync -r --checksums-only --delete-unmatched-destination-objects \
+SYNC_DIRS="dem icons vocab app lib"
+sync_dir() { # sync_dir <dir> [extra rsync flags…]
+  local d="$1"; shift
+  gcloud storage rsync -r --checksums-only "$@" \
     "$STAGE/$d" "$BUCKET/$d/" 2>&1 | tee -a "$RSYNC_LOG"
-done
+}
+for d in $SYNC_DIRS; do sync_dir "$d"; done                      # a. add/update
+gcloud storage rsync --checksums-only --delete-unmatched-destination-objects \
+  "$STAGE" "$BUCKET/" 2>&1 | tee -a "$RSYNC_LOG"                 # b. the entry flips
+for d in $SYNC_DIRS; do sync_dir "$d" --delete-unmatched-destination-objects; done   # c. prune
 # Alias out of the way (404 = first deploy, fine), then the scoped rsync.
 curl -sS -o /dev/null -X DELETE \
   -H "Authorization: Bearer $(gcloud auth print-access-token)" \
@@ -252,9 +269,13 @@ echo ">> Setting headers…"
 gcloud storage objects update \
   "$BUCKET/app.js" "$BUCKET/energy-worker.js" "$BUCKET/graph-engine.js" "$BUCKET/wasm-worker.js" \
   --cache-control="public, max-age=3600"
-# The ES modules app.js imports (gcloud expands the wildcard itself).
+# The ES modules app.js imports (gcloud expands the wildcard itself). Not
+# allowed to abort the deploy: this only restates the bucket's default for
+# public objects (also max-age=3600), while the steps BELOW it — sw.js
+# no-cache, the /modelo/ alias, the Cloudflare purge — are load-bearing.
 gcloud storage objects update "$BUCKET/app/*.js" "$BUCKET/lib/*.js" \
-  --cache-control="public, max-age=3600"
+  --cache-control="public, max-age=3600" \
+  || echo "WARNING: could not set Cache-Control on app/*.js and lib/*.js (they keep the bucket default)." >&2
 # WebAssembly modules: application/wasm is what lets the page compile them
 # while they download (WebAssembly.compileStreaming); app.js falls back to
 # compiling the downloaded bytes if the type is ever wrong.
