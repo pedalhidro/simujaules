@@ -2,8 +2,10 @@
 
 Static, build-step-free PWA that computes asymmetric-cost cycling energy
 fields over DEMs (Dijkstra variants on an 8-connected grid), plus an
-optional native Rust backend. No package.json, no bundler — `index.html`
-loads `app.js` directly and libraries come from CDNs with SRI hashes.
+optional native Rust backend. No root package.json, no bundler —
+`index.html` loads `app.js` directly as an ES module (which imports `app/`
+and `lib/`, native browser imports) and libraries come from CDNs with SRI
+hashes.
 
 > **Name:** the app is **Simujaules** — a deliberate, affective typo of
 > *joules* ("simu" + "jaules"), NOT a misspelling of "simujoules". Do not
@@ -14,8 +16,22 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 
 ## Layout
 
-- `app.js` — all UI: DEM/GeoPackage loading, Leaflet map, compute dispatch,
-  rendering, i18n (PT/EN `STRINGS` table + `t()`), bundle export/import.
+- `app.js` + `app/` — all UI. Until v82 `app.js` was ONE 13,000-line module;
+  it is now only the entry (a module map + imports) and the code lives in
+  27 modules under `app/`, one per concern, in the original order: `i18n`
+  (PT/EN `STRINGS` table + `t()`), `panel` (parameter persistence,
+  `readCost`, config I/O), `boot` (worker URLs + the DOMContentLoaded
+  wiring), `map`, `state`, `compute-source`, `dom` (shared DOM handles),
+  `dem` (DEM/FABDEM loading), `network` (GeoPackage, Overpass/FGB street
+  pulls), `bridges`, `draw`, `water`, `network-view`, `graph-mode`, `points`
+  (source/destination/reference points, census sampling), `run` (the Run
+  handler: message build, worker/wasm/backend dispatch, pool merge),
+  `kpi`, `maxseg`, `render`, `refgeom`, `engines` (`densityPoolSize`, wasm
+  engine choice), `cloud`, `estimate`, `colormaps`, `geotiff`, `grid`
+  (`buildComputeGrid`, `buildPortals`), `bundle`. `app.js`'s header lists
+  them with one line each. Older comments, the changelog and many rules
+  below still say "`app.js`" for code that now sits in one of these files
+  — read it as "the app's UI code" and grep `app/` for the function.
   Street-network pulls (group 1B) have two interchangeable cloud sources:
   Overpass (`loadOsmNetwork`) and the South-America road FlatGeobuf
   (`loadFgbNetwork`, v65 — amora's `build-viario.py` product on `gs://telhas`,
@@ -47,8 +63,9 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   and `lib/dem-smoothing.js` (`smoothHeightsInPlace`), and hosts `energy-worker.js` in a
   `worker_threads` Worker (`mcp/engine-thread.mjs`, the threaded twin of the
   census `loadWorker()` shim). `mcp/lib.mjs` `buildRunMessage` is the
-  headless mirror of app.js `baseMsg` (no network / bridges / impassable
-  layers yet) — a new run-message field in app.js must land there AND in
+  headless mirror of the app's `baseMsg` (built in `app/run.js`; no network /
+  bridges / impassable layers yet) — a new run-message field there must land
+  in `buildRunMessage` AND in
   `census/census-density.mjs` `runDensity`'s own `msg` literal (the `density`
   tool is the app's pool merge with one slice and builds its message there;
   the engine silently defaults any missing key, and `test-mcp.mjs` compares
@@ -143,6 +160,31 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   Worker callbacks drop messages whose generation doesn't match.
 
 ## Invariants — easy to break, hard to notice
+
+- THE `app/` EVALUATION-ORDER CHAIN (v82). The split of `app.js` was
+  mechanical: each `app/` module is a contiguous slice of the old file,
+  verbatim, and their top-level code (the map, its panes, `state`, the DOM
+  handles, every `addEventListener`) must still run in the old top-to-bottom
+  order. The modules import each other in cycles — fine for functions, which
+  are hoisted across module cycles exactly as inside one file — so the order
+  is pinned by a chain instead: every module's FIRST import is the bare
+  `import "./<predecessor>.js";` and `app.js` imports the LAST module
+  (`app/bundle.js`) first. Remove or reorder a chain import and top-level
+  code runs in a different order (typically a TDZ `ReferenceError` on a
+  `const` such as `map` or `state` at page load — or, worse, listeners
+  registering in a different order with no error at all). To add a module:
+  insert it in `app.js`'s list, make its first import the module before it,
+  repoint the next module's first import at it, and add it to
+  `PRECACHE_URLS`. Two consequences of ES-module rules: (a) an imported
+  binding is READ-ONLY — a `let` shared across modules is assigned only
+  through a setter in the module that declares it (`setActiveColormap`,
+  `setLayerOrder`, `setRefreshLayerOrderList`, `setRefreshColormapLabels`);
+  assigning to an import throws only when that line runs, not at load;
+  (b) a top-level `const`/`let` of another module is in its TDZ until that
+  module has evaluated, so top-level code may only use bindings from
+  modules EARLIER in the chain (functions may reference anything).
+  `test-app-shell.mjs` checks the chain, the import/export names, the
+  setter rule (heuristically) and the precache list.
 
 - THE WASM ENGINE IS THE BACKEND ENGINE (v80). `wasm/src/lib.rs`
   `include!`s `backend/src/main.rs` verbatim, so there is no third engine to

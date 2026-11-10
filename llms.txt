@@ -61,8 +61,9 @@
 
 ## Notes for automated agents
 
-- The app is a static PWA: `index.html` + `app.js` + `energy-worker.js`,
-  no build step, no server-side compute. Parameters and results round-trip
+- The app is a static PWA: `index.html` + `app.js` (the entry of the native
+  ES modules under `app/` and `lib/`) + `energy-worker.js`, no build step,
+  no server-side compute. Parameters and results round-trip
   through the bundle format, so runs are fully reproducible from the
   metadata.jsonld alone (plus the same DEM).
 - Coordinates in bundles are DEM pixel (row, col); the GeoTIFFs carry the

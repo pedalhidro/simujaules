@@ -11,7 +11,7 @@
 //     tiffMetadataForDem / writeRasterAsGeoTIFF / writeBundle;
 //   - lib/dem-smoothing.js: smoothHeightsInPlace (the function app.js runs).
 // What this file adds is the app's DEM-load smoothing rule, the run-message
-// construction app.js does in baseMsg (no network / bridges / impassable
+// construction the app does in baseMsg (app/run.js; no network / bridges / impassable
 // layers — those stay browser-only for now), worker_threads runners for the
 // engine and the DEM load, and the GeoJSON / bundle output shapes
 // downloadBundle writes.
@@ -221,7 +221,7 @@ export function runEngine(msg, { onProgress, onWarning, signal } = {}) {
 }
 
 // ---- single-source run (from / to / round, optional goal + top-N) ----------------
-// Mirror of app.js baseMsg + startSingleWorker's `{ ...baseMsg, height, mask,
+// Mirror of the app's baseMsg (app/run.js) + startSingleWorker's `{ ...baseMsg, height, mask,
 // networkMask }` for a run with NO network constraint, NO bridges and NO
 // impassable/drawn layers (those are the only app inputs missing here).
 // Like the app it permits seed === goal; callers that need two distinct

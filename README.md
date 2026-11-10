@@ -75,9 +75,12 @@ first load).
 ## Layout
 
 - `index.html` — page shell, panel UI, map container, help/changelog modal.
-- `app.js` — all UI: DEM/GeoPackage loading (geotiff.js, sql.js), Leaflet map,
-  compute dispatch, rendering, i18n (`STRINGS` table + `t()`), bundle
-  export/import.
+- `app.js` — the entry module: a module map plus the imports. The UI itself
+  lives in `app/`, one ES module per concern (i18n `STRINGS` table + `t()`,
+  DEM/GeoPackage loading, the Leaflet map, compute dispatch, rendering,
+  bundle export/import…), loaded natively by the browser — still no build
+  step. `app.js`'s header lists the modules and explains the import chain
+  that keeps their top-level code running in order.
 - `energy-worker.js` — the compute engine (Web Worker): Dijkstra, A\* top-N,
   multi-ref density, layered-DP max-cost path, IDW network fill. Pure JS on typed
   arrays. **This is the reference implementation** the Rust backend must mirror.

@@ -15,6 +15,9 @@
 //      workers importScripts are all precached — and no precached script is
 //      orphaned;
 //   3. every named import resolves to an export of its target module;
+//   3b. the evaluation-order chain of app/ holds (see app.js): the entry
+//      imports the last module first and lists every module, each module's
+//      first import is its predecessor, and nothing assigns to an import;
 //   4. deploy.sh's real staging + version stamping (its DEPLOY_STAGE_ONLY
 //      hook; needs bash): every staged precache URL resolves to a staged file,
 //      every import carries the sw.js VERSION stamp and resolves, the URLs the
@@ -31,8 +34,10 @@ const ok = (cond, msg) => { if (cond) passed++; else { failed++; console.error("
 
 // ---- source scanners (regex on purpose: no parser dependency) -----------------
 // Static imports in this codebase start at column 0 and use double quotes;
-// the lazy group spans a multi-line `import {\n  a, b,\n} from "…";`.
-const IMPORT_RE = /^(?:import|export)\s+(?:([\s\S]*?)\s+from\s+)?"([^"]+)";?/gm;
+// the lazy group spans a multi-line `import {\n  a, b,\n} from "…";` but can
+// never cross a quote, so a bare `import "./x.js";` is not swallowed into the
+// import statement that follows it.
+const IMPORT_RE = /^(?:import|export)\s+(?:([^"]*?)\s+from\s+)?"([^"]+)";?/gm;
 function parseImports(src) {
   const out = [];
   for (const m of src.matchAll(IMPORT_RE)) {
@@ -88,8 +93,8 @@ function workerUrls(graph) {
   const workers = [], wasm = [];
   for (const { src } of graph.values()) {
     if (!src) continue;
-    for (const m of src.matchAll(/^const \w*WORKER_URL = "([^"]+)";/gm)) workers.push(m[1]);
-    for (const m of src.matchAll(/^const WASM_ENGINE_URLS = \{([^}]*)\};/gm))
+    for (const m of src.matchAll(/^(?:export )?const \w*WORKER_URL = "([^"]+)";/gm)) workers.push(m[1]);
+    for (const m of src.matchAll(/^(?:export )?const WASM_ENGINE_URLS = \{([^}]*)\};/gm))
       for (const s of m[1].matchAll(/"([^"]+)"/g)) wasm.push(s[1]);
   }
   return { workers, wasm };
@@ -156,6 +161,47 @@ const workerFiles = new Map();
 for (const w of workers) importScriptsOf(root, rel(w), workerFiles);
 for (const [p, specs] of workerFiles) ok(specs !== null, `worker script exists: ${p}`);
 for (const w of wasm) ok(existsSync(join(root, rel(w))), `wasm engine exists: ${w}`);
+
+// ---- the app/ evaluation-order chain ------------------------------------------
+// app/ modules import each other in cycles (fine for hoisted functions), so
+// the ORDER in which their top-level code runs is pinned by a chain instead:
+// app.js imports the LAST module first, and every module's first import is
+// its predecessor. Break the chain and top-level code (the map, `state`, the
+// DOM handles, every addEventListener) runs in a different order.
+console.log("app/ evaluation-order chain");
+{
+  const entry = graph.get("app.js");
+  const listed = entry.imports.map((im) => im.target);
+  ok(entry.imports.every((im) => im.names.length === 0 && /^app\/[\w-]+\.js$/.test(im.target)), "app.js contains only side-effect imports of app/*.js");
+  ok(new Set(listed).size === listed.length, "app.js lists each module once");
+  const onDisk = readdirSync(join(root, "app")).filter((f) => f.endsWith(".js")).map((f) => `app/${f}`).sort();
+  ok(onDisk.length === listed.length && onDisk.every((f) => listed.includes(f)), `app.js lists exactly the files in app/ (${listed.length} listed, ${onDisk.length} on disk)`);
+  const order = [...listed.slice(1), listed[0]]; // evaluation order: the first import is the LAST module
+  order.forEach((p, i) => {
+    const node = graph.get(p);
+    if (!node || node.missing) return;
+    const sideEffect = node.imports.filter((im) => im.names.length === 0);
+    if (i === 0) ok(sideEffect.length === 0, `${p} (first in the chain) has no side-effect import`);
+    else {
+      ok(node.imports[0]?.target === order[i - 1] && node.imports[0].names.length === 0, `${p}: first import is its predecessor ${order[i - 1]}`);
+      ok(sideEffect.length === 1, `${p}: exactly one side-effect import`);
+    }
+    // ES imports are read-only bindings: assigning to one throws — at RUN
+    // time, only when that line executes, so it would slip past a page-load
+    // check. Cross-module state goes through a setter in the declaring module
+    // (setActiveColormap, setLayerOrder…). Heuristic, not a parser: a name
+    // that the module also declares locally somewhere (a shadowing const/let,
+    // parameter or arrow argument) is skipped, and // comments are ignored.
+    const code = node.src.replace(/(^|\s)\/\/.*$/gm, "$1");
+    for (const n of node.imports.flatMap((im) => im.names)) {
+      const N = n.replace(/\$/g, "\\$");
+      const shadowed = new RegExp(`\\b(?:const|let|var)\\s+(?:[\\[{][^=;]*)?\\b${N}\\b|\\bfunction\\b[^(]*\\([^)]*\\b${N}\\b|\\(\\s*[^()]*\\b${N}\\b[^()]*\\)\\s*=>|\\b${N}\\s*=>|\\bfor\\s*\\(\\s*(?:const|let|var)\\s[^)]*\\b${N}\\b`).test(node.src);
+      if (shadowed) continue;
+      const assigns = new RegExp(`(^|[^.\\w$"'\`])${N}\\s*(=(?![=>])|[-+*/%&|^]=|\\+\\+|--)`, "m");
+      ok(!assigns.test(code), `${p}: never assigns to its import ${n}`);
+    }
+  });
+}
 
 console.log("precache ⊇ what the page loads");
 const precached = new Set(sw.urls.map(rel));

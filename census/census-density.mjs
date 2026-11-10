@@ -8,7 +8,7 @@
 //
 // Parity notes (mirrors app.js exactly):
 //   - density workers receive dx/dy = dxM/dyM (METRES) for the cost model
-//     (app.js baseMsg, ~app.js:2624);
+//     (the app's baseMsg, in app/run.js);
 //   - the worker takes a v2 `cost` bundle derived from the physics inputs by
 //     deriveCost() from lib/cost.js — the same function app.js readCost() calls
 //     (re-exported below for mcp/ and the census test);
@@ -162,7 +162,7 @@ export async function runDensity(dem, refs, params, runFn = loadWorker()) {
   const msg = {
     kind: "run",
     H: dem.H, W: dem.W,
-    dx: dem.dxM, dy: dem.dyM,                 // metres — matches app.js baseMsg
+    dx: dem.dxM, dy: dem.dyM,                 // metres — matches the app's baseMsg (app/run.js)
     seedR: refs[0]?.[0] ?? -1, seedC: refs[0]?.[1] ?? -1,
     goalR: -1, goalC: -1,
     mode: params.mode, densityMode: params.mode,

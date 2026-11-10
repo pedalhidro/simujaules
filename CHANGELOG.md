@@ -14,10 +14,12 @@ history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 
 ## v82 — 2026-11-10
 
-> **Histórico de versões em um só lugar.** A seção "Histórico de versões" da
-> Ajuda agora é lida do `CHANGELOG.md` na hora em que você a abre, em vez de
-> vir embutida na página — o carregamento inicial fica mais leve (a página
-> encolhe ~30% e o service worker ~85%). Nada muda nos cálculos.
+> **Arrumação por dentro.** A seção "Histórico de versões" da Ajuda agora é
+> lida do `CHANGELOG.md` na hora em que você a abre, em vez de vir embutida
+> na página (a página encolhe ~30% e o service worker ~85%). E o código do
+> app, que era um arquivo único de 13 mil linhas, foi dividido em módulos por
+> assunto. Nada muda nos cálculos nem nos resultados — conferido de ponta a
+> ponta, byte a byte, contra a versão anterior.
 
 **Changelog em fonte única.** O histórico vivia em três lugares mantidos à
 mão — este arquivo, a seção recolhida da Ajuda (`index.html`, 748 linhas) e
@@ -52,6 +54,37 @@ aleatórios, zero diferenças). Seguem como cópias, por o `energy-worker.js`
 ser um script clássico: `v2Edge` (`test-worker-pool.mjs`), `epsEstimate`
 (`test-energy-v2.mjs`) e a tabela de curvas (`test-maxseg.mjs`). O
 `lib/package.json` só diz ao Node que são módulos ES e não é publicado.
+
+**`app.js` dividido em 27 módulos (`app/`).** O `app.js` (13 006 linhas, 302
+funções de topo) vira só o ponto de entrada; o código passa a morar em
+`app/`, um módulo ES por assunto, na ordem em que já estava: `i18n`, `panel`,
+`boot`, `map`, `state`, `compute-source`, `dom`, `dem`, `network`, `bridges`,
+`draw`, `water`, `network-view`, `graph-mode`, `points`, `run`, `kpi`,
+`maxseg`, `render`, `refgeom`, `engines`, `cloud`, `estimate`, `colormaps`,
+`geotiff`, `grid`, `bundle`. Continua sem build: o navegador importa os
+módulos nativamente. A divisão foi mecânica — cada módulo é uma fatia
+contígua do arquivo antigo, literal; as únicas edições são as linhas de
+`import` geradas, o prefixo `export` nas declarações usadas por outro
+módulo, quatro *setters* (uma ligação importada é somente leitura:
+`setActiveColormap`, `setLayerOrder` e os dois ganchos de idioma) e o
+reposicionamento de um bloco de quatro funções e dois comentários. A ordem
+de execução do código de topo (mapa, painéis, `state`, os
+`addEventListener`) é a mesma de antes, garantida por uma corrente: o
+primeiro `import` de cada módulo é o seu antecessor, e o `app.js` importa o
+último. Verificado de três formas: (1) reparse independente — os 413
+comandos de topo e os 3 313 comentários dos módulos, concatenados, são os do
+arquivo original, na mesma ordem; (2) um roteiro de 24 passos no Chromium
+(campo de/para/ida-e-volta, caminho, top-N, densidade com e sem WebAssembly
+em 8 e 16 direções, KPIs, segmento de densidade máxima, estilo, exportar e
+reimportar o bundle), com hash de cada imagem, rota e GeoTIFF exportado —
+relatório idêntico byte a byte antes e depois da divisão, e a única
+diferença para a v81 é o próprio histórico de versões; (3) o mesmo roteiro
+sobre a saída carimbada do `deploy.sh`, mais a instalação do service worker
+(49 de 49 URLs no precache) e a partida offline. O `sw.js` precacheia os 27
+módulos, o `deploy.sh` publica `app/*.js` e carimba todo `import` com a
+versão, e o `test-app-shell.mjs` confere a corrente, os nomes
+importados/exportados e que tudo que a página carrega está no precache e no
+deploy.
 
 ## v81 — 2026-09-25
 
