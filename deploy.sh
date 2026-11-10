@@ -68,6 +68,11 @@ cp index.html app.js energy-worker.js graph-engine.js favicon.ico "$STAGE/"
 # v80 WebAssembly engine: the worker + both prebuilt modules (wasm/build.sh
 # writes them at the repo root and they are committed — no build step here).
 cp wasm-worker.js engine32.wasm engine64.wasm "$STAGE/"
+# Shared ES modules imported by app.js (pure, DOM-free helpers — the tests and
+# the headless tools import the very same files). lib/package.json only tells
+# Node they are ES modules; it does not ship.
+mkdir -p "$STAGE/lib"
+cp lib/*.js "$STAGE/lib/"
 # Explicit glob rather than `cp -r dem/ ...` — BSD and GNU cp disagree on
 # trailing-slash semantics (GNU nests a second dem/ level, breaking the
 # example-DEM URLs hardcoded in app.js).
@@ -96,7 +101,8 @@ cp modelo/index.html modelo/en.html modelo/artigo.pdf modelo/paper.pdf "$STAGE/m
 cp modelo/figs/*.svg "$STAGE/modelo/figs/"
 
 # SEO / LLM-crawler descriptors + the changelog (linked from llms.txt and
-# index.html's noscript). sitemap.xml now lives at the subdomain root
+# index.html's noscript, AND fetched by the help modal, which renders its
+# Changelog section from it — hence its place in sw.js's PRECACHE_URLS). sitemap.xml now lives at the subdomain root
 # (https://simujaules.pedalhidrografi.co/sitemap.xml); still worth submitting it
 # explicitly in Search Console.
 cp llms.txt sitemap.xml CHANGELOG.md "$STAGE/"
@@ -209,8 +215,8 @@ fi
 #    every earlier deploy explains the "census .fgb 404" reports). So:
 #      - top-level files: a NON-recursive rsync of the stage root — its delete
 #        candidates are top-level objects only; prefixes are out of scope.
-#      - dem/ icons/ vocab/: per-directory recursive rsyncs — deletes are
-#        scoped inside each directory.
+#      - dem/ icons/ vocab/ lib/: per-directory recursive rsyncs — deletes
+#        are scoped inside each directory.
 #      - modelo/: the "/modelo/" directory-index ALIAS OBJECT (an object
 #        literally named "modelo/", step 4b) makes "gs://…/modelo/" ambiguous
 #        for ANY rsync ("matched more than one URL") — delete it first via the
@@ -224,7 +230,7 @@ echo ">> Uploading to $BUCKET …"
 : > "$RSYNC_LOG"
 gcloud storage rsync --checksums-only --delete-unmatched-destination-objects \
   "$STAGE" "$BUCKET/" 2>&1 | tee -a "$RSYNC_LOG"
-for d in dem icons vocab; do
+for d in dem icons vocab lib; do
   gcloud storage rsync -r --checksums-only --delete-unmatched-destination-objects \
     "$STAGE/$d" "$BUCKET/$d/" 2>&1 | tee -a "$RSYNC_LOG"
 done
@@ -242,6 +248,9 @@ gcloud storage rsync -r --checksums-only --delete-unmatched-destination-objects 
 echo ">> Setting headers…"
 gcloud storage objects update \
   "$BUCKET/app.js" "$BUCKET/energy-worker.js" "$BUCKET/graph-engine.js" "$BUCKET/wasm-worker.js" \
+  --cache-control="public, max-age=3600"
+# The ES modules app.js imports (gcloud expands the wildcard itself).
+gcloud storage objects update "$BUCKET/lib/*.js" \
   --cache-control="public, max-age=3600"
 # WebAssembly modules: application/wasm is what lets the page compile them
 # while they download (WebAssembly.compileStreaming); app.js falls back to

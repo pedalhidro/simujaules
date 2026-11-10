@@ -152,6 +152,7 @@ CI (`.github/workflows/deploy.yml`) runs these on PRs and on pushes to `deploy`;
     node test-maxseg.mjs                      # max-density segment search
     node test-water-raster.mjs                # OSM water-mask rasterisation
     node test-app-shell.mjs                   # imports ≡ sw.js precache ≡ deploy.sh staging
+    node test-changelog.mjs                   # CHANGELOG.md parser, newest entry ≡ sw.js VERSION
     node test-graph-engine.mjs                # graph-mode engine
     node test-dem-smoothing.mjs               # DEM pre-smoothing mirror
     node census/test-census-density.mjs       # headless density harness (npm install in census/)
@@ -165,8 +166,8 @@ differ only on exact f64 cost ties). Likewise `test-water-raster.mjs` holds pure
 mirrors of `app.js`'s OSM water-mask helpers (app.js can't be imported in node).
 Keep the mirrors in sync — a change to one engine must land in the other.
 
-Per the project convention, bump `sw.js` `VERSION` (with a changelog line in
-`CHANGELOG.md`, the help modal, and the `sw.js` history comment) on every deploy
+Per the project convention, bump `sw.js` `VERSION` (with an entry in
+`CHANGELOG.md` — the only changelog; the help modal renders it) on every deploy
 that changes app behaviour.
 
 ## Known limitations

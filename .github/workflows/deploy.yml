@@ -76,6 +76,8 @@ jobs:
         run: node census/test-census-sampler.mjs
       - name: Max-density segment search
         run: node test-maxseg.mjs
+      - name: Changelog (single source, matches sw.js VERSION)
+        run: node test-changelog.mjs
       # What index.html loads == what sw.js precaches == what deploy.sh stages
       # and stamps (runs deploy.sh in its stage-only mode; no gcloud needed).
       - name: App shell consistency (imports, precache, deploy staging)

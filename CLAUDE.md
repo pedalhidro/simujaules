@@ -65,6 +65,11 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   (`densityPartial`) and plain single-source fields on the module when the
   page attaches one (`msg.wasm = {module, is64}`) and hands every other
   message — and any wasm failure — to the JS engine. See `wasm/README.md`.
+- `lib/` — small PURE ES modules (no DOM, no `state`, no CDN globals) that
+  `app.js` imports and Node can import too, so tests and headless tools use
+  the app's own code instead of a hand-kept copy. `lib/package.json` only
+  marks them as ESM for Node and does not ship. Currently
+  `lib/changelog.js` (the `CHANGELOG.md` parser behind the help modal).
 - `sw.js` — service worker (precache + runtime cache). `index.html`,
   `manifest.webmanifest`, `icons/` are the PWA shell.
 - `deploy.sh` — stages and rsyncs to `gs://simujaules`, served at
@@ -296,7 +301,7 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   `settled` byte array (not `g > E[idx]`) filters stale heap entries, and
   settled neighbours are never relaxed. Both guards exist because of the
   f32/f64 precision mismatch — removing either corrupts passes counts.
-- `sw.js`: bump `VERSION` (with a changelog line) on every deploy that
+- `sw.js`: bump `VERSION` (with a `CHANGELOG.md` entry) on every deploy that
   changes app behaviour; keep `PRECACHE_URLS` in sync with what
   `index.html`/`deploy.sh` actually reference — `cache.addAll` is atomic,
   one 404 blocks the SW install for every user. `test-app-shell.mjs` enforces
@@ -306,12 +311,17 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   module instances). A new shipped `.js` file therefore needs three edits —
   the import, `PRECACHE_URLS`, and (if it is in a new directory) `deploy.sh`
   — and that test fails until all three agree.
-- The changelog lives in THREE places that must move together with every
-  release: `CHANGELOG.md`, the collapsed `<details id="changelog">` in the
-  help modal (`index.html`), and the `sw.js` version-history comment.
-  Update all three whenever you ship user-visible changes — don't let
-  them drift.
-- Every version bump (a new `VERSION` + the changelog trio) ships as its own
+- The changelog lives in ONE place: `CHANGELOG.md` (since v82 — it used to be
+  a hand-synced trio with the help modal and a `sw.js` comment). Each entry
+  is a `## vNN — date` heading followed by a Markdown BLOCKQUOTE: that
+  blockquote is the short user-facing summary the help modal shows (the
+  modal fetches `./CHANGELOG.md` when its Changelog section is first opened
+  and renders it with `lib/changelog.js` — bold, italic and code only, HTML
+  escaped first); the technical detail follows it. Every release needs both.
+  `test-changelog.mjs` fails if the newest heading is not `sw.js`'s
+  `VERSION` or an entry has no blockquote. Never paste changelog text back
+  into `index.html` or `sw.js`.
+- Every version bump (a new `VERSION` + its `CHANGELOG.md` entry) ships as its own
   git commit — always commit when pushing a new version. Author the release
   commit as Claude (the assistant) and credit the user as a contributor, e.g.
   `git commit --author="Claude <noreply@anthropic.com>"` with a trailer
@@ -399,6 +409,7 @@ node test-graph-engine.mjs                 # vector-network graph engine
 node test-maxseg.mjs                       # max-density segment search + app-side coarsening
 node test-water-raster.mjs                 # OSM water-mask rasterisation (areas/sea/rivers)
 node test-app-shell.mjs                    # imports ≡ sw.js precache ≡ deploy.sh staging + stamps (needs bash)
+node test-changelog.mjs                    # CHANGELOG.md parser + newest entry ≡ sw.js VERSION
 node census/test-census-sampler.mjs        # in-browser census sampler helpers (mirrors app.js)
 node census/test-census-density.mjs        # census density harness end-to-end (needs npm install in census/)
 node mcp/test-mcp.mjs                      # MCP server over real stdio vs direct engine runs (needs npm install in census/ AND mcp/)

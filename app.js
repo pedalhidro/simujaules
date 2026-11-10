@@ -1,5 +1,7 @@
 // app.js — wires up DEM loading, map UI, worker dispatch, result overlay
 
+import { parseChangelog } from "./lib/changelog.js";
+
 // ============================================================================
 // i18n
 // ============================================================================
@@ -643,7 +645,10 @@ const STRINGS = {
   "help.h.interp":       { pt: "Interpolação fora da rede", en: "Off-network interpolation" },
   "help.p.interp":       { pt: "Visualização opcional: preenche células fora da rede com a média dos valores da rede em redor, usando o mesmo algoritmo do GDAL <code>fillnodata</code>. Para cada célula vazia, busca em 8 direções até achar uma célula de rede dentro de <strong>distância máx</strong> (em células); calcula a média ponderada por <code>1/d²</code> dos acertos. Em seguida, aplica <strong>suavizações</strong> passes de média 3×3 sobre o preenchimento — preservando os valores originais da rede.", en: 'Optional visualisation: fills off-network cells with a weighted mean of nearby on-network values, using the same algorithm as GDAL <code>fillnodata</code>. For each empty cell, scan 8 directions for a network cell within <strong>max distance</strong> (cells); compute a <code>1/d²</code>-weighted mean of the hits. Then apply <strong>smoothing iters</strong> 3×3 mean passes over the fill, preserving the original network values.' },
   "help.p.interp_only":  { pt: "Apenas para visualização; a análise (Dijkstra, top-N, densidade) continua estritamente sobre a rede.", en: 'For visualisation only; the analysis (Dijkstra, top-N, density) stays strictly on the network.' },
-  "help.h.changelog":    { pt: "Histórico de versões (changelog, em inglês)", en: "Changelog" },
+  "help.h.changelog":    { pt: "Histórico de versões (changelog)", en: "Changelog" },
+  "help.changelog.loading": { pt: "Carregando o histórico…", en: "Loading the changelog…" },
+  "help.changelog.error":   { pt: "Não foi possível carregar o histórico. Veja o <a href='./CHANGELOG.md' target='_blank' rel='noopener'>CHANGELOG.md</a>.", en: "Could not load the changelog. See <a href='./CHANGELOG.md' target='_blank' rel='noopener'>CHANGELOG.md</a>." },
+  "help.changelog.full":    { pt: "<a href='./CHANGELOG.md' target='_blank' rel='noopener'>Changelog técnico completo</a>", en: "<a href='./CHANGELOG.md' target='_blank' rel='noopener'>Full technical changelog</a>" },
   "help.h.impl":         { pt: "Implementação", en: "Implementation" },
   "help.p.impl":         { pt: "JS puro, em Web Worker: Dijkstra 8-conectada com heap binária sobre arrays tipados (<code>Float64Array</code> de prioridades + <code>Int32Array</code> de payloads). Tudo o que precisa de Δh assimétrico, passes count, top-N e densidade roda no mesmo motor.", en: 'Pure JS in a Web Worker: 8-connected Dijkstra on a binary heap over typed arrays (<code>Float64Array</code> for priorities + <code>Int32Array</code> for payloads). Everything — asymmetric Δh, passes count, top-N, density — runs on the same engine.' },
   "help.h.attribution":  { pt: "Atribuições", en: "Attributions" },
@@ -1790,6 +1795,33 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && helpModal?.classList.contains("active")) closeHelp();
+  });
+
+  // Help-modal changelog: CHANGELOG.md is the single source. Fetched and
+  // rendered the first time the <details> opens (the blockquote under each
+  // heading is the digest; lib/changelog.js returns it as escaped HTML with
+  // only <strong>/<em>/<code>). Status lines use data-i18n(-html) so a
+  // language switch re-translates them; the entries themselves are content.
+  const changelogDetails = document.getElementById("changelog");
+  const changelogList = document.getElementById("changelog-entries");
+  let changelogState = "idle";   // idle → loading → done (failure → idle: retried on next open)
+  changelogDetails?.addEventListener("toggle", async () => {
+    if (!changelogDetails.open || !changelogList || changelogState !== "idle") return;
+    changelogState = "loading";
+    try {
+      const res = await fetch("./CHANGELOG.md");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const entries = parseChangelog(await res.text());
+      if (!entries.length) throw new Error("empty changelog");
+      changelogList.innerHTML = entries.map((e) =>
+        `<p><strong>${escapeHtml(e.version)}</strong> — ${escapeHtml(e.date)}<br/>${e.summaryHtml}</p>`,
+      ).join("") + `<p data-i18n-html="help.changelog.full">${t("help.changelog.full")}</p>`;
+      changelogState = "done";
+    } catch (err) {
+      console.warn("changelog load failed:", err);
+      changelogList.innerHTML = `<p data-i18n-html="help.changelog.error">${t("help.changelog.error")}</p>`;
+      changelogState = "idle";
+    }
   });
 
   // Layer-stacking-order modal: list rendered top-of-screen-first, rows
