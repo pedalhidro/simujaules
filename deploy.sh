@@ -24,6 +24,10 @@
 # set Browser Cache TTL to "Respect Existing Headers"), or SW updates stall.
 #
 # Usage: ./deploy.sh
+#
+# Test hook: DEPLOY_STAGE_ONLY=<dir> ./deploy.sh stages and version-stamps into
+# <dir> (steps 1–2 below) and stops before any gcloud call. test-app-shell.mjs
+# uses it to check that what gets shipped is what index.html and sw.js expect.
 
 set -euo pipefail
 
@@ -31,6 +35,12 @@ BUCKET="gs://simujaules"
 PUBLIC_URL="https://simujaules.pedalhidrografi.co/"
 
 cd "$(dirname "$0")"
+
+# Credenciais opcionais (CF_API_TOKEN / CF_ZONE_ID pro purge da Cloudflare)
+# moram no .env gitignored ao lado deste script — carrega se existir, senão o
+# deploy sai sem purge e a edge serve HTML/JS velhos por até 4 h (o v64 saiu
+# assim e clientes precachearam o app.js do v63).
+if [[ -f .env ]]; then set -a; source .env; set +a; fi
 
 if [[ $# -gt 0 ]]; then
   echo "deploy.sh takes no arguments; got: $*" >&2
@@ -40,20 +50,45 @@ fi
 # 1. Stage the deploy. Keeps source-only files (QGIS plugins,
 #    test harnesses, this script) out of the public bucket.
 echo ">> Staging files…"
-STAGE="$(mktemp -d)"
 RSYNC_LOG="$(mktemp)"
 CDN_ERR="$(mktemp)"
 # Single EXIT trap for every temp path — a second `trap ... EXIT` would
 # silently REPLACE the first one (the old script leaked the ~575 MB
 # staging dir on every run because of exactly that).
-trap 'rm -rf "$STAGE" "$RSYNC_LOG" "$CDN_ERR"' EXIT
+if [[ -n "${DEPLOY_STAGE_ONLY:-}" ]]; then
+  STAGE="$DEPLOY_STAGE_ONLY"   # the caller owns (and removes) this directory
+  mkdir -p "$STAGE"
+  trap 'rm -rf "$RSYNC_LOG" "$CDN_ERR"' EXIT
+else
+  STAGE="$(mktemp -d)"
+  trap 'rm -rf "$STAGE" "$RSYNC_LOG" "$CDN_ERR"' EXIT
+fi
 
 cp index.html app.js energy-worker.js graph-engine.js favicon.ico "$STAGE/"
+# v80 WebAssembly engine: the worker + both prebuilt modules (wasm/build.sh
+# writes them at the repo root and they are committed — no build step here).
+cp wasm-worker.js engine32.wasm engine64.wasm "$STAGE/"
+# app.js is only the entry: the UI lives in app/*.js (one module per concern,
+# imported by app.js). lib/*.js are the pure, DOM-free helpers those modules
+# import — the tests and the headless tools import the very same files.
+# lib/package.json only tells Node they are ES modules; it does not ship.
+mkdir -p "$STAGE/app" "$STAGE/lib"
+cp app/*.js "$STAGE/app/"
+cp lib/*.js "$STAGE/lib/"
 # Explicit glob rather than `cp -r dem/ ...` — BSD and GNU cp disagree on
 # trailing-slash semantics (GNU nests a second dem/ level, breaking the
 # example-DEM URLs hardcoded in app.js).
 mkdir -p "$STAGE/dem"
-cp dem/*.tif "$STAGE/dem/"
+# dem/*.tif are gitignored (the live bucket is their home; CI pulls them
+# first). A real deploy must have them — staging an empty dem/ would DELETE
+# every example DEM from the bucket. Only the stage-only test hook may go
+# without.
+if ls dem/*.tif >/dev/null 2>&1; then
+  cp dem/*.tif "$STAGE/dem/"
+elif [[ -z "${DEPLOY_STAGE_ONLY:-}" ]]; then
+  echo "no dem/*.tif to stage — pull them first: gcloud storage cp 'gs://simujaules/dem/*.tif' dem/" >&2
+  exit 1
+fi
 
 # JSON-LD vocab document referenced by SIMU_CONTEXT["@vocab"] — bundles point
 # at this URL, so it has to be present at every deploy or @vocab 404s.
@@ -68,7 +103,8 @@ cp modelo/index.html modelo/en.html modelo/artigo.pdf modelo/paper.pdf "$STAGE/m
 cp modelo/figs/*.svg "$STAGE/modelo/figs/"
 
 # SEO / LLM-crawler descriptors + the changelog (linked from llms.txt and
-# index.html's noscript). sitemap.xml now lives at the subdomain root
+# index.html's noscript, AND fetched by the help modal, which renders its
+# Changelog section from it — hence its place in sw.js's PRECACHE_URLS). sitemap.xml now lives at the subdomain root
 # (https://simujaules.pedalhidrografi.co/sitemap.xml); still worth submitting it
 # explicitly in Search Console.
 cp llms.txt sitemap.xml CHANGELOG.md "$STAGE/"
@@ -86,51 +122,144 @@ cp icons/icon-maskable-192-v2.png  "$STAGE/icons/"
 cp icons/icon-maskable-512-v2.png  "$STAGE/icons/"
 cp icons/apple-touch-icon-v2.png   "$STAGE/icons/"
 
+# 2. Cache-bust the JS asset URLs with the sw.js VERSION. Cloudflare fronts
+#    the site with tiered caching, and single-URL AND zone-wide purges were
+#    OBSERVED not reaching a stale upper-tier entry (2026-08-28: after a
+#    purge the edge MISSed and re-primed the OLD app.js from its cache
+#    parent, age 1336 s — the v77 deploy shipped invisibly). Versioned query
+#    strings give every release a fresh cache key, so no purge is ever
+#    load-bearing for the app shell: index.html (never edge-cached — .html
+#    isn't a Cloudflare default-cacheable extension, verified DYNAMIC) points
+#    at app.js?v=NN, app.js imports app/*.js?v=NN and those lib/*.js?v=NN,
+#    the app spawns energy-worker.js?v=NN, the worker imports
+#    graph-engine.js?v=NN (and wasm-worker.js?v=NN / engine32|64.wasm?v=NN,
+#    wasm-worker.js importing energy-worker.js?v=NN — v80), and sw.js's
+#    precache list is stamped identically
+#    so the SW caches exactly the URLs the pages request. sw.js itself stays
+#    unversioned on purpose (its URL must be stable for browser SW updates;
+#    it's already no-cache). Only the STAGED copies are rewritten — the repo
+#    keeps clean relative URLs for local dev. Guards fail the deploy loudly
+#    if a source pattern drifts.
+echo ">> Version-stamping asset URLs…"
+V="$(sed -n 's/^const VERSION *= *"\(v[0-9][0-9]*\)".*/\1/p' sw.js)"
+[[ -n "$V" ]] || { echo "could not read VERSION from sw.js" >&2; exit 1; }
+# `sed -i` não é portável: o BSD (macOS) exige `-i ''`, o GNU (Linux) lê esse
+# '' como o script e a expressão como nome de arquivo — o deploy abortava aqui
+# no Linux. Reescreve via arquivo temporário FORA do $STAGE (nada de .bak
+# sobrando pra subir no rsync).
+stamp() { # stamp <sed-script> <arquivo>
+  local tmp; tmp="$(mktemp)"
+  sed "$1" "$2" > "$tmp" && cat "$tmp" > "$2"
+  rm -f "$tmp"
+}
+stamp "s|src=\"./app.js\"|src=\"./app.js?v=${V}\"|" "$STAGE/index.html"
+# Every staged ES module (app.js, plus app/ and lib/ when present): each
+# relative static import gets the stamp — `from "./x.js"` and the bare
+# `import "./x.js"` form — and so do the worker / engine URL constants,
+# whichever module holds them. All importers of a module must end up with the
+# SAME specifier (two spellings = two module instances), which stamping every
+# file with the one version guarantees.
+shopt -s nullglob
+MODULES=("$STAGE"/app.js "$STAGE"/app/*.js "$STAGE"/lib/*.js)
+shopt -u nullglob
+for f in "${MODULES[@]}"; do
+  stamp "s|from \"\(\.\.*/[^\"]*\.js\)\"|from \"\1?v=${V}\"|g; s|^import \"\(\.\.*/[^\"]*\.js\)\"|import \"\1?v=${V}\"|" "$f"
+  stamp "s|const WORKER_URL = \"./energy-worker.js\"|const WORKER_URL = \"./energy-worker.js?v=${V}\"|; s|const WASM_WORKER_URL = \"./wasm-worker.js\"|const WASM_WORKER_URL = \"./wasm-worker.js?v=${V}\"|; s|wasm32: \"./engine32.wasm\", wasm64: \"./engine64.wasm\"|wasm32: \"./engine32.wasm?v=${V}\", wasm64: \"./engine64.wasm?v=${V}\"|" "$f"
+done
+stamp "s|importScripts(\"graph-engine.js\")|importScripts(\"graph-engine.js?v=${V}\")|" "$STAGE/energy-worker.js"
+stamp "s|importScripts(\"energy-worker.js\")|importScripts(\"energy-worker.js?v=${V}\")|" "$STAGE/wasm-worker.js"
+# sw.js: every .js / .wasm entry of PRECACHE_URLS (and only inside that
+# array), so the SW caches exactly the URLs the pages request.
+stamp "/^const PRECACHE_URLS = \[/,/^\];/ s|\"\(\./[^\"]*\.js\)\",|\"\1?v=${V}\",|" "$STAGE/sw.js"
+stamp "/^const PRECACHE_URLS = \[/,/^\];/ s|\"\(\./[^\"]*\.wasm\)\",|\"\1?v=${V}\",|" "$STAGE/sw.js"
+grep -q "app\.js?v=${V}" "$STAGE/index.html"        || { echo "stamp failed: index.html" >&2; exit 1; }
+grep -q "energy-worker\.js?v=${V}" "${MODULES[@]}"  || { echo "stamp failed: WORKER_URL" >&2; exit 1; }
+grep -q "wasm-worker\.js?v=${V}" "${MODULES[@]}"    || { echo "stamp failed: WASM_WORKER_URL" >&2; exit 1; }
+grep -q "engine64\.wasm?v=${V}" "${MODULES[@]}"     || { echo "stamp failed: WASM_ENGINE_URLS" >&2; exit 1; }
+grep -q "graph-engine\.js?v=${V}" "$STAGE/energy-worker.js" || { echo "stamp failed: energy-worker.js" >&2; exit 1; }
+grep -q "energy-worker\.js?v=${V}" "$STAGE/wasm-worker.js" || { echo "stamp failed: wasm-worker.js" >&2; exit 1; }
+grep -q "app\.js?v=${V}" "$STAGE/sw.js"             || { echo "stamp failed: sw.js" >&2; exit 1; }
+grep -q "engine32\.wasm?v=${V}" "$STAGE/sw.js"      || { echo "stamp failed: sw.js (wasm)" >&2; exit 1; }
+# Nothing left unstamped: a relative import in a module, or a .js/.wasm
+# precache entry, without the version would be a second cache key / a second
+# module instance.
+if grep -nE "(from|^import) \"\.\.?/[^\"]*\.js\"" "${MODULES[@]}"; then
+  echo "stamp failed: unstamped relative import(s) above" >&2; exit 1
+fi
+if sed -n '/^const PRECACHE_URLS = \[/,/^\];/p' "$STAGE/sw.js" | grep -nE "\.(js|wasm)\","; then
+  echo "stamp failed: unstamped precache entry above" >&2; exit 1
+fi
+
+if [[ -n "${DEPLOY_STAGE_ONLY:-}" ]]; then
+  echo ">> Stage-only: staged and stamped ${V} into $STAGE — nothing uploaded."
+  exit 0
+fi
+
 if ! command -v gcloud >/dev/null 2>&1; then
   echo "gcloud not on PATH. Install the Google Cloud SDK." >&2
   exit 1
 fi
 
-# 3. Upload with `gcloud storage rsync`:
-#    -r                                      recurse into dem/, icons/, vocab/.
-#    --delete-unmatched-destination-objects  delete bucket objects not in the
-#                                            staging dir (the whole dedicated
-#                                            simujaules bucket) so renames
-#                                            don't leave orphans.
-#    --exclude='^(census|vector|mask|vm)(/|$)'  ...EXCEPT these OUT-OF-BAND
-#                                            prefixes, uploaded by hand and read
-#                                            directly by the app/orchestrator —
-#                                            never staged here, so without the
-#                                            exclude --delete-unmatched would
-#                                            prune them on every deploy
-#                                            (they 404 afterwards):
-#                                              census/setores_br_pop.fgb (~454 MB,
-#                                                CENSUS_FGB_URL, built by build_fgb.py)
-#                                              vector/sampa-viario.gpkg (~145 MB,
-#                                                "Viário RMSampa" example network)
-#                                              mask/water_mask.tif (~2.4 MB,
-#                                                "Águas RMSampa" example barrier mask)
-#                                              vm/startup-script.sh (the cloud-compute
-#                                                VM startup script, read by
-#                                                orchestrator/main.py on VM create)
-#                                            gcloud's --exclude is a Python regex
-#                                            (re.match, start-anchored) on the
-#                                            RELATIVE object path and is applied
-#                                            to the DESTINATION listing too, so
-#                                            matching bucket objects are removed
-#                                            from the delete-candidate set — real
-#                                            protection, not just a source skip.
-#    --checksums-only                        compare by CRC32C, not mtime — the
-#                                            staging dir gets fresh mtimes every
-#                                            run, so without this every file
-#                                            looks changed and re-uploads.
+# 3. Upload with `gcloud storage rsync`, SCOPED so the delete pass can only
+#    ever see app-owned objects. The bucket also holds OUT-OF-BAND prefixes,
+#    uploaded by hand and read directly by the app/orchestrator — never staged
+#    here:
+#      census/setores_br_pop.fgb (~454 MB, CENSUS_FGB_URL, built by build_fgb.py)
+#      vector/sampa-viario.gpkg  (~145 MB, "Viário RMSampa" example network)
+#      mask/water_mask.tif       (~2.4 MB, "Águas RMSampa" example barrier mask)
+#      vm/startup-script.sh      (cloud-compute VM startup script, read by
+#                                 orchestrator/main.py on VM create)
+#
+#    ⚠️ Protection is by SCOPE, not by --exclude: gcloud's --exclude does NOT
+#    remove destination objects from --delete-unmatched-destination-objects'
+#    candidate set (VERIFIED empirically 2026-07-12 with --dry-run: a root
+#    recursive rsync with the old '^(census|vector|mask|vm)(/|$)' exclude
+#    still deleted all four objects — one deploy wiped them in production and
+#    every earlier deploy explains the "census .fgb 404" reports). So:
+#      - top-level files: a NON-recursive rsync of the stage root — its delete
+#        candidates are top-level objects only; prefixes are out of scope.
+#      - dem/ icons/ vocab/ app/ lib/: per-directory recursive rsyncs —
+#        deletes are scoped inside each directory.
+#      - modelo/: the "/modelo/" directory-index ALIAS OBJECT (an object
+#        literally named "modelo/", step 4b) makes "gs://…/modelo/" ambiguous
+#        for ANY rsync ("matched more than one URL") — delete it first via the
+#        JSON API (gcloud can't address trailing-slash names), rsync scoped
+#        with delete like the others, and step 4b recreates it right after.
+#        The window without the alias is seconds, and only affects the bare
+#        "/modelo/" URL (the real pages are their own objects).
+#    --checksums-only: compare by CRC32C, not mtime — the staging dir gets
+#    fresh mtimes every run, so without it every file re-uploads.
+#
+#    ORDER (since v82 app.js imports modules from app/ and lib/, so the entry
+#    and the directories are no longer independent):
+#      a. the directories, ADD/UPDATE only — new modules land while the old
+#         index.html/app.js are still live; nothing references them yet;
+#      b. the top-level files — index.html and app.js flip to the new version
+#         with everything they import already in the bucket;
+#      c. the directories again, now WITH delete — prune what the new version
+#         no longer uses (only after nothing live points at it).
+#    Uploading the entry first left a window, and on a failed directory rsync
+#    a standing outage, in which the live app.js imported modules that were
+#    not there. With this order an abort (set -e, pipefail) before (b) leaves
+#    the previous version fully in place.
 echo ">> Uploading to $BUCKET …"
-# NB: the extra '^modelo/$' alternative shields the "/modelo/" directory-index
-# ALIAS OBJECT (an object literally named "modelo/", created in step 4b below)
-# from the delete pass — it never exists in the staging dir.
+: > "$RSYNC_LOG"
+SYNC_DIRS="dem icons vocab app lib"
+sync_dir() { # sync_dir <dir> [extra rsync flags…]
+  local d="$1"; shift
+  gcloud storage rsync -r --checksums-only "$@" \
+    "$STAGE/$d" "$BUCKET/$d/" 2>&1 | tee -a "$RSYNC_LOG"
+}
+for d in $SYNC_DIRS; do sync_dir "$d"; done                      # a. add/update
+gcloud storage rsync --checksums-only --delete-unmatched-destination-objects \
+  "$STAGE" "$BUCKET/" 2>&1 | tee -a "$RSYNC_LOG"                 # b. the entry flips
+for d in $SYNC_DIRS; do sync_dir "$d" --delete-unmatched-destination-objects; done   # c. prune
+# Alias out of the way (404 = first deploy, fine), then the scoped rsync.
+curl -sS -o /dev/null -X DELETE \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  "https://storage.googleapis.com/storage/v1/b/${BUCKET#gs://}/o/modelo%2F" || true
 gcloud storage rsync -r --checksums-only --delete-unmatched-destination-objects \
-  --exclude='^(census|vector|mask|vm)(/|$)|^modelo/$' \
-  "$STAGE" "$BUCKET/" 2>&1 | tee "$RSYNC_LOG"
+  "$STAGE/modelo" "$BUCKET/modelo/" 2>&1 | tee -a "$RSYNC_LOG"
 
 # 4. Set headers (metadata-only — cheap, so run every deploy). HTML gets a short
 #    cache so deploys propagate quickly; JS an hour; the service worker no-cache
@@ -138,8 +267,20 @@ gcloud storage rsync -r --checksums-only --delete-unmatched-destination-objects 
 #    Cloudflare "Browser Cache TTL" can override these (see the header note).
 echo ">> Setting headers…"
 gcloud storage objects update \
-  "$BUCKET/app.js" "$BUCKET/energy-worker.js" "$BUCKET/graph-engine.js" \
+  "$BUCKET/app.js" "$BUCKET/energy-worker.js" "$BUCKET/graph-engine.js" "$BUCKET/wasm-worker.js" \
   --cache-control="public, max-age=3600"
+# The ES modules app.js imports (gcloud expands the wildcard itself). Not
+# allowed to abort the deploy: this only restates the bucket's default for
+# public objects (also max-age=3600), while the steps BELOW it — sw.js
+# no-cache, the /modelo/ alias, the Cloudflare purge — are load-bearing.
+gcloud storage objects update "$BUCKET/app/*.js" "$BUCKET/lib/*.js" \
+  --cache-control="public, max-age=3600" \
+  || echo "WARNING: could not set Cache-Control on app/*.js and lib/*.js (they keep the bucket default)." >&2
+# WebAssembly modules: application/wasm is what lets the page compile them
+# while they download (WebAssembly.compileStreaming); app.js falls back to
+# compiling the downloaded bytes if the type is ever wrong.
+gcloud storage objects update "$BUCKET/engine32.wasm" "$BUCKET/engine64.wasm" \
+  --content-type="application/wasm" --cache-control="public, max-age=3600"
 
 # The vocab is consumed by RDF tools that content-negotiate; tag it as
 # application/ld+json. Long-lived cache because the vocab churns rarely.
@@ -190,8 +331,9 @@ gcloud storage objects update "$BUCKET/modelo/artigo.pdf" "$BUCKET/modelo/paper.
 #     API, which has NO MainPageSuffix — the bare "/" works only via a
 #     Cloudflare rewrite, so "/modelo/" needs an object literally NAMED
 #     "modelo/" carrying a copy of modelo/index.html. gcloud can't create
-#     trailing-slash object names; the JSON API can. Idempotent overwrite; the
-#     rsync --exclude above shields it from the delete pass.
+#     trailing-slash object names; the JSON API can. Idempotent overwrite;
+#     step 3 DELETED the previous alias before the modelo/ rsync (it makes the
+#     scoped rsync URL ambiguous), so this recreation is load-bearing.
 echo ">> Creating the /modelo/ directory-index alias…"
 ALIAS_BODY="$STAGE/.modelo-alias-body"   # inside $STAGE so the EXIT trap cleans it
 {
@@ -218,21 +360,30 @@ gcloud storage objects update "$BUCKET/favicon.ico" \
 #    so this is a CF cache purge — there is no Google Cloud CDN url-map). Purges
 #    the EXACT URLs just staged (works on every CF plan; prefix purge is
 #    Enterprise-only). The list is derived from the staging dir, so it stays in
-#    sync automatically and never exceeds the 30-URL per-request limit here.
+#    sync automatically; it is sent in batches of 30, the per-request limit.
 #    Skipped — with a notice — when CF_API_TOKEN / CF_ZONE_ID aren't set.
 if [[ -n "${CF_API_TOKEN:-}" && -n "${CF_ZONE_ID:-}" ]]; then
   echo ">> Purging Cloudflare cache…"
   # "" → the bare directory URL (serves index.html); then every staged file.
-  PURGE_JSON=""
+  # Sent in batches: Cloudflare takes at most 30 URLs per purge request.
+  PURGE_URLS=()
   for rel in "" $(cd "$STAGE" && find . -type f | sed 's|^\./||'); do
-    PURGE_JSON+="\"${PUBLIC_URL}${rel}\","
+    PURGE_URLS+=("${PUBLIC_URL}${rel}")
   done
-  PURGE_JSON="[${PURGE_JSON%,}]"
-  if ! curl -fsS -X POST \
-        "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/purge_cache" \
-        -H "Authorization: Bearer ${CF_API_TOKEN}" \
-        -H "Content-Type: application/json" \
-        --data "{\"files\":${PURGE_JSON}}" >"$CDN_ERR" 2>&1; then
+  PURGE_OK=1
+  for ((i = 0; i < ${#PURGE_URLS[@]}; i += 30)); do
+    PURGE_JSON=""
+    for u in "${PURGE_URLS[@]:i:30}"; do PURGE_JSON+="\"${u}\","; done
+    if ! curl -fsS -X POST \
+          "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/purge_cache" \
+          -H "Authorization: Bearer ${CF_API_TOKEN}" \
+          -H "Content-Type: application/json" \
+          --data "{\"files\":[${PURGE_JSON%,}]}" >"$CDN_ERR" 2>&1; then
+      PURGE_OK=0
+      break
+    fi
+  done
+  if [[ "$PURGE_OK" != 1 ]]; then
     echo
     echo "WARNING: Cloudflare purge failed. Output:"
     cat "$CDN_ERR"

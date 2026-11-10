@@ -1468,6 +1468,492 @@ function maxCostPathOfLength(opts) {
   };
 }
 
+// ------- Max-density segment (multi-start self-avoiding greedy search) -------
+// Post-hoc analysis over a computed density/passes field: find a continuous
+// SIMPLE path (no cell revisited) of ~target metric length that maximises the
+// density line integral Σ d̄·len (d̄ = trapezoid mean of the two endpoint cells
+// per edge). Runs on a grid coarsened by app.js (block-mean density) —
+// display/analysis layer only, no energy semantics, no backend counterpart.
+//
+// Why not exact DP: this is the orienteering problem (NP-hard for simple
+// paths). A layered DP over WALKS is exact for the walk relaxation but
+// degenerates on real corridor fields — with only immediate backtracking
+// forbidden, the optimum is to turn around in a 3-cell loop and re-harvest
+// the single hottest stretch over and over (measured: a 20 km "segment"
+// collapsed onto 4 km of corridor traversed 5×). A warning can't fix that;
+// the deliverable has to be a simple path.
+//
+// Algorithm: from each of ≤ MAXSEG_STARTS well-separated high-density seed
+// cells, grow a self-avoiding path TWO-ENDED (either endpoint may extend, so
+// a seed in the middle of a corridor grows both ways); each candidate step is
+// scored by its own edge reward plus a short greedy self-avoiding ROLLOUT
+// (depth MAXSEG_ROLLOUT) past it, which carries the search across local dips
+// and junctions. Keep the best run — full-length runs by reward, else the
+// longest. Corridor fields are ridge-shaped, which is exactly where greedy
+// ridge-following is strong; test-maxseg.mjs pins quality against exact
+// self-avoiding enumeration on small grids and against analytic optima on
+// synthetic corridor fields.
+
+const MAXSEG_MAX_CELLS = 16 * 1024 * 1024; // app coarsens to ≤ ~4 M — hard stop here
+const MAXSEG_STARTS = 24;      // seed cells (spacing-filtered from the top pool)
+const MAXSEG_TOP_POOL = 4096;  // top-density pool the seeds are drawn from
+const MAXSEG_ROLLOUT = 12;      // lookahead depth per candidate step
+// Turn penalty exponent (DEFAULT — the app passes msg.turnExp from the 3C.c
+// knob): candidate steps are SCORED as reward × ((1 + cos Δθ)/2)^exp against
+// the leg's previous direction (1 = straight, →0 near a reversal). Without it
+// the raw objective rewards SNAKING: where the coarsened corridor is 2–3
+// cells wide, weaving across its width packs more Σ d̄·len into the hot band
+// than following its spine (measured: a straight 3-wide corridor came back
+// at sinuosity 1.41 with 100% ≥90° turns). 0 disables.
+const MAXSEG_TURN_EXP = 0.5;
+// Elongation (anti-round-trip) exponent DEFAULT (msg.elongExp from the same
+// panel): each step is additionally scored × ((1 + g)/2)^exp against TWO
+// reference points, where g is the step's change to the distance from that
+// reference per metre (+1 = straight away, −1 = straight back toward it):
+//   - GLOBAL: the other endpoint — penalises end-to-end round-trip shapes
+//     (a leg curling back toward the other end), prefers chord-like segments;
+//   - LOCAL: a trailing anchor msg.elongLookbackM metres back along the path
+//     — penalises the U-turn of a local out-and-back lobe, which the global
+//     reference misses when the lobe is perpendicular to the main chord.
+// The anchor alone can't stop the RETURN LANE of an out-and-back (past one
+// lookback beyond the U-turn, the return moves AWAY from its trailing
+// anchor), so a third term does: a proximity HALO — a step landing within
+// MAXSEG_HALO_CELLS of an already-visited path cell is scored × 0.02^exp
+// (soft widened self-avoidance: the segment shouldn't hug itself). Only the
+// path's own immediate tail is exempt — cells within ~4·radius of path
+// length behind, i.e. what a smooth path necessarily keeps inside its own
+// halo — NOT the whole lookback window (an early version exempted a full
+// lookback and the first lookback-worth of every return lane rode free).
+// 0 disables all three (pure density corridor). Every exponent steers the
+// SEARCH only — the reported sum stays the drawn polyline's own raw line
+// integral.
+const MAXSEG_ELONG_EXP = 0.5;
+const MAXSEG_HALO_CELLS = 2;   // Chebyshev radius of the self-proximity halo
+const MAXSEG_MAX_SEGMENTS = 100; // consecutive-segments cap (cost ~linear in n)
+
+function maxDensitySegment(opts) {
+  const {
+    density, allowed, H, W, dx, dy, targetLenM,
+    turnExp = MAXSEG_TURN_EXP,
+    elongExp = MAXSEG_ELONG_EXP,
+    elongLookbackM = 0,          // 0 = local anchor off; app sends auto = L/8
+    progressBase = 0, progressScale = 1,
+  } = opts;
+  const N = H * W;
+  // Sanitise the knob values (UI input / older cached app.js): finite, 0–4.
+  const tExp = Number.isFinite(turnExp) ? Math.min(4, Math.max(0, turnExp)) : MAXSEG_TURN_EXP;
+  const eExp = Number.isFinite(elongExp) ? Math.min(4, Math.max(0, elongExp)) : MAXSEG_ELONG_EXP;
+  const lookM = (Number.isFinite(elongLookbackM) && elongLookbackM > 0) ? elongLookbackM : 0;
+
+  const drs = [-1, -1, -1, 0, 0, 1, 1, 1];
+  const dcs = [-1, 0, 1, -1, 1, -1, 0, 1];
+  const diag = Math.hypot(dx, dy);
+  const lens = [diag, dy, diag, dx, dx, diag, dy, diag];
+  const minCell = Math.min(dx, dy);
+
+  if (targetLenM < 4 * minCell) return { error: "too_short" };
+  if (N > MAXSEG_MAX_CELLS) return { error: `grid_too_big (${N} cells)` };
+
+  // Multi-segment ("consecutive sum-maxing"): after each found segment its
+  // density is ZEROED in a MAXSEG_HALO_CELLS tube, and the search re-runs on
+  // what is left (seed pool included — it must be re-picked per segment).
+  // Cells stay PASSABLE, so a later segment may still CROSS an earlier one
+  // perpendicular (it just collects nothing there) — "non-overlapping" means
+  // no shared corridor stretches, and the tube stops segment k+1 from simply
+  // riding the adjacent lane of segment k.
+  const nSeg = Math.min(MAXSEG_MAX_SEGMENTS, Math.max(1, (opts.nSegments | 0) || 1));
+
+  // ---- Seed selection: top-density pool, then spacing filter ----
+  // Min-heap of the MAXSEG_TOP_POOL highest-density allowed cells (one pass),
+  // then greedily keep the densest seeds at least `sep` cells apart so the
+  // starts probe different corridors instead of one hot blob. Re-run per
+  // segment (the zeroed tube changes what "top density" means).
+  const heapIdx = new Int32Array(MAXSEG_TOP_POOL);
+  const heapVal = new Float64Array(MAXSEG_TOP_POOL);
+  let heapN = 0;
+  const heapUp = (i) => {
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (heapVal[p] <= heapVal[i]) break;
+      const tv = heapVal[p]; heapVal[p] = heapVal[i]; heapVal[i] = tv;
+      const ti = heapIdx[p]; heapIdx[p] = heapIdx[i]; heapIdx[i] = ti;
+      i = p;
+    }
+  };
+  const heapDown = () => {
+    let i = 0;
+    for (;;) {
+      const l = 2 * i + 1, r = l + 1;
+      let m = i;
+      if (l < heapN && heapVal[l] < heapVal[m]) m = l;
+      if (r < heapN && heapVal[r] < heapVal[m]) m = r;
+      if (m === i) break;
+      const tv = heapVal[m]; heapVal[m] = heapVal[i]; heapVal[i] = tv;
+      const ti = heapIdx[m]; heapIdx[m] = heapIdx[i]; heapIdx[i] = ti;
+      i = m;
+    }
+  };
+  const pickStarts = () => {
+    heapN = 0;
+    for (let i = 0; i < N; i++) {
+      if (!allowed[i]) continue;
+      const v = density[i];
+      if (heapN < MAXSEG_TOP_POOL) {
+        heapIdx[heapN] = i; heapVal[heapN] = v; heapUp(heapN++);
+      } else if (v > heapVal[0]) {
+        heapIdx[0] = i; heapVal[0] = v; heapDown();
+      }
+    }
+    const pool = [];
+    for (let i = 0; i < heapN; i++) pool.push([heapVal[i], heapIdx[i]]);
+    pool.sort((a, b) => b[0] - a[0]);
+    const sep = Math.max(2, Math.round(targetLenM / minCell / 12)); // Chebyshev cells
+    const starts = [];
+    for (const [, idx] of pool) {
+      const r = (idx / W) | 0, c = idx - r * W;
+      let far = true;
+      for (const s of starts) {
+        const sr = (s / W) | 0, sc = s - sr * W;
+        if (Math.max(Math.abs(sr - r), Math.abs(sc - c)) < sep) { far = false; break; }
+      }
+      if (far) starts.push(idx);
+      if (starts.length >= MAXSEG_STARTS) break;
+    }
+    return starts;
+  };
+
+  // ---- Two-ended self-avoiding greedy growth with rollout lookahead ----
+  // Turn-factor table over metric move directions (anisotropy-aware): row a =
+  // the leg's previous move, col k = the candidate move; row 8 = "no previous
+  // direction" (only the very first extension of a run). A leg's FIRST step is
+  // scored against the REVERSE of the other leg's first move when that exists
+  // — the bend at the seed is a bend of the traversed path like any other.
+  // Leaving it free let a strongly-straightened path fold into a hairpin "V"
+  // (two straight legs, endpoints adjacent — measured sinuosity 2.19). With
+  // the coupling, the accumulated penalized score equals the full traversal's
+  // pairwise turn objective exactly (turn factors are direction-symmetric),
+  // which is also what test-maxseg.mjs's exact reference enumerates.
+  const turnF = new Float64Array(9 * 8);
+  {
+    const ux = new Float64Array(8), uy = new Float64Array(8);
+    for (let k = 0; k < 8; k++) {
+      const vx = dcs[k] * dx, vy = drs[k] * dy;
+      const n = Math.hypot(vx, vy);
+      ux[k] = vx / n; uy[k] = vy / n;
+    }
+    for (let a = 0; a < 8; a++)
+      for (let k = 0; k < 8; k++)
+        turnF[a * 8 + k] = Math.pow(Math.max(0, (1 + ux[a] * ux[k] + uy[a] * uy[k]) / 2), tExp);
+    for (let k = 0; k < 8; k++) turnF[8 * 8 + k] = 1;
+  }
+
+  // Elongation (anti-round-trip) factor: g = Δ(head↔tail separation)/stepLen
+  // ∈ [−1, 1] by the triangle inequality — +1 straight away from the other
+  // endpoint (factor 1), −1 straight back toward it (factor →0). Metric,
+  // anisotropy-aware.
+  const distM = (r1, c1, r2, c2) => Math.hypot((r1 - r2) * dy, (c1 - c2) * dx);
+  const elongF = eExp > 0
+    ? (g) => Math.pow(Math.max(0, (1 + g) / 2), eExp)
+    : () => 1;
+
+  // Per-run scratch, GENERATION-STAMPED instead of refilled: a cell is
+  // visited (or its halo stamp valid) iff its gen equals the current run's
+  // `gen`, bumped once per start. With plain fills, every start paid two
+  // O(N) clears — at 100 segments × 24 starts on a 4 M-cell grid that's
+  // ~20 GB of memory writes doing nothing.
+  const visitGen = new Int32Array(N); // visited ⇔ visitGen[i] === gen
+  const rollMarks = new Int32Array(MAXSEG_ROLLOUT);
+  // stamp[cell] = SIGNED along-path coordinate at which the real path visited
+  // the cell (head leg +cum, tail leg −cum, seed 0); valid iff
+  // stampGen[cell] === gen. Rollout temp-cells never stamp — the halo is
+  // about the established path, and rollout cells are "recent" by definition.
+  // Signed coordinates make proximity age = |Δcoord| the true along-path
+  // separation — with plain run-length stamps, the two legs extending in
+  // alternation kept opposite-leg neighbours "recent" forever, and a
+  // lockstep twin-lane descent rode the tail exemption unpenalised.
+  const stamp = new Float32Array(N);
+  const stampGen = new Int32Array(N);
+  let gen = 0;
+  const haloF = (eExp > 0 && lookM > 0) ? Math.pow(0.02, eExp) : 1;
+  // Tail exemption: a turn-penalised smooth path keeps its radius-2
+  // neighbours ≤ ~2–3 cells behind, so anything ≥ 3 cells of along-path
+  // separation inside the halo is self-hugging. Deliberately cell-scale,
+  // NOT the lookback window (an early version exempted a full lookback and
+  // the first lookback-worth of every return lane rode free).
+  const haloAgeM = 3 * Math.max(dx, dy);
+  // Any path cell with along-path separation ≥ haloAgeM within the halo?
+  const haloHit = (n, coord) => {
+    const r = (n / W) | 0, c = n - r * W;
+    const r0 = Math.max(0, r - MAXSEG_HALO_CELLS), r1 = Math.min(H - 1, r + MAXSEG_HALO_CELLS);
+    const c0 = Math.max(0, c - MAXSEG_HALO_CELLS), c1 = Math.min(W - 1, c + MAXSEG_HALO_CELLS);
+    for (let rr = r0; rr <= r1; rr++) {
+      const rowBase = rr * W;
+      for (let cc = c0; cc <= c1; cc++) {
+        const i = rowBase + cc;
+        if (stampGen[i] === gen && Math.abs(coord - stamp[i]) >= haloAgeM) return true;
+      }
+    }
+    return false;
+  };
+
+  // Greedy self-avoiding continuation from `from` (arrived via `fromDir`),
+  // depth-limited; returns the summed PENALIZED reward (turn + elongation,
+  // the latter against the FIXED other endpoint `otherR/otherC`). Temp-marks
+  // visited cells and unmarks before returning.
+  // `remainM` caps the lookahead at the REMAINING length budget: without it,
+  // near the end of a path candidates are ranked by reward that will never
+  // be walked (measured on exhaustible fields: uncapped depth-12+ scored
+  // WORSE than depth-6 because of exactly this overshoot).
+  // Steps are CHOSEN by penalized reward PER METRE (rate), not per step —
+  // with per-step maximisation a diagonal collects 41% more d̄·len than an
+  // axis move and greedy slaloms across any corridor wider than one cell
+  // (the 45° turn factor 0.92 can't offset ×1.41). The accumulated reward
+  // stays the actual Σ per-step values.
+  // rolloutLenOut: metric length of the greedy continuation (module-scope
+  // out-param — this closure is called millions of times per run and a
+  // {sum, len} return would allocate on every call).
+  let rolloutLenOut = 0;
+  const rollout = (from, fromDir, otherR, otherC, anchR, anchC, coord0, sideSign, remainM) => {
+    let cur = from, dir = fromDir, sum = 0, nMarks = 0, coord = coord0;
+    let rolled = 0;
+    const fr = (from / W) | 0, fc = from - fr * W;
+    let dOther = distM(fr, fc, otherR, otherC);
+    let dAnch = anchR >= 0 ? distM(fr, fc, anchR, anchC) : 0;
+    for (let d = 0; d < MAXSEG_ROLLOUT && rolled < remainM; d++) {
+      const r = (cur / W) | 0, c = cur - r * W;
+      let bestRate = -Infinity, bestS = 0, bestN = -1, bestK = -1, bestD1 = 0, bestD2 = 0;
+      for (let k = 0; k < 8; k++) {
+        const nr = r + drs[k], nc = c + dcs[k];
+        if (nr < 0 || nr >= H || nc < 0 || nc >= W) continue;
+        const n = nr * W + nc;
+        if (!allowed[n] || visitGen[n] === gen) continue;
+        let s = 0.5 * (density[cur] + density[n]) * lens[k] * turnF[dir * 8 + k];
+        let d1 = 0, d2 = 0;
+        if (eExp > 0) {
+          d1 = distM(nr, nc, otherR, otherC);
+          s *= elongF((d1 - dOther) / lens[k]);
+          if (anchR >= 0) {
+            d2 = distM(nr, nc, anchR, anchC);
+            s *= elongF((d2 - dAnch) / lens[k]);
+          }
+          if (haloF < 1 && haloHit(n, coord + sideSign * lens[k])) s *= haloF;
+        }
+        const rate = s / lens[k];
+        if (rate > bestRate) { bestRate = rate; bestS = s; bestN = n; bestK = k; bestD1 = d1; bestD2 = d2; }
+      }
+      if (bestN < 0) break;
+      sum += bestS;
+      visitGen[bestN] = gen;
+      rollMarks[nMarks++] = bestN;
+      cur = bestN;
+      dir = bestK;
+      dOther = bestD1;
+      dAnch = bestD2;
+      coord += sideSign * lens[bestK];
+      rolled += lens[bestK];
+    }
+    for (let i = 0; i < nMarks; i++) visitGen[rollMarks[i]] = 0; // 0 ≠ any gen ≥ 1
+    rolloutLenOut = rolled;
+    return sum;
+  };
+
+  // Binary searches over a leg's cumulative-length array (monotonic).
+  const bsearchLE = (cum, x) => {
+    let lo = 0, hi = cum.length - 1, res = -1;
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (cum[m] <= x) { res = m; lo = m + 1; } else hi = m - 1; }
+    return res;
+  };
+  const bsearchGE = (cum, x) => {
+    let lo = 0, hi = cum.length - 1, res = -1;
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (cum[m] >= x) { res = m; hi = m - 1; } else lo = m + 1; }
+    return res;
+  };
+
+  // One full search over the CURRENT density field. Returns the best run or
+  // null; [pBase, pBase+pScale] is this call's slice of the progress bar.
+  const findOne = (starts, pBase, pScale) => {
+  const best = { Rsel: -Infinity, Rraw: 0, len: 0, rho: 0, path: null };
+  for (let si = 0; si < starts.length; si++) {
+    const s = starts[si];
+    gen++; // one generation per start — invalidates all prior marks at O(1)
+    visitGen[s] = gen;
+    stamp[s] = 0;
+    stampGen[s] = gen;
+    const headArr = [], tailArr = []; // cells beyond s on each side, in growth order
+    const headCum = [], tailCum = []; // cumulative metric length seed → cell
+    let headEnd = s, tailEnd = s;
+    let headLen = 0, tailLen = 0;    // each leg's metric length
+    let headDir = 8, tailDir = 8;    // 8 = no previous direction yet
+    let headDir0 = 8, tailDir0 = 8;  // each leg's FIRST outward move (kink coupling)
+    let len = 0, Rraw = 0, Rpen = 0;
+    let lastPen = 0, lastLen = 0; // final accepted step, for selection proration
+
+    // Local anti-round-trip anchor for one side: the path cell ~lookM metres
+    // BEHIND that end along the path (through the seed into the other leg if
+    // this leg is shorter). Returns −1 when the whole path is shorter than
+    // lookM — the anchor would coincide with the other end, which the global
+    // reference already covers.
+    const anchorCell = (side) => {
+      if (!(eExp > 0) || !(lookM > 0)) return -1;
+      const lenA = side === 0 ? headLen : tailLen;
+      if (lenA >= lookM) {
+        const arrA = side === 0 ? headArr : tailArr;
+        const cumA = side === 0 ? headCum : tailCum;
+        const i = bsearchLE(cumA, lenA - lookM);
+        return i >= 0 ? arrA[i] : s; // nothing that far back on the leg → the seed
+      }
+      const arrB = side === 0 ? tailArr : headArr;
+      const cumB = side === 0 ? tailCum : headCum;
+      const i = bsearchGE(cumB, lookM - lenA);
+      return i >= 0 ? arrB[i] : -1;
+    };
+
+    while (len < targetLenM) {
+      let bestScore = -Infinity, bestN = -1, bestK = -1, bestBase = 0, bestPen = 0, bestSide = 0;
+      for (let side = 0; side < 2; side++) {
+        const end = side === 0 ? headEnd : tailEnd;
+        let endDir = side === 0 ? headDir : tailDir;
+        // Seed-kink coupling: this leg's first step bends the path at the
+        // seed relative to the other leg's first (outward) move — score it
+        // against that move's reverse (7 − k mirrors the classic tables).
+        if (endDir === 8) {
+          const otherFirst = side === 0
+            ? (tailArr.length ? tailDir0 : 8)
+            : (headArr.length ? headDir0 : 8);
+          if (otherFirst !== 8) endDir = 7 - otherFirst;
+        }
+        const r = (end / W) | 0, c = end - r * W;
+        // GLOBAL elongation reference: the OTHER end — extending this leg
+        // toward it is round-trip-shaped, away from it is chord-shaped.
+        const other = side === 0 ? tailEnd : headEnd;
+        const otherR = (other / W) | 0, otherC = other - otherR * W;
+        const d0 = distM(r, c, otherR, otherC);
+        // LOCAL reference: the trailing anchor lookM metres behind this end —
+        // catches out-and-back lobes the chord reference can't see.
+        const anch = anchorCell(side);
+        const anchR = anch >= 0 ? (anch / W) | 0 : -1;
+        const anchC = anch >= 0 ? anch - anchR * W : -1;
+        const dA0 = anch >= 0 ? distM(r, c, anchR, anchC) : 0;
+        // Signed along-path coordinate this side extends toward (head +, tail −).
+        const sideSign = side === 0 ? 1 : -1;
+        const legLen = side === 0 ? headLen : tailLen;
+        for (let k = 0; k < 8; k++) {
+          const nr = r + drs[k], nc = c + dcs[k];
+          if (nr < 0 || nr >= H || nc < 0 || nc >= W) continue;
+          const n = nr * W + nc;
+          if (!allowed[n] || visitGen[n] === gen) continue;
+          const coordN = sideSign * (legLen + lens[k]);
+          const base = 0.5 * (density[end] + density[n]) * lens[k];
+          let pen = base * turnF[endDir * 8 + k];
+          if (eExp > 0) {
+            pen *= elongF((distM(nr, nc, otherR, otherC) - d0) / lens[k]);
+            if (anch >= 0) pen *= elongF((distM(nr, nc, anchR, anchC) - dA0) / lens[k]);
+            if (haloF < 1 && haloHit(n, coordN)) pen *= haloF;
+          }
+          visitGen[n] = gen;
+          const rollSum = rollout(n, k, otherR, otherC, anchR, anchC, coordN, sideSign, targetLenM - len - lens[k]);
+          visitGen[n] = 0;
+          // Rate, not total: penalized reward per metre of (step + lookahead).
+          const score = (pen + rollSum) / (lens[k] + rolloutLenOut);
+          if (score > bestScore) {
+            bestScore = score; bestN = n; bestK = k; bestBase = base; bestPen = pen; bestSide = side;
+          }
+        }
+      }
+      if (bestN < 0) break; // both ends stuck (mask pocket / grid corner)
+      visitGen[bestN] = gen;
+      if (bestSide === 0) {
+        if (!headArr.length) headDir0 = bestK;
+        headArr.push(bestN); headEnd = bestN; headDir = bestK;
+        headLen += lens[bestK]; headCum.push(headLen);
+      } else {
+        if (!tailArr.length) tailDir0 = bestK;
+        tailArr.push(bestN); tailEnd = bestN; tailDir = bestK;
+        tailLen += lens[bestK]; tailCum.push(tailLen);
+      }
+      len += lens[bestK];
+      stamp[bestN] = bestSide === 0 ? headLen : -tailLen; // signed along-path coord
+      stampGen[bestN] = gen;
+      Rraw += bestBase;
+      Rpen += bestPen;
+      lastPen = bestPen; lastLen = lens[bestK];
+    }
+
+    // Length-fair selection: every run stops at its FIRST step crossing the
+    // target, so a diagonal-rich path overshoots by up to one edge and banks
+    // extra reward (measured: a 45° slalom beat the straight spine purely on
+    // its +4.6% overshoot). Prorate the final step to exactly targetLenM for
+    // the selection score — the reported sums stay the full drawn line's.
+    let RpenSel = Rpen;
+    if (len > targetLenM && lastLen > 0) {
+      RpenSel = Rpen - lastPen * ((len - targetLenM) / lastLen);
+    }
+
+    // Straightness ρ = chord / length — the length-weighted circular mean
+    // resultant of the step headings (the traversal-oriented step vectors sum
+    // to exactly the tail→head chord), i.e. 1 − circular variance. With the
+    // elongation knob on, run selection weights the penalized reward by ρ^exp
+    // so among the seeds a low-circular-spread (straighter) run wins ties.
+    const chord = distM((headEnd / W) | 0, headEnd % W, (tailEnd / W) | 0, tailEnd % W);
+    const rho = len > 0 ? chord / len : 0;
+    const Rsel = eExp > 0 ? RpenSel * Math.pow(Math.max(rho, 1e-6), eExp) : RpenSel;
+
+    // Prefer runs that reached (≈) the target; among those, max SELECTION
+    // score (penalized reward × straightness weight) — the raw integral is
+    // what gets reported.
+    const full = len >= 0.95 * targetLenM;
+    const bFull = best.len >= 0.95 * targetLenM;
+    if ((full && !bFull) || (full === bFull && (full ? Rsel > best.Rsel : len > best.len))) {
+      const path = new Int32Array(headArr.length + 1 + tailArr.length);
+      let p = 0;
+      for (let i = headArr.length - 1; i >= 0; i--) path[p++] = headArr[i];
+      path[p++] = s;
+      for (let i = 0; i < tailArr.length; i++) path[p++] = tailArr[i];
+      best.Rsel = Rsel; best.Rraw = Rraw; best.len = len; best.rho = rho; best.path = path;
+    }
+    postMessage({ kind: "progress", progress: pBase + pScale * ((si + 1) / starts.length) });
+  }
+
+  if (!best.path || best.path.length < 2) return null;
+  return {
+    path: best.path,
+    sum: best.Rraw,          // Σ d̄·len over the path (density · metres) — RAW,
+                             // the drawn line's own integral (the shape
+                             // penalties steer the search, never the readout)
+    lengthM: best.len,       // true metric length (exact edge sum)
+    straightness: best.rho,  // chord/length ∈ (0,1] — 1 − circular variance
+                             // of the step headings (1 = perfectly straight)
+  };
+  };
+
+  // ---- Segment loop: find, peel (zero the tube), repeat ----
+  const segments = [];
+  for (let g = 0; g < nSeg; g++) {
+    const starts = pickStarts();
+    if (!starts.length) break;
+    const res = findOne(starts, progressBase + progressScale * (g / nSeg), progressScale / nSeg);
+    if (!res) break;
+    // A later segment over a fully-peeled field collects nothing — stop
+    // rather than return arbitrary zero-sum lines (segment 1 keeps the old
+    // behaviour: even a zero field returns its best-effort path).
+    if (g > 0 && !(res.sum > 0)) break;
+    segments.push(res);
+    if (g < nSeg - 1) {
+      for (let i = 0; i < res.path.length; i++) {
+        const cell = res.path[i];
+        const r = (cell / W) | 0, c = cell - r * W;
+        const r0 = Math.max(0, r - MAXSEG_HALO_CELLS), r1 = Math.min(H - 1, r + MAXSEG_HALO_CELLS);
+        const c0 = Math.max(0, c - MAXSEG_HALO_CELLS), c1 = Math.min(W - 1, c + MAXSEG_HALO_CELLS);
+        for (let rr = r0; rr <= r1; rr++)
+          for (let cc = c0; cc <= c1; cc++)
+            density[rr * W + cc] = 0;
+      }
+    }
+  }
+  if (!segments.length) return { error: "unreachable" };
+  return { segments };
+}
+
 // ------- Worker message handler -------
 // Vector-network graph routing lives in a sibling module (shared with the node
 // test). importScripts only exists in a real Worker; in the node test harness
@@ -1522,6 +2008,32 @@ self.onmessage = (ev) => {
         buf = boxSmoothPreserveNetwork(buf, msg.networkMask, msg.mask, msg.H, msg.W);
       }
       postMessage({ kind: "smooth-done", energy: buf }, [buf.buffer]);
+    } catch (err) {
+      postMessage({ kind: "error", message: err.message });
+    }
+    return;
+  }
+
+  // Max-density segment: post-hoc layered DP over a coarsened density field
+  // (see maxDensitySegment). Standalone job like "interp" — no grid/energy
+  // state involved, so it never touches the run paths or backend parity.
+  if (msg.kind === "maxseg") {
+    try {
+      const res = maxDensitySegment(msg);
+      if (res.error) postMessage({ kind: "error", message: res.error });
+      else {
+        // Top-level fields mirror segments[0] (legacy single-segment shape).
+        const first = res.segments[0];
+        postMessage(
+          {
+            kind: "maxseg-done",
+            path: first.path, sum: first.sum, lengthM: first.lengthM,
+            straightness: first.straightness, revisitFrac: 0,
+            segments: res.segments,
+          },
+          res.segments.map((s) => s.path.buffer),
+        );
+      }
     } catch (err) {
       postMessage({ kind: "error", message: err.message });
     }

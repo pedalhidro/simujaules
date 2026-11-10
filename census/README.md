@@ -58,7 +58,7 @@ FlatGeobuf carries a packed Hilbert R-tree, so the browser fetches only the
 bbox slice (a few hundred KB for a city), never the whole file — a raw `.gpkg`
 **cannot** be range-queried over HTTP, which is why we convert. The app reads
 the **direct GCS URL** (`storage.googleapis.com/simujaules/…`, native Range +
-bucket CORS), set as `CENSUS_FGB_URL` in `app.js`. To repoint, change that
+bucket CORS), set as `CENSUS_FGB_URL` in `app/points.js`. To repoint, change that
 constant.
 
 **CORS (one-time, bucket-level).** Cross-origin Range reads from the app origin
@@ -78,7 +78,7 @@ Verify end-to-end before relying on it in the app (queries the SP city bbox):
 curl -s -o /dev/null -D - -H "Range: bytes=0-7" \
   https://storage.googleapis.com/simujaules/census/setores_br_pop.fgb | grep -i 206   # 206 Partial Content
 ogrinfo -spat -46.77 -23.60 -46.59 -23.48 setores_br_pop.fgb setores | head   # local sanity
-node test-census-sampler.mjs                                                   # sampler math (mirrors app.js)
+node test-census-sampler.mjs                                                   # sampler math (lib/census-sampler.js)
 ```
 
 > `build_fgb.py` works on a (reflink) copy of the malha — the source download
@@ -156,19 +156,24 @@ node census-density.mjs \
 ```
 
 Cost knobs are the app's **v2 physics inputs** — `--mass 75 --crr 0.008
---cda 0.45 --rho 1.1 --keff 0.97 --pflat 80 --climb-thr 2 --ksmooth 1`
+--cda 0.45 --rho 1.1 --keff 0.97 --pflat 80 --climb-thr 2 --ksmooth 1 --ndirs 8`
 (defaults shown = the app's UI defaults; `--climb-thr` is in %). The harness
 folds them into the `{aRoll, aAero, beta, …}` cost bundle exactly like the
-app's `readCost()` (hand-kept mirror). The v1 `--alpha/--beta/--eta` flags
+app's `readCost()` (both call `deriveCost` in `lib/cost.js`). The v1 `--alpha/--beta/--eta` flags
 were removed with the v2 cost model.
 
 It loads the DEM, converts each point to a DEM pixel (dropping out-of-extent /
 nodata points, logged), then runs the **same** `densityField` engine the PWA
 uses — `../energy-worker.js`, driven through its real `onmessage` handler (the
-shim from `test-worker-pool.mjs`). A single non-partial density message returns
-the fully-normalised `energy` + `passes`, so there is no re-implemented math:
-the engine owns it. The output is an app-importable **v3 bundle** (zip with
-`metadata.jsonld` + `energy.tif` + `passes.tif`, georeferenced to the DEM).
+shim from `test-worker-pool.mjs`). It sends ONE `densityPartial: true` message
+and does what the app's worker pool does with a single slice: merge into Float64
+accumulators, apply the second /N and the energySum/energyCount mean (the
+engine applies only the first /N) — `test-census-density.mjs` asserts this
+equals the engine's own non-partial normalisation. `--ndirs` picks the move
+set (default 8, the classic neighbourhood; the app's UI default is 16) and is
+recorded in the bundle so an import restores the same knob. The output is an
+app-importable **v3 bundle** (zip with `metadata.jsonld` + `energy.tif` +
+`passes.tif`, georeferenced to the DEM).
 
 Parity details worth knowing if you edit this:
 

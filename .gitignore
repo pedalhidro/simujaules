@@ -243,6 +243,10 @@ docs/articles/*
 *.fit
 *.gpx
 
+# lib/ holds the app's shared ES modules (source, shipped by deploy.sh) — the
+# Python template above ignores every `lib/` directory; re-include ours.
+!/lib/
+
 # Credentials — GCP service-account keys (the live one lives under fabdem/,
 # already covered by fabdem/* above, but keep a copy anywhere in the tree out).
 pedal-hidrografico-*.json

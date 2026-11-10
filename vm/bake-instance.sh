@@ -47,7 +47,7 @@ set -euo pipefail
 GCP_PROJECT="${GCP_PROJECT:-pedal-hidrografico}"
 GCP_ZONE="${GCP_ZONE:-southamerica-east1-a}"
 INSTANCE_NAME="${INSTANCE_NAME:-simu-compute}"
-MACHINE_TYPE="${MACHINE_TYPE:-c4-standard-96}"
+MACHINE_TYPE="${MACHINE_TYPE:-n2-standard-128}"  # C4 tem quota 0 na região (ver orchestrator/main.py)
 VM_PORT="${VM_PORT:-8077}"          # backend Rust, agora SÓ em 127.0.0.1
 DATA_PORT="${DATA_PORT:-443}"       # porta pública (Caddy/TLS), liberada no firewall
 FIREWALL_RULE="${FIREWALL_RULE:-simu-compute-allow-443}"
@@ -71,9 +71,9 @@ MAX_RUN_DURATION="${MAX_RUN_DURATION:-4h}" # teto ENFORÇADO PELO GCP (Schedulin
 PROVISIONING_MODEL="${PROVISIONING_MODEL:-SPOT}"
 
 # Teto de memória do backend (--max-mem-gb), repassado à VM via metadata. Vazio
-# = usa o default da startup-script (320). Dimensione p/ ~0,8× a RAM caber em
-# slices sem OOM (n2-standard-128 = 512 GB → 320 é seguro/conservador, ~34
-# slices; ~480 usa mais núcleos). Cada slice round = 55·N bytes.
+# = usa o default da startup-script (460). Dimensione p/ ~0,8× a RAM caber em
+# slices sem OOM (n2-standard-128 = 512 GB → 460 reserva ~50 GB pro corpo da
+# requisição + cópias do DEM + buffers). Cada slice round = 55·N bytes.
 MAX_MEM_GB="${MAX_MEM_GB:-}"
 
 # Imagem base e disco. Debian 12 traz ferramentas recentes; o disco precisa de

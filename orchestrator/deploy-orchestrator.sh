@@ -14,9 +14,13 @@
 #        simu-cf-dns-token  (token Cloudflare DNS:Edit na zona pedalhidrografi.co)
 #        simu-reap-token    (token de admin só pro Cloud Scheduler chamar /reap)
 #   2. Service account `simu-orchestrator@PROJECT.iam.gserviceaccount.com` com um
-#      papel custom mínimo: compute.instances.{get,start,stop,create,delete},
-#      compute.disks.create, compute.firewalls.{get,update},
+#      papel custom mínimo: compute.instances.{get,start,stop,create,delete,
+#      setMetadata,setTags,setMachineType}, compute.disks.create,
+#      compute.firewalls.{get,update}, compute.networks.updatePolicy,
+#      compute.subnetworks.{use,useExternalIp}, compute.{zone,global}Operations.get,
 #      iam.serviceAccounts.actAs na SA da VM, e secretAccessor nos 3 secrets.
+#      (setMetadata/setTags: o GCP os exige já no INSERT com metadata/tags;
+#      setMachineType: o resize do seletor "Máquina da nuvem" do app.)
 #   3. O startup-script da VM publicado em gs://simujaules/vm/startup-script.sh
 #      (a SA da VM precisa de storage.objectViewer nesse bucket).
 #
@@ -49,6 +53,12 @@ ENV_VARS="${ENV_VARS},REAP_IDLE_DAYS=${REAP_IDLE_DAYS:-30}"
 # ver vm/startup-script.sh), mas é melhor o operador saber que precisa publicar
 # o binário pra evitar o build de ~10 min em toda VM recriada do zero.
 ENV_VARS="${ENV_VARS},BACKEND_BINARY_URL=${BACKEND_BINARY_URL:-}"
+# IP reservado da VM (endereço regional simu-compute-ip). Com ele, VMs
+# recriadas reclamam o mesmo endereço e o registro A nunca muda — configure
+# DNS_PLACEHOLDER_IP com o MESMO valor pra parar a dança de DNS por completo
+# (ver main.py). Vazio = modo efêmero antigo.
+ENV_VARS="${ENV_VARS},STATIC_IP=${STATIC_IP:-}"
+ENV_VARS="${ENV_VARS},DNS_PLACEHOLDER_IP=${DNS_PLACEHOLDER_IP:-127.0.0.1}"
 
 if [[ -z "${BACKEND_BINARY_URL:-}" ]]; then
   echo ">> AVISO: BACKEND_BINARY_URL não definido." >&2

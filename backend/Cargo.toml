@@ -1,6 +1,10 @@
 [package]
 name = "simujoules-backend"
-version = "0.1.0"
+# 0.2.0: v57 movement directions (nDirs 4–128, profile-integrated long moves).
+# The app gates nDirs≠8 backend dispatch on /health version >= 0.2.0 — a
+# pre-0.2.0 binary silently ignores the nDirs param (serde skips unknown
+# fields) and would compute an 8-dir field.
+version = "0.2.0"
 edition = "2021"
 description = "Optional native compute backend for the Simujoules density mode (off by default in the app)"
 

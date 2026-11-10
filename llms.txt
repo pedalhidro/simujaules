@@ -31,8 +31,6 @@
   native Rust backend exists for large runs (off by default).
 - **Energy budgets**: prune the search at a maximum energy; in round-trip
   mode the budget can cap each leg or the out-plus-back total.
-- **Maximize mode**: invert the optimisation to find the most expensive
-  routes, optionally length-constrained (layered dynamic programming).
 
 ## Inputs and outputs
 
@@ -61,8 +59,9 @@
 
 ## Notes for automated agents
 
-- The app is a static PWA: `index.html` + `app.js` + `energy-worker.js`,
-  no build step, no server-side compute. Parameters and results round-trip
+- The app is a static PWA: `index.html` + `app.js` (the entry of the native
+  ES modules under `app/` and `lib/`) + `energy-worker.js`, no build step,
+  no server-side compute. Parameters and results round-trip
   through the bundle format, so runs are fully reproducible from the
   metadata.jsonld alone (plus the same DEM).
 - Coordinates in bundles are DEM pixel (row, col); the GeoTIFFs carry the

@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 // Regression test for the in-browser census sampler (app.js placeCensusRefPoints
-// and its helpers). app.js is a browser module and can't be imported in node, so
-// the helpers below are HAND-KEPT MIRRORS of app.js — keep them in lockstep with
-// it (same convention as test-water-raster.mjs mirroring app.js's water helpers,
-// and backend/main.rs mirroring energy-worker.js).
+// and its helpers). The helpers are imported from lib/census-sampler.js — the
+// same module app.js uses, so these tests exercise the real implementation.
 //
 // Run: node test-census-sampler.mjs
 //
@@ -13,85 +11,9 @@
 // pop weight for an edge-straddling setor uses the correct clipped/full fraction.
 
 import assert from "node:assert";
-
-// ---- MIRRORS OF app.js (keep in sync) ------------------------------------
-function bitReverse32(x) {
-  x = ((x & 0x55555555) << 1) | ((x >>> 1) & 0x55555555);
-  x = ((x & 0x33333333) << 2) | ((x >>> 2) & 0x33333333);
-  x = ((x & 0x0f0f0f0f) << 4) | ((x >>> 4) & 0x0f0f0f0f);
-  x = ((x & 0x00ff00ff) << 8) | ((x >>> 8) & 0x00ff00ff);
-  return ((x << 16) | (x >>> 16)) >>> 0;
-}
-const SOBOL_DIM2_V = (() => {
-  const v = new Uint32Array(32);
-  v[0] = 0x80000000;
-  for (let j = 1; j < 32; j++) v[j] = (v[j - 1] ^ (v[j - 1] >>> 1)) >>> 0;
-  return v;
-})();
-function sobolPoint2D(i) {
-  const u = bitReverse32(i >>> 0) / 2 ** 32;
-  let x = 0;
-  for (let j = 0; j < 32; j++) if ((i >>> j) & 1) x = (x ^ SOBOL_DIM2_V[j]) >>> 0;
-  return [u, x / 2 ** 32];
-}
-function sobolScalar1D(i) { return bitReverse32(i >>> 0) / 2 ** 32; }
-
-function pointInRing(x, y, ring) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
-    if (((yi > y) !== (yj > y)) &&
-        (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi)) inside = !inside;
-  }
-  return inside;
-}
-function pointInPolygon(x, y, rings) {
-  if (!rings.length || !pointInRing(x, y, rings[0])) return false;
-  for (let h = 1; h < rings.length; h++) if (pointInRing(x, y, rings[h])) return false;
-  return true;
-}
-function ringArea(ring) {
-  let a = 0;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++)
-    a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
-  return Math.abs(a) / 2;
-}
-function polyArea(rings) {
-  let a = rings.length ? ringArea(rings[0]) : 0;
-  for (let h = 1; h < rings.length; h++) a -= ringArea(rings[h]);
-  return Math.max(0, a);
-}
-function clipRingToBbox(ring, bb) {
-  let poly = ring;
-  if (poly.length > 1) {
-    const a = poly[0], b = poly[poly.length - 1];
-    if (a[0] === b[0] && a[1] === b[1]) poly = poly.slice(0, -1);
-  }
-  const ix = (p, q, x) => { const t = (x - p[0]) / (q[0] - p[0]); return [x, p[1] + t * (q[1] - p[1])]; };
-  const iy = (p, q, y) => { const t = (y - p[1]) / (q[1] - p[1]); return [p[0] + t * (q[0] - p[0]), y]; };
-  const clip = (pts, inside, cut) => {
-    const out = [];
-    for (let i = 0; i < pts.length; i++) {
-      const cur = pts[i], prev = pts[(i + pts.length - 1) % pts.length];
-      const ci = inside(cur), pi = inside(prev);
-      if (ci) { if (!pi) out.push(cut(prev, cur)); out.push(cur); }
-      else if (pi) out.push(cut(prev, cur));
-    }
-    return out;
-  };
-  poly = clip(poly, (p) => p[0] >= bb.xmin, (p, q) => ix(p, q, bb.xmin)); if (!poly.length) return poly;
-  poly = clip(poly, (p) => p[0] <= bb.xmax, (p, q) => ix(p, q, bb.xmax)); if (!poly.length) return poly;
-  poly = clip(poly, (p) => p[1] >= bb.ymin, (p, q) => iy(p, q, bb.ymin)); if (!poly.length) return poly;
-  poly = clip(poly, (p) => p[1] <= bb.ymax, (p, q) => iy(p, q, bb.ymax));
-  return poly;
-}
-function clippedPolyArea(rings, bb) {
-  if (!rings.length) return 0;
-  let a = ringArea(clipRingToBbox(rings[0], bb));
-  for (let h = 1; h < rings.length; h++) a -= ringArea(clipRingToBbox(rings[h], bb));
-  return Math.max(0, a);
-}
-// ---- end mirrors ---------------------------------------------------------
+import {
+  sobolPoint2D, sobolScalar1D, pointInPolygon, polyArea, clippedPolyArea,
+} from "../lib/census-sampler.js";
 
 // A closed square ring [x0,y0]-[x1,y1].
 const sq = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
@@ -102,7 +24,7 @@ const check = (name, fn) => {
   catch (e) { failures++; console.error(`  FAIL ${name}\n       ${e.message}`); }
 };
 
-console.log("census sampler (mirror) tests");
+console.log("census sampler (lib/census-sampler.js) tests");
 
 // --- 1. population-weighted setor selection -------------------------------
 check("weighting: ~90% of draws land in the pop-90 setor", () => {
