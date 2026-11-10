@@ -2,8 +2,10 @@
 
 Static, build-step-free PWA that computes asymmetric-cost cycling energy
 fields over DEMs (Dijkstra variants on an 8-connected grid), plus an
-optional native Rust backend. No package.json, no bundler — `index.html`
-loads `app.js` directly and libraries come from CDNs with SRI hashes.
+optional native Rust backend. No root package.json, no bundler —
+`index.html` loads `app.js` directly as an ES module (which imports `app/`
+and `lib/`, native browser imports) and libraries come from CDNs with SRI
+hashes.
 
 > **Name:** the app is **Simujaules** — a deliberate, affective typo of
 > *joules* ("simu" + "jaules"), NOT a misspelling of "simujoules". Do not
@@ -14,8 +16,22 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 
 ## Layout
 
-- `app.js` — all UI: DEM/GeoPackage loading, Leaflet map, compute dispatch,
-  rendering, i18n (PT/EN `STRINGS` table + `t()`), bundle export/import.
+- `app.js` + `app/` — all UI. Until v82 `app.js` was ONE 13,000-line module;
+  it is now only the entry (a module map + imports) and the code lives in
+  27 modules under `app/`, one per concern, in the original order: `i18n`
+  (PT/EN `STRINGS` table + `t()`), `panel` (parameter persistence,
+  `readCost`, config I/O), `boot` (worker URLs + the DOMContentLoaded
+  wiring), `map`, `state`, `compute-source`, `dom` (shared DOM handles),
+  `dem` (DEM/FABDEM loading), `network` (GeoPackage, Overpass/FGB street
+  pulls), `bridges`, `draw`, `water`, `network-view`, `graph-mode`, `points`
+  (source/destination/reference points, census sampling), `run` (the Run
+  handler: message build, worker/wasm/backend dispatch, pool merge),
+  `kpi`, `maxseg`, `render`, `refgeom`, `engines` (`densityPoolSize`, wasm
+  engine choice), `cloud`, `estimate`, `colormaps`, `geotiff`, `grid`
+  (`buildComputeGrid`, `buildPortals`), `bundle`. `app.js`'s header lists
+  them with one line each. Older comments, the changelog and many rules
+  below still say "`app.js`" for code that now sits in one of these files
+  — read it as "the app's UI code" and grep `app/` for the function.
   Street-network pulls (group 1B) have two interchangeable cloud sources:
   Overpass (`loadOsmNetwork`) and the South-America road FlatGeobuf
   (`loadFgbNetwork`, v65 — amora's `build-viario.py` product on `gs://telhas`,
@@ -41,14 +57,15 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 - `mcp/` — MCP server (stdio) exposing the engine to agents (Claude Code /
   Desktop): `load_dem`, `energy_field`, `route` (+ top-N, string pull),
   `energy_at`, `density`. Dev tooling like `census/` — its own
-  `package.json`, never deployed. It imports the existing mirrors instead of
-  copying them: `census/census-density.mjs` (`loadDem`, `deriveCost`,
-  `runDensity`, the GeoTIFF/bundle writers) and `test-dem-smoothing.mjs`
-  (`smoothHeightsInPlace`), and hosts `energy-worker.js` in a
+  `package.json`, never deployed. It imports existing code instead of
+  copying it: `census/census-density.mjs` (`loadDem`, `runDensity`, the
+  GeoTIFF/bundle writers, and `deriveCost` re-exported from `lib/cost.js`)
+  and `lib/dem-smoothing.js` (`smoothHeightsInPlace`), and hosts `energy-worker.js` in a
   `worker_threads` Worker (`mcp/engine-thread.mjs`, the threaded twin of the
   census `loadWorker()` shim). `mcp/lib.mjs` `buildRunMessage` is the
-  headless mirror of app.js `baseMsg` (no network / bridges / impassable
-  layers yet) — a new run-message field in app.js must land there AND in
+  headless mirror of the app's `baseMsg` (built in `app/run.js`; no network /
+  bridges / impassable layers yet) — a new run-message field there must land
+  in `buildRunMessage` AND in
   `census/census-density.mjs` `runDensity`'s own `msg` literal (the `density`
   tool is the app's pool merge with one slice and builds its message there;
   the engine silently defaults any missing key, and `test-mcp.mjs` compares
@@ -65,12 +82,32 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   (`densityPartial`) and plain single-source fields on the module when the
   page attaches one (`msg.wasm = {module, is64}`) and hands every other
   message — and any wasm failure — to the JS engine. See `wasm/README.md`.
+- `lib/` — small PURE ES modules (no DOM, no `state`, no CDN globals) that
+  `app.js` imports and Node can import too, so tests and headless tools use
+  the app's own code instead of a hand-kept copy. `lib/package.json` only
+  marks them as ESM for Node and does not ship. `cost.js` (`G_SP`,
+  `flatEqSpeed`, `deriveCost` — the physics → kJ cost bundle; app.js
+  `readCost()` only reads the inputs and calls it), `ref-energy.js`
+  (`refEnergyKJ`, `deadband` — the GPX-overlay closed form),
+  `dem-smoothing.js` (`smoothHeightsInPlace`), `water-raster.js` (the OSM
+  water-mask rasterisers), `census-sampler.js` (Sobol/Halton + polygon
+  helpers), `maxseg-coarsen.js`, `changelog.js` (the `CHANGELOG.md` parser
+  behind the help modal). RULE: a pure helper that a test or headless tool
+  needs goes HERE and is imported — never copy a function out of `app/` or
+  `app.js` into a test again. What still IS hand-mirrored, because
+  `energy-worker.js` is a classic `importScripts` script: `v2Edge` in
+  `test-worker-pool.mjs`, `epsEstimate` in `test-energy-v2.mjs`, the
+  turn-factor table in `test-maxseg.mjs`; plus `mcp/lib.mjs`
+  `buildRunMessage` (below) and the dated `docs/grid-*.mjs` copies of
+  `flatEqSpeed`/`deriveCost`/`smoothHeightsInPlace`.
 - `sw.js` — service worker (precache + runtime cache). `index.html`,
   `manifest.webmanifest`, `icons/` are the PWA shell.
 - `deploy.sh` — stages and rsyncs to `gs://simujaules`, served at
   `simujaules.pedalhidrografi.co` behind Cloudflare (cache invalidation is a
   CF purge, not a Cloud CDN invalidation). Only explicitly listed files ship;
-  backend/ and tests never deploy.
+  backend/ and tests never deploy. `DEPLOY_STAGE_ONLY=<dir> ./deploy.sh`
+  stages + version-stamps into `<dir>` and stops before any gcloud call —
+  the hook `test-app-shell.mjs` uses to check the real staging.
 - `test-worker-pool.mjs` — run with `node`; self-contained worker
   regression test (invariants + pooled-density ≡ single-run equivalence).
 - `backend/test-backend.mjs` — starts the release binary and compares its
@@ -124,12 +161,39 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 
 ## Invariants — easy to break, hard to notice
 
+- THE `app/` EVALUATION-ORDER CHAIN (v82). The split of `app.js` was
+  mechanical: each `app/` module is a contiguous slice of the old file,
+  verbatim, and their top-level code (the map, its panes, `state`, the DOM
+  handles, every `addEventListener`) must still run in the old top-to-bottom
+  order. The modules import each other in cycles — fine for functions, which
+  are hoisted across module cycles exactly as inside one file — so the order
+  is pinned by a chain instead: every module's FIRST import is the bare
+  `import "./<predecessor>.js";` and `app.js` imports the LAST module
+  (`app/bundle.js`) first. Remove or reorder a chain import and top-level
+  code runs in a different order (typically a TDZ `ReferenceError` on a
+  `const` such as `map` or `state` at page load — or, worse, listeners
+  registering in a different order with no error at all). To add a module:
+  insert it in `app.js`'s list, make its first import the module before it,
+  repoint the next module's first import at it, and add it to
+  `PRECACHE_URLS`. Two consequences of ES-module rules: (a) an imported
+  binding is READ-ONLY — a `let` shared across modules is assigned only
+  through a setter in the module that declares it (`setActiveColormap`,
+  `setLayerOrder`, `setRefreshLayerOrderList`, `setRefreshColormapLabels`);
+  assigning to an import throws only when that line runs, not at load;
+  (b) a top-level `const`/`let` of another module is in its TDZ until that
+  module has evaluated, so top-level code may only use bindings from
+  modules EARLIER in the chain (functions may reference anything).
+  `test-app-shell.mjs` checks the chain, the import/export names, the
+  setter rule (heuristically) and the precache list.
+
 - THE WASM ENGINE IS THE BACKEND ENGINE (v80). `wasm/src/lib.rs`
   `include!`s `backend/src/main.rs` verbatim, so there is no third engine to
   keep in parity (the pre-v11 Wasm engine was a separate reimplementation —
   that is why it was dropped). Never put engine logic in `wasm/src/lib.rs`.
   Consequences: (a) EVERY change to `main.rs` must be followed by
-  `wasm/build.sh`, committing BOTH `.wasm` files, and `node
+  `wasm/build.sh`, committing BOTH `.wasm` files plus
+  `wasm/engine-sources.sha256` (the build.sh-recorded hashes of its inputs;
+  `test-wasm.mjs` fails if they are stale), and `node
   wasm/test-wasm.mjs` — a stale module silently serves the old engine in the
   browser; (b) wasm results equal the native backend's, so vs the JS worker
   they differ exactly like the backend does — passes on exact f64 ties
@@ -292,16 +356,27 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   `settled` byte array (not `g > E[idx]`) filters stale heap entries, and
   settled neighbours are never relaxed. Both guards exist because of the
   f32/f64 precision mismatch — removing either corrupts passes counts.
-- `sw.js`: bump `VERSION` (with a changelog line) on every deploy that
+- `sw.js`: bump `VERSION` (with a `CHANGELOG.md` entry) on every deploy that
   changes app behaviour; keep `PRECACHE_URLS` in sync with what
   `index.html`/`deploy.sh` actually reference — `cache.addAll` is atomic,
-  one 404 blocks the SW install for every user.
-- The changelog lives in THREE places that must move together with every
-  release: `CHANGELOG.md`, the collapsed `<details id="changelog">` in the
-  help modal (`index.html`), and the `sw.js` version-history comment.
-  Update all three whenever you ship user-visible changes — don't let
-  them drift.
-- Every version bump (a new `VERSION` + the changelog trio) ships as its own
+  one 404 blocks the SW install for every user. `test-app-shell.mjs` enforces
+  it: every module `app.js` imports, both workers and what they
+  `importScripts` must be precached AND staged by `deploy.sh`, under the same
+  `?v=` stamp their importers use (two spellings of one module URL = two
+  module instances). A new shipped `.js` file therefore needs three edits —
+  the import, `PRECACHE_URLS`, and (if it is in a new directory) `deploy.sh`
+  — and that test fails until all three agree.
+- The changelog lives in ONE place: `CHANGELOG.md` (since v82 — it used to be
+  a hand-synced trio with the help modal and a `sw.js` comment). Each entry
+  is a `## vNN — date` heading followed by a Markdown BLOCKQUOTE: that
+  blockquote is the short user-facing summary the help modal shows (the
+  modal fetches `./CHANGELOG.md` when its Changelog section is first opened
+  and renders it with `lib/changelog.js` — bold, italic and code only, HTML
+  escaped first); the technical detail follows it. Every release needs both.
+  `test-changelog.mjs` fails if the newest heading is not `sw.js`'s
+  `VERSION` or an entry has no blockquote. Never paste changelog text back
+  into `index.html` or `sw.js`.
+- Every version bump (a new `VERSION` + its `CHANGELOG.md` entry) ships as its own
   git commit — always commit when pushing a new version. Author the release
   commit as Claude (the assistant) and credit the user as a contributor, e.g.
   `git commit --author="Claude <noreply@anthropic.com>"` with a trailer
@@ -342,11 +417,10 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   already-smoothed re-imports via the exported dem.tif's `ImageDescription`
   tag. It runs BEFORE heights ship to the engines, so JS/graph/Rust
   bit-parity is untouched — never move smoothing INTO an engine
-  (path-history state, forbidden above). `test-dem-smoothing.mjs` holds the
-  byte-identical mirror and reference tests (hand-kept-in-sync; the mirror
-  is exported for `mcp/lib.mjs`, which applies the same auto rule at
-  headless DEM load — keep the function body verbatim, the `export` is a
-  trailing statement); the σ
+  (path-history state, forbidden above). The function lives in
+  `lib/dem-smoothing.js` — ONE definition, imported by the app, by
+  `test-dem-smoothing.mjs` (the reference tests) and by `mcp/lib.mjs`
+  (which applies the same auto rule at headless DEM load); the σ
   choices are only valid for THIS transform — don't swap in a plain blur or
   change σ/the auto rule without re-running the journal validation (Entry 74
   is the validation behind the current σ30 rule). Accuracy itself is carried by per-rider
@@ -354,18 +428,19 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
   validated med|Δ%| 3.7/2.7/4.9 with bias < ±1% on three independent riders,
   meeting the ±5%/±2% product goal); smoothing alone does NOT rescue
   uncalibrated fine-DEM accuracy.
-- **GRAVITY IS LOCAL, and it is hand-copied.** `G_SP = 9.7864`
+- **GRAVITY IS LOCAL, and it is defined once.** `G_SP = 9.7864`
   m/s² (São Paulo, IAG-USP absolute gravimetry) — NOT the textbook 9.81, which
   is ≈0.24% high here. Re-baselined in v63 to re-sync with
   `bicycling-energy-model` (its journal Entry 27), which moved first; while the
   two disagreed, the sibling applet's `v2Edge` readout differed from this app's
-  by exactly the gravity ratio. The constant lives in `app.js`'s `readCost`
-  chain (the origin, with the long note) and is hand-copied into
-  `census/census-density.mjs`, `test-energy-v2.mjs` and every
-  `docs/grid-*.mjs` harness — the `readCost` mirror chain. **Grep `9.7864`
-  and change every hit together**; a mirror at a different gravity silently
-  computes different physics than the app (the sibling repo hit exactly that,
-  running two gravities inside one computation). `backend/src/main.rs` needs NO
+  by exactly the gravity ratio. The constant lives in `lib/cost.js`
+  (with the long note) and everything else IMPORTS it: `app.js` via
+  `deriveCost`, `census/census-density.mjs`, `test-energy-v2.mjs` and every
+  `docs/grid-*.mjs` harness (it used to be hand-copied into ten files — a
+  copy at a different gravity silently computes different physics than the
+  app; the sibling repo hit exactly that, running two gravities inside one
+  computation). `grep 9.7864` must show exactly one definition; never
+  reintroduce a literal. `backend/src/main.rs` needs NO
   copy and never will: it receives the derived `{aRoll, aAero, beta, abRatio,
   …}` bundle over the wire, so **JS↔Rust bit-parity is gravity-blind** — which
   also means `test-backend.mjs` (synthetic bundle, `aRoll: 1, beta: 30`) does
@@ -383,28 +458,31 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 
 ```sh
 node test-worker-pool.mjs                  # worker regression suite
-node test-energy-v2.mjs                    # v2 closed form + refEnergyKJ/epsGeom mirrors
-node test-dem-smoothing.mjs                # DEM pre-smoothing transform (mirrors app.js)
+node test-energy-v2.mjs                    # v2 closed form + lib/cost.js deriveCost, lib/ref-energy.js
+node test-dem-smoothing.mjs                # DEM pre-smoothing transform (lib/dem-smoothing.js)
 node test-graph-engine.mjs                 # vector-network graph engine
+node test-maxseg.mjs                       # max-density segment search + app-side coarsening
 node test-water-raster.mjs                 # OSM water-mask rasterisation (areas/sea/rivers)
-node census/test-census-sampler.mjs        # in-browser census sampler helpers (mirrors app.js)
+node test-app-shell.mjs                    # imports ≡ sw.js precache ≡ deploy.sh staging + stamps (needs bash)
+node test-changelog.mjs                    # CHANGELOG.md parser + newest entry ≡ sw.js VERSION
+node census/test-census-sampler.mjs        # in-browser census sampler helpers (lib/census-sampler.js)
 node census/test-census-density.mjs        # census density harness end-to-end (needs npm install in census/)
 node mcp/test-mcp.mjs                      # MCP server over real stdio vs direct engine runs (needs npm install in census/ AND mcp/)
 cd backend && cargo build --release && node test-backend.mjs
 node wasm/test-wasm.mjs                    # wasm-worker.js + engine32/64.wasm vs energy-worker.js (after wasm/build.sh)
 ```
 
-`census/test-census-sampler.mjs` holds PURE MIRRORS of `app.js`'s census-sampling
-helpers (`pointInPolygon`, `ringArea`/`polyArea`, `clipRingToBbox`/`clippedPolyArea`,
-`sobolScalar1D`) — same hand-kept-in-sync rule as below. It checks population
+`census/test-census-sampler.mjs` tests the app's own census-sampling helpers
+(`pointInPolygon`, `ringArea`/`polyArea`, `clipRingToBbox`/`clippedPolyArea`,
+`sobolScalar1D`), imported from `lib/census-sampler.js`. It checks population
 weighting, in-polygon placement, and the clip-area ratio. The cloud `.fgb`
 (`census/build_fgb.py` → GCS) is built/uploaded out-of-band, never shipped.
 
-`test-water-raster.mjs` holds PURE MIRRORS of `app.js`'s OSM water-mask helpers
+`test-water-raster.mjs` tests the app's own OSM water-mask helpers
 (`fillRingsEvenOdd`, `rasterPolylineSupercover`, `assembleRings`,
-`fillSeaFromCoastlines`) — `app.js` is a browser module and can't be imported in
-node, so the copies must be kept in sync (like `backend/main.rs` mirrors
-`energy-worker.js`). The SEA fill is the load-bearing case: OSM gives only
+`fillSeaFromCoastlines`), imported from `lib/water-raster.js`. The async
+`…Chunked` variants the app actually calls for big masks stay in the app and
+are NOT under test — keep them line-for-line with the lib versions. The SEA fill is the load-bearing case: OSM gives only
 `natural=coastline` lines (land-left/water-right), filled by a horizontal+vertical
 orientation SWEEP (sea/land set per span, never flood-filled — coastline gaps
 would otherwise leak the sea into all land).
@@ -417,6 +495,8 @@ and each self-validates its 8-move engine bit-identical against
 `energy-worker.js` before reporting, so they double as an independent
 cross-check when touching the engines.
 
-There is no CI; run them before committing engine changes. Style knob
+CI (`.github/workflows/deploy.yml`) runs the node suites, the backend parity
+suite and the wasm suite on PRs to `main`/`deploy` and on pushes to `deploy`;
+still run them locally before committing engine changes. Style knob
 changes (colormap, ranges, gamma, blend) re-render cached arrays and must
 never trigger a recompute.

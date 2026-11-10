@@ -1,0 +1,263 @@
+{
+ "firstModuleStartsAt": "// ============================================================================",
+ "entryHeader": [
+  "// app.js — entry point of the Simujaules UI (DEM loading, map, compute",
+  "// dispatch, rendering, bundle I/O). It was one 13,000-line module until v82;",
+  "// the code now lives under app/, one module per concern, with the pure",
+  "// DOM-free helpers in lib/. No build step: the browser imports these files.",
+  "//",
+  "// EVALUATION ORDER IS PART OF THE CONTRACT. The modules' top-level code (the",
+  "// map, its panes, `state`, the DOM handles, every addEventListener) runs in",
+  "// the order listed below — the top-to-bottom order of the original file.",
+  "// Modules import each other freely (function declarations are hoisted across",
+  "// import cycles, exactly as they were inside one file), so that order is",
+  "// pinned by a chain instead: every module's FIRST import is its predecessor",
+  "// in this list, and this file imports the LAST module first.",
+  "//",
+  "// To add a module: put it in the list, make its first import the module",
+  "// before it, repoint the next module's first import at it, and add it to",
+  "// sw.js PRECACHE_URLS. A `let` shared across modules is assigned only through",
+  "// a setter in the module that declares it (imports are read-only bindings).",
+  "// test-app-shell.mjs checks all of this."
+ ],
+ "entryChainComment": [
+  "// Walks the chain down to app/i18n.js and evaluates the modules in list order."
+ ],
+ "entryListComment": [
+  "// Already evaluated by the line above — listed so the browser fetches them in",
+  "// parallel instead of discovering them one import at a time."
+ ],
+ "modules": [
+  {
+   "name": "i18n",
+   "anchor": "",
+   "desc": [
+    "PT/EN STRINGS table, t(), applyTranslations(), setLang()."
+   ],
+   "short": "PT/EN STRINGS table, t(), applyTranslations(), setLang()"
+  },
+  {
+   "name": "panel",
+   "anchor": "// ---- Loaded-group highlight (style only",
+   "desc": [
+    "Side-panel plumbing: group highlights, label a11y, parameter persistence,",
+    "the physics → cost-bundle readout (readCost), config export/import/reset."
+   ],
+   "short": "group highlights, parameter persistence, readCost(), config I/O"
+  },
+  {
+   "name": "boot",
+   "anchor": "// ------- Compute workers -------",
+   "desc": [
+    "Worker/engine URLs, the style-dirty flag, and the DOMContentLoaded wiring",
+    "of every static control."
+   ],
+   "short": "worker/engine URLs, the DOMContentLoaded wiring of every control"
+  },
+  {
+   "name": "map",
+   "anchor": "// attributionControl:false — the on-map attribution strip is removed",
+   "desc": [
+    "The Leaflet map: panes + layer order, address search, basemaps."
+   ],
+   "short": "the Leaflet map: panes + layer order, address search, basemaps"
+  },
+  {
+   "name": "state",
+   "anchor": "// ------- State -------",
+   "desc": [
+    "The shared `state` object, plus escapeHtml()."
+   ],
+   "short": "the shared `state` object, escapeHtml()"
+  },
+  {
+   "name": "compute-source",
+   "anchor": "// ---- Compute-source indirection (Browser / Localhost / Cloud)",
+   "desc": [
+    "Compute source (Browser / Localhost / Cloud): URLs, headers,",
+    "cancelActiveCompute(), wedged-compute recovery."
+   ],
+   "short": "Browser / Localhost / Cloud: URLs, cancelActiveCompute()"
+  },
+  {
+   "name": "dom",
+   "anchor": "// ------- Shared DOM handles -------",
+   "desc": [
+    "DOM handles used across the app (status line, run button, progress bar…)."
+   ],
+   "short": "shared DOM handles (status line, run button, progress bar…)"
+  },
+  {
+   "name": "dem",
+   "anchor": "// ------- DEM loading -------",
+   "desc": [
+    "DEM loading: file / URL / example DEMs, the FABDEM viewport loader,",
+    "crop + downsample, loadDemFromArrayBuffer()."
+   ],
+   "short": "DEM loading: file / URL / FABDEM viewport, crop, downsample"
+  },
+  {
+   "name": "network",
+   "anchor": "// ------- Vector network loader (GeoPackage) -------",
+   "desc": [
+    "Vector network: GeoPackage read/write, input-dataset export/import,",
+    "rasterisation, the Overpass and FlatGeobuf street pulls."
+   ],
+   "short": "vector network: GeoPackage, Overpass + FlatGeobuf street pulls"
+  },
+  {
+   "name": "bridges",
+   "anchor": "// ---- OSM bridges & tunnels (level decks",
+   "desc": [
+    "OSM / FlatGeobuf bridges and tunnels → portal edges (group 1D)."
+   ],
+   "short": "bridges and tunnels → portal edges (group 1D)"
+  },
+  {
+   "name": "draw",
+   "anchor": "// ------- On-map drawing tools (Leaflet-Geoman) -------",
+   "desc": [
+    "On-map drawing (Leaflet-Geoman): impassable polygons, portal bridges,",
+    "the bridge overlay, clearVectorNetwork()."
+   ],
+   "short": "on-map drawing (Geoman): impassable polygons, portal bridges"
+  },
+  {
+   "name": "water",
+   "anchor": "// ---- Optional impassable mask (water bodies, etc.)",
+   "desc": [
+    "Impassable mask: the OSM / FlatGeobuf water pulls (group 1C), mask files,",
+    "corridor availability."
+   ],
+   "short": "impassable mask: water pulls (group 1C), mask files"
+  },
+  {
+   "name": "network-view",
+   "anchor": "// ---- Optional vector-network rendering",
+   "desc": [
+    "Network line overlay, snapToNetwork(), lat/lng ↔ DEM pixel conversion."
+   ],
+   "short": "network line overlay, snapToNetwork(), lat/lng ↔ pixel"
+  },
+  {
+   "name": "graph-mode",
+   "anchor": "// ------- \"Follow the vectors\" graph mode -------",
+   "desc": [
+    "Graph mode (\"follow the vectors\"): graph token, route comparison,",
+    "graph energy/passes rasterisation and overlay."
+   ],
+   "short": "graph mode (\"follow the vectors\") and its overlay"
+  },
+  {
+   "name": "points",
+   "anchor": "map.on(\"click\", (e) => {",
+   "desc": [
+    "Map clicks → source / destination / reference points: markers, the",
+    "reference set with undo/redo, Sobol/Halton and census placement, ref I/O."
+   ],
+   "short": "map clicks → source / destination / reference points, census"
+  },
+  {
+   "name": "run",
+   "anchor": "// ------- Run -------",
+   "desc": [
+    "The Run button: builds the compute message, dispatches to workers / wasm /",
+    "backend, merges density pools — and renderResult()."
+   ],
+   "short": "the Run handler: message build, dispatch, pool merge; renderResult()"
+  },
+  {
+   "name": "kpi",
+   "anchor": "// ---- Accessibility KPIs (300 kJ initiative)",
+   "desc": [
+    "Accessibility KPIs (3B) from the ref↔ref energy matrix, and their CSV exports."
+   ],
+   "short": "accessibility KPIs (3B) and their CSV exports"
+  },
+  {
+   "name": "maxseg",
+   "anchor": "// ---- Max-density segment (3C.c)",
+   "desc": [
+    "Max-density segment (3C.c): coarsening, the worker run, stroke rendering."
+   ],
+   "short": "max-density segment (3C.c)"
+  },
+  {
+   "name": "render",
+   "anchor": "// Re-render the cached energy + passes overlays with the currently-selected",
+   "desc": [
+    "Field rendering: energy / passes / relief / impassable overlays, layer",
+    "controls, legend ticks and range inputs. Style-only — never recomputes."
+   ],
+   "short": "field / relief / impassable overlays, layer controls, legend"
+  },
+  {
+   "name": "refgeom",
+   "anchor": "// ------- Reference geometry (GPX overlay) -------",
+   "desc": [
+    "Reference geometry: the GPX track overlay and its energy metrics."
+   ],
+   "short": "reference geometry: the GPX overlay and its energy"
+  },
+  {
+   "name": "engines",
+   "anchor": "// Shared conservative memory budget (bytes) for browser worker pools",
+   "desc": [
+    "Engine sizing and choice: memory budget, densityPoolSize(), the",
+    "WebAssembly engine selection, backend capabilities, compute-source UI."
+   ],
+   "short": "memory budget, densityPoolSize(), WebAssembly engine choice"
+  },
+  {
+   "name": "cloud",
+   "anchor": "// ---- Cloud VM state machine",
+   "desc": [
+    "Cloud compute: the VM state machine (start, keep-alive, stop)."
+   ],
+   "short": "cloud compute: the VM state machine"
+  },
+  {
+   "name": "estimate",
+   "anchor": "// Calibration probe: each ref runs an UNBUDGETED search stopped after",
+   "desc": [
+    "Run-time estimate: calibration probe, predictComputeMs(), the online",
+    "correction, and the duration / byte / energy formatters."
+   ],
+   "short": "run-time estimate: probe, predictComputeMs(), formatters"
+  },
+  {
+   "name": "colormaps",
+   "anchor": "// ------- ColorCET colormaps -------",
+   "desc": [
+    "Colormaps: the ColorCET tables, colormap(), route colours, the legend."
+   ],
+   "short": "ColorCET tables, colormap(), route colours, the legend"
+  },
+  {
+   "name": "geotiff",
+   "anchor": "// ---- GeoTIFF helpers",
+   "desc": [
+    "GeoTIFF read/write helpers shared by the dataset and bundle I/O."
+   ],
+   "short": "GeoTIFF read/write helpers"
+  },
+  {
+   "name": "grid",
+   "anchor": "// ===================== Impassable mask + bridge corridors",
+   "desc": [
+    "The compute grid: mask GeoTIFF read/resample, bridge corridors,",
+    "buildComputeGrid(), buildPortals(), deck pass stamping."
+   ],
+   "short": "the compute grid: mask resample, corridors, buildPortals()"
+  },
+  {
+   "name": "bundle",
+   "anchor": "// ------- Bundle download / reload -------",
+   "desc": [
+    "Bundle export/import: metadata.jsonld, route GeoJSON, rendered images,",
+    "downloadBundle(), loadBundleFile(), applyMetadataToUI()."
+   ],
+   "short": "bundle export/import: metadata.jsonld, GeoJSON, images"
+  }
+ ]
+}

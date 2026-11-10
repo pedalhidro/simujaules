@@ -60,9 +60,8 @@ jobs:
         with:
           node-version: 22
       # The self-contained suites (no npm install, no DEM files, no network).
-      # backend/test-backend.mjs (needs a cargo build) and
-      # census/test-census-density.mjs (needs npm install in census/) are the
-      # two documented exceptions — run those locally on engine changes.
+      # The suites that need more run as their own jobs below: backend-parity
+      # (cargo build) and harness-suites (npm ci in census/ and mcp/).
       - name: Worker regression suite
         run: node test-worker-pool.mjs
       - name: v2 energy closed form
@@ -75,10 +74,63 @@ jobs:
         run: node test-water-raster.mjs
       - name: Census sampler helpers
         run: node census/test-census-sampler.mjs
+      - name: Max-density segment search
+        run: node test-maxseg.mjs
+      - name: Changelog (single source, matches sw.js VERSION)
+        run: node test-changelog.mjs
+      # What index.html loads == what sw.js precaches == what deploy.sh stages
+      # and stamps (runs deploy.sh in its stage-only mode; no gcloud needed).
+      - name: App shell consistency (imports, precache, deploy staging)
+        run: node test-app-shell.mjs
+      # Includes the staleness guard: fails when backend/src/main.rs (or another
+      # build input) changed without wasm/build.sh + committing the .wasm files.
+      # An engine64.wasm this Node's V8 cannot compile is skipped (engine32 is not).
+      - name: WebAssembly engine vs JS worker
+        run: node wasm/test-wasm.mjs
+
+  backend-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            backend/target
+          key: cargo-backend-${{ runner.os }}-${{ hashFiles('backend/Cargo.lock') }}
+      - name: Build the native backend
+        run: cargo build --release
+        working-directory: backend
+      # Spawns backend/target/release/simujoules-backend and compares its output
+      # against energy-worker.js (energy bit-parity).
+      - name: JS <-> Rust parity
+        run: node backend/test-backend.mjs
+
+  # census-density and the MCP server run fully offline on a synthetic DEM
+  # (no download, no network) once their npm dependencies are installed.
+  harness-suites:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install census/ and mcp/ dependencies
+        run: |
+          npm ci --prefix census
+          npm ci --prefix mcp
+      - name: Census density harness
+        run: node census/test-census-density.mjs
+      - name: MCP server vs direct engine runs
+        run: node mcp/test-mcp.mjs
 
   deploy:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, backend-parity, harness-suites]
     # Deploy only on the deploy branch (never for PRs), and stay INERT
     # ("skipped") until the WIF setup above is done.
     if: >-

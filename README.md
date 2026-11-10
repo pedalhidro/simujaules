@@ -75,13 +75,19 @@ first load).
 ## Layout
 
 - `index.html` — page shell, panel UI, map container, help/changelog modal.
-- `app.js` — all UI: DEM/GeoPackage loading (geotiff.js, sql.js), Leaflet map,
-  compute dispatch, rendering, i18n (`STRINGS` table + `t()`), bundle
-  export/import.
+- `app.js` — the entry module: a module map plus the imports. The UI itself
+  lives in `app/`, one ES module per concern (i18n `STRINGS` table + `t()`,
+  DEM/GeoPackage loading, the Leaflet map, compute dispatch, rendering,
+  bundle export/import…), loaded natively by the browser — still no build
+  step. `app.js`'s header lists the modules and explains the import chain
+  that keeps their top-level code running in order.
 - `energy-worker.js` — the compute engine (Web Worker): Dijkstra, A\* top-N,
   multi-ref density, layered-DP max-cost path, IDW network fill. Pure JS on typed
   arrays. **This is the reference implementation** the Rust backend must mirror.
 - `graph-engine.js` — the graph-mode engine (OSM vector graph).
+- `lib/` — small pure ES modules (cost bundle, DEM smoothing, water-mask
+  rasterisers, census sampler, changelog parser…) imported by the app AND by
+  the node tests / headless tools, so there is one definition of each.
 - `sw.js`, `manifest.webmanifest`, `icons/` — the PWA shell.
 - `backend/` — optional native compute server (Rust + rayon). Off by default; see
   [backend/README.md](backend/README.md).
@@ -123,8 +129,11 @@ and `POST /single` (single-source field); top-N, the destination path, and
 maximize stay browser-only. Memory-budget tuning, the binary protocol, and the
 `energy-worker.js` parity contract are in [backend/README.md](backend/README.md).
 
-> The old in-page **wasm** engine was removed — native compute now lives in the
-> standalone Rust server above, and the browser engine is always JS.
+> The browser can also run this SAME engine without a server: since v80 the
+> workers load `backend/src/main.rs` compiled to WebAssembly (`wasm/`, on by
+> default, any failure re-runs the job on the JS engine) — see
+> [wasm/README.md](wasm/README.md). (The pre-v11 in-page wasm engine, a
+> separate reimplementation, was removed.)
 
 ## Deploy
 
@@ -146,24 +155,29 @@ etc.) drop the same set of files manually. No backend required.
 
 ## Verification & tests
 
-There is no CI; run these before committing engine changes:
+CI (`.github/workflows/deploy.yml`) runs these on PRs and on pushes to `deploy`; run them locally before committing engine changes:
 
     node test-worker-pool.mjs                 # worker regression suite
+    node test-maxseg.mjs                      # max-density segment search
     node test-water-raster.mjs                # OSM water-mask rasterisation
+    node test-app-shell.mjs                   # imports ≡ sw.js precache ≡ deploy.sh staging
+    node test-changelog.mjs                   # CHANGELOG.md parser, newest entry ≡ sw.js VERSION
     node test-graph-engine.mjs                # graph-mode engine
-    node test-dem-smoothing.mjs               # DEM pre-smoothing mirror
+    node test-dem-smoothing.mjs               # DEM pre-smoothing transform (lib/dem-smoothing.js)
     node census/test-census-density.mjs       # headless density harness (npm install in census/)
     node mcp/test-mcp.mjs                     # MCP server vs direct engine runs (npm install in census/ and mcp/)
     cd backend && cargo build --release && node test-backend.mjs   # JS↔Rust parity
+    node wasm/test-wasm.mjs                   # wasm engines vs JS worker (+ stale-.wasm guard)
 
 `backend/src/main.rs` is a line-for-line port of `energy-worker.js`'s cost model
 and density math — `test-backend.mjs` enforces energy bit-parity (passes may
-differ only on exact f64 cost ties). Likewise `test-water-raster.mjs` holds pure
-mirrors of `app.js`'s OSM water-mask helpers (app.js can't be imported in node).
-Keep the mirrors in sync — a change to one engine must land in the other.
+differ only on exact f64 cost ties) — a change to one engine must land in the
+other. The app's pure helpers (cost bundle, DEM smoothing, water-mask
+rasterisers, census sampler…) live in `lib/` and are imported by the app, the
+tests and the headless tools alike, so those need no copies to keep in sync.
 
-Per the project convention, bump `sw.js` `VERSION` (with a changelog line in
-`CHANGELOG.md`, the help modal, and the `sw.js` history comment) on every deploy
+Per the project convention, bump `sw.js` `VERSION` (with an entry in
+`CHANGELOG.md` — the only changelog; the help modal renders it) on every deploy
 that changes app behaviour.
 
 ## Known limitations

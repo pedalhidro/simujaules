@@ -12,7 +12,7 @@ the Localhost/Cloud engine running inside the page's Web Workers:
 `wasm-worker.js` (repo root) loads `energy-worker.js` and serves two jobs on
 the module — density-pool slices and plain single-source fields — speaking the
 JS worker's message protocol; everything else, and any wasm failure, runs on
-the JS engine. `app.js` decides the engine per job (`wasmEngineFor`,
+the JS engine. The app (`app/engines.js`) decides the engine per job (`wasmEngineFor`,
 `densityEngine`, `singleEngine`) and compiles each module once.
 
 ## Build
@@ -25,7 +25,9 @@ node test-wasm.mjs    # parity vs energy-worker.js, both modules
 ```
 
 **Rebuild and commit both `.wasm` files whenever `backend/src/main.rs`
-changes** — the browser otherwise keeps serving the old engine. The deploy
+changes**, together with `wasm/engine-sources.sha256` (written by `build.sh`;
+`test-wasm.mjs` and CI fail when it no longer matches the sources) — the
+browser otherwise keeps serving the old engine. The deploy
 itself stays build-free: `deploy.sh` just ships the committed modules.
 
 `engine64.wasm` is linked with `--max-memory` (16 GiB): Firefox otherwise

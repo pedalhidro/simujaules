@@ -1,15 +1,97 @@
 # Changelog
 
 Versions track the service-worker `VERSION` in `sw.js` (bumped on every
-deploy that changes app behaviour). Keep this file, the collapsed Changelog
-section in the help modal (`index.html`), and the `sw.js` version-history
-comment in sync — update all three with every release.
+deploy that changes app behaviour). This file is the single source of the
+release history: the help modal's collapsed Changelog section fetches it at
+runtime (`lib/changelog.js`) and shows the blockquote directly under each
+heading — that blockquote is the short user-facing summary; everything after
+it is technical detail. Every entry needs one. The newest heading must equal
+`sw.js`'s `VERSION` (`node test-changelog.mjs` checks both).
 
 Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v82 — 2026-11-10
+
+> **Arrumação por dentro.** A seção "Histórico de versões" da Ajuda agora é
+> lida do `CHANGELOG.md` na hora em que você a abre, em vez de vir embutida
+> na página (a página encolhe ~30% e o service worker ~85%). E o código do
+> app, que era um arquivo único de 13 mil linhas, foi dividido em módulos por
+> assunto. Nada muda nos cálculos nem nos resultados — conferido de ponta a
+> ponta, byte a byte, contra a versão anterior.
+
+**Changelog em fonte única.** O histórico vivia em três lugares mantidos à
+mão — este arquivo, a seção recolhida da Ajuda (`index.html`, 748 linhas) e
+o comentário de histórico do `sw.js` (714 linhas, baixadas por todo
+cliente). Agora só existe aqui: o resumo curto que a Ajuda mostra é a
+citação (`>`) logo abaixo de cada título, e o texto técnico vem depois. Os
+71 resumos que estavam no `index.html` foram trazidos para cá por script e
+conferidos um a um contra o original (texto e marcação). A Ajuda busca
+`./CHANGELOG.md` na primeira vez que a seção é aberta e o renderiza com
+`lib/changelog.js` (módulo puro: escapa o HTML antes de aplicar negrito,
+itálico e código — as únicas marcações aceitas); sem rede, o arquivo vem do
+precache do service worker, e se a leitura falhar aparece um link para o
+arquivo. `index.html` 190 → 131 kB, `sw.js` 64 → 11 kB. Novo
+`test-changelog.mjs`: o título mais recente tem de ser o `VERSION` do
+`sw.js`, toda versão precisa do resumo, e nenhuma marcação além das três
+passa.
+
+**Módulos compartilhados (`lib/`) no lugar das cópias à mão.** O `app.js` não
+pode ser importado pelo Node, então os testes e as ferramentas headless
+carregavam cópias manuais das funções puras dele, mantidas em sincronia por
+disciplina — a gravidade local (`G_SP`) estava escrita em dez arquivos. Essas
+funções agora moram em módulos ES puros (sem DOM, sem `state`) que o app, os
+testes, o `census/`, o `mcp/` e os harnesses de `docs/` importam: `cost.js`
+(`G_SP`, `flatEqSpeed`, `deriveCost` — o `readCost()` do app só lê os campos
+e chama `deriveCost`), `ref-energy.js` (`refEnergyKJ`, `deadband`),
+`dem-smoothing.js` (`smoothHeightsInPlace`), `water-raster.js`,
+`census-sampler.js` e `maxseg-coarsen.js`. Os corpos das funções foram
+movidos literalmente; nos dois casos em que uma função misturava leitura de
+campos com conta (`readCost`, `refEnergyKJ`), o antigo e o novo foram
+comparados bit a bit (1 002 conjuntos de parâmetros e 2 000 trajetos
+aleatórios, zero diferenças). Seguem como cópias, por o `energy-worker.js`
+ser um script clássico: `v2Edge` (`test-worker-pool.mjs`), `epsEstimate`
+(`test-energy-v2.mjs`) e a tabela de curvas (`test-maxseg.mjs`). O
+`lib/package.json` só diz ao Node que são módulos ES e não é publicado.
+
+**`app.js` dividido em 27 módulos (`app/`).** O `app.js` (13 006 linhas, 302
+funções de topo) vira só o ponto de entrada; o código passa a morar em
+`app/`, um módulo ES por assunto, na ordem em que já estava: `i18n`, `panel`,
+`boot`, `map`, `state`, `compute-source`, `dom`, `dem`, `network`, `bridges`,
+`draw`, `water`, `network-view`, `graph-mode`, `points`, `run`, `kpi`,
+`maxseg`, `render`, `refgeom`, `engines`, `cloud`, `estimate`, `colormaps`,
+`geotiff`, `grid`, `bundle`. Continua sem build: o navegador importa os
+módulos nativamente. A divisão foi mecânica — cada módulo é uma fatia
+contígua do arquivo antigo, literal; as únicas edições são as linhas de
+`import` geradas, o prefixo `export` nas declarações usadas por outro
+módulo, quatro *setters* (uma ligação importada é somente leitura:
+`setActiveColormap`, `setLayerOrder` e os dois ganchos de idioma) e o
+reposicionamento de um bloco de quatro funções e dois comentários. A ordem
+de execução do código de topo (mapa, painéis, `state`, os
+`addEventListener`) é a mesma de antes, garantida por uma corrente: o
+primeiro `import` de cada módulo é o seu antecessor, e o `app.js` importa o
+último. Verificado de três formas: (1) reparse independente — os 413
+comandos de topo e os 3 313 comentários dos módulos, concatenados, são os do
+arquivo original, na mesma ordem; (2) um roteiro de 24 passos no Chromium
+(campo de/para/ida-e-volta, caminho, top-N, densidade com e sem WebAssembly
+em 8 e 16 direções, KPIs, segmento de densidade máxima, estilo, exportar e
+reimportar o bundle), com hash de cada imagem, rota e GeoTIFF exportado —
+relatório idêntico byte a byte antes e depois da divisão, e a única
+diferença para a v81 é o próprio histórico de versões; (3) o mesmo roteiro
+sobre a saída carimbada do `deploy.sh`, mais a instalação do service worker
+(49 de 49 URLs no precache) e a partida offline. O `sw.js` precacheia os 27
+módulos, o `deploy.sh` publica `app/*.js` e carimba todo `import` com a
+versão, e o `test-app-shell.mjs` confere a corrente, os nomes
+importados/exportados e que tudo que a página carrega está no precache e no
+deploy.
+
 ## v81 — 2026-09-25
+
+> **Viário e água sem custo de download.** Os arquivos do viário e das águas
+> passam a vir do Cloudflare R2 (o mesmo servidor do FABDEM), que não cobra
+> por download — antes, cada leitura saía paga do Google Cloud. A velocidade é
+> a mesma.
 
 **Viário e água servidos do R2 (sem custo de download).** Os FlatGeobuf do
 viário e das águas (`south-america-*.fgb`, 0,4–4,5 GB) passam a ser lidos de
@@ -21,6 +103,13 @@ R2 vs 0,5–0,85 s direto do GCS). Os arquivos acima de 500 MB estão com
 fria, ela devolvia o arquivo inteiro).
 
 ## v80 — 2026-09-22
+
+> **Motor WebAssembly.** A densidade e o campo de fonte única (sem
+> destino/top-N) rodam, por padrão, no motor do backend nativo compilado para
+> WebAssembly — os mesmos números do Localhost/Nuvem, ~2× mais rápido na
+> densidade (8 direções), ~1,5× com 16 e ~1,3–1,5× na fonte única. Qualquer
+> falha refaz o cálculo no motor JS. Liga/desliga em 2C; acima de 4 GiB por
+> worker, Chrome ≥ 133 e Firefox ≥ 143 usam a versão de 64 bits.
 
 **Motor WebAssembly nos workers do navegador.** A densidade multi-referência
 e o campo de energia de fonte única (de/para/ida-e-volta, sem destino nem
@@ -61,6 +150,13 @@ Sampa Centro, 8,5 M células, 6 referências em 3 workers): densidade
 
 ## v79 — 2026-09-20
 
+> **Celular: folha inferior no lugar da sidebar.** Em telas ≤ 860 px o painel
+> vira uma folha ancorada embaixo, com três posições (mínima / meia / cheia) —
+> arraste pela alça ou toque nela para alternar. O botão Calcular fica sempre
+> visível na cabeça da folha; um toque no mapa recolhe a folha. Pílula de
+> status no topo, botões e campos com alvos de toque maiores (≥ 40 px; campos
+> com 16 px para o iOS não dar zoom).
+
 **Celular: painel vira folha inferior (bottom sheet).** Em telas ≤ 860 px o
 painel lateral deslizante (uma sidebar — impraticável no celular) foi
 substituído por uma folha ancorada na borda de baixo, com três posições:
@@ -88,6 +184,13 @@ gaveta/folha foi recalculado (o corpo mudou).
 
 ## v78 — 2026-09-20
 
+> **Referências editáveis.** Clicar num marcador de referência abre um popup
+> com o botão "Remover esta referência"; as sobreviventes são renumeradas. E
+> um par desfazer/refazer (↶ ↷, logo abaixo do 🔍 — também Ctrl+Z /
+> Ctrl+Shift+Z) percorre o histórico do conjunto de referências: clique no
+> mapa, remoção, "Distribuir aleatórias"/censo (o lote inteiro é um passo),
+> "Limpar", GeoJSON e importação de bundle. Zera ao carregar outro DEM.
+
 **Referências editáveis.** Clicar num marcador de referência abre um popup
 com o rótulo (`ref N · r, c`) e o botão "Remover esta referência" — a
 referência sai do conjunto, as sobreviventes são renumeradas e a matriz de
@@ -111,6 +214,13 @@ fora do histórico de propósito (não é ação do usuário e se reaplica ao qu
 for restaurado).
 
 ## v77 — 2026-08-28
+
+> **Cores dos segmentos viram dado (3C.c).** Cada segmento é colorido pela sua
+> densidade média relativa à média do campo, proporcional ao melhor da rodada,
+> numa paleta CET selecionável (padrão CET-R1). Trocar a paleta recolore na
+> hora, sem recalcular; os ×N exatos seguem nos tooltips. O empilhamento no
+> mapa também segue a densidade — o segmento mais denso pinta por cima nos
+> cruzamentos.
 
 **Cores dos segmentos viram dado (3C.c).** Em vez de cores arbitrárias por
 posto, cada segmento agora é colorido pela sua densidade média relativa à
@@ -139,6 +249,13 @@ URLs limpas — só as cópias staged são reescritas.
 
 ## v76 — 2026-08-28
 
+> **Dois consertos.** O knob "nº de segmentos" ficava limitado a 10 por um
+> clamp esquecido no app.js (o worker e o input já diziam 100). E os limites
+> automáticos por percentil (p90 das passagens, p80 da energia…) agora são
+> determinísticos: a amostragem-reservatório usava `Math.random` e cada
+> re-render dava um "auto" ligeiramente diferente — agora primeiro render,
+> "Atualizar estilo" e "Reset" mostram exatamente o mesmo número.
+
 **Dois consertos.** (1) O knob "nº de segmentos" ficava silenciosamente
 limitado a 10: o aumento do teto no v75 atualizou o worker (100) e o `max`
 do input, mas esqueceu o clamp do sanitizador em `runMaxseg` — o worker
@@ -152,6 +269,15 @@ diferentes para o mesmo campo. RNG de semente fixa: mesmo campo + mesmas
 opções → limites bit-idênticos (estatisticamente equivalente).
 
 ## v75 — 2026-08-28
+
+> **Segmentos consecutivos não-sobrepostos (3C.c).** Novo knob "nº de
+> segmentos" (1–100): a cada segmento encontrado, a densidade é zerada num
+> tubo de ±2 células ao redor dele e a busca roda de novo no que sobrou
+> (sementes re-sorteadas). Um segmento posterior pode cruzar um anterior
+> perpendicular (as células seguem transitáveis, só não rendem nada), mas não
+> repassa o mesmo corredor nem a pista vizinha. Cores por posto, estatísticas
+> por segmento no resultado e nos tooltips; custo ~linear no nº de segmentos,
+> com parada antecipada em campo exaurido.
 
 **Segmentos consecutivos não-sobrepostos (3C.c).** Novo knob "nº de
 segmentos" (1–100): depois de encontrar cada segmento, o worker zera a
@@ -171,6 +297,31 @@ senão 100 segmentos pagariam ~20 GB de escrita só limpando arrays); num
 campo exaurido a busca para antes e retorna menos segmentos.
 
 ## v74 — 2026-08-27
+
+> **Segmento de densidade máxima (3C.c).** Depois de um cálculo de
+> densidade/passagens, um novo painel encontra um caminho contínuo *simples*
+> (que não se cruza) de ~L km (padrão 20) maximizando a soma de densidade (∑
+> densidade·metro). É o problema de *orienteering* (NP-difícil), então a busca
+> é heurística: partidas múltiplas em células quentes bem espaçadas,
+> crescimento auto-evitante pelas duas pontas, lookahead guloso e penalizações
+> de forma com knobs no painel — suavidade de curvas (sem ela o objetivo bruto
+> premia serpentear em corredores largos) e retidão/anti-ida-e-volta
+> (referência global na outra ponta + âncora local + halo de proximidade, que
+> impede sair e voltar pela pista vizinha; retidão ρ = corda/comprimento = 1 −
+> variância circular dos rumos, exibida no resultado). As penalizações guiam
+> só a busca — a soma exibida continua sendo a integral bruta da linha. Busca
+> com lookahead limitado ao orçamento restante, escolha gulosa por recompensa
+> por metro e seleção com rateio no alvo exato (correções medidas contra
+> ótimos enumeráveis; mais sementes/ lookahead que o padrão mediu ≤ 0,7% de
+> efeito — não viraram knobs). Campo engrossado automaticamente (média por
+> bloco, ≤ 4 M células); uma DP exata sobre *passeios* foi testada e
+> descartada (degenerava em vaivém sobre o trecho mais quente). Linha fúcsia
+> com contorno escuro, mapa enquadra o resultado; tooltip com comprimento,
+> densidade média (×N da média do campo) e célula efetiva. Só
+> análise/exibição, DEMs geográficos: nunca recalcula o campo, e some quando o
+> resultado é invalidado. Novo `kind: "maxseg"` no worker + `test-maxseg.mjs`
+> (qualidade pinada contra enumeração exata de caminhos simples); motores e
+> paridade com o backend intocados.
 
 **Segmento de densidade máxima (3C.c).** Depois de um cálculo de
 densidade/passagens, o novo painel 3C.c encontra o trajeto contínuo de ~L km
@@ -250,6 +401,12 @@ concentra mais passagens?".
 
 ## v73 — 2026-08-25
 
+> **Pulls FGB ~25× mais rápidos.** Os FlatGeobufs (viário, água, pontes) agora
+> vêm direto do GCS em vez do proxy da Cloudflare, que estrangula ranges
+> grandes de objetos não-cacheáveis (medido: 92 s vs 0,6 s no mesmo range de
+> 20 MB; um pull de 0,2°×0,2° caiu de 57 s pra 2,3 s). Áreas e rios da água
+> baixam em paralelo, e o service worker não intercepta mais `.fgb`.
+
 **Pulls FGB ~25× mais rápidos.** Os três FlatGeobufs (viário 1B, água 1C,
 pontes 1D) agora são baixados **direto do GCS** (`storage.googleapis.com`)
 em vez do host `telhas.pedalhidrografi.co`: o proxy da Cloudflare não
@@ -268,6 +425,12 @@ o caminho de serving, não a falta de paralelismo no cliente.
 
 ## v72 — 2026-08-24
 
+> **Teto FABDEM 10× maior.** O limite da janela do "Carregar FABDEM" subiu de
+> 50 MB (≈ 1°²) para **10°²** (≈ 494 MiB de Float32, ~129,6 M células — na
+> casa do teto honesto de RAM do app; use com máquina folgada). Os tetos dos
+> pulls FGB derivam dele (v71), então viário, água e pontes sobem pra 10°²
+> junto.
+
 **Teto FABDEM 10× maior.** O limite da janela do "Carregar FABDEM" subiu de
 50 MB (≈ 1°²) para **10°²** (`FABDEM_MAX_DEG2`; ≈ 494 MiB de Float32,
 ~129,6 M células — na casa do teto honesto de RAM do app: um DEM de 135 M
@@ -277,6 +440,12 @@ pontes sobem pra 10°² junto. Botão, ajuda e mensagens atualizados
 (≤ ~500 MB / teto ~10°²).
 
 ## v71 — 2026-08-24
+
+> **Pulls FGB com o mesmo teto do FABDEM.** Os três pulls de FlatGeobuf
+> (viário 1B, água 1C, pontes 1D) agora compartilham um único teto de janela,
+> derivado do cap de 50 MB do loader FABDEM (≈ 1°×1°, ~100×110 km em SP) —
+> qualquer janela que o "Carregar FABDEM" aceita, os pulls FGB aceitam também.
+> O viário/pontes usava um teto 4× mais restritivo (0,25°²).
 
 **Pulls FGB com o mesmo teto do FABDEM.** Os três pulls de FlatGeobuf
 (viário 1B, água 1C, pontes 1D) agora compartilham UM teto de janela,
@@ -288,6 +457,13 @@ pro viário/pontes (4× mais restritivo que agora) e 1,0°² pra água. A
 mensagem de recusa agora diz o teto ("~1°×1°, o mesmo do FABDEM").
 
 ## v70 — 2026-08-24
+
+> **Busca de endereços (🔍).** Botão de busca na coluna de controles do mapa,
+> abaixo do zoom — typeahead via Photon (komoot), com viés pro que está na
+> tela e navegação por ↑/↓/Enter/Esc. Escolher um resultado APENAS centraliza
+> o mapa no lugar — sem pino, sem estado (versão reduzida da busca da amora).
+> CSP e service worker ajustados pro novo host (`photon.komoot.io`, isento do
+> runtime-cache).
 
 **Busca de endereços (🔍).** Botão de busca estacionado na coluna de
 controles do mapa, abaixo do zoom — typeahead via
@@ -301,6 +477,12 @@ O `applyTranslations()` ganhou suporte a `data-i18n-placeholder`.
 
 ## v69 — 2026-08-24
 
+> **FABDEM mudou de casa.** Os tiles FABDEM agora vêm de
+> `fabdem.pedalhidrografi.co` (Cloudflare R2, na raiz — sem o segmento
+> `/fabdem/` do host antigo). Mesmos nomes, mesmos COGs — sem mudança de
+> comportamento. O `telhas` segue servindo os tiles rmsampa e os FGBs do
+> viário.
+
 **FABDEM mudou de casa.** Os tiles FABDEM agora vêm de
 `fabdem.pedalhidrografi.co` (Cloudflare R2, na raiz — sem o segmento
 `/fabdem/` do host antigo `telhas`). Mesmos nomes de Bristol, mesmos COGs,
@@ -308,6 +490,14 @@ mesmo carregador por HTTP Range — **sem mudança de comportamento**. O
 `telhas` segue servindo os tiles rmsampa e os FGBs do viário.
 
 ## v68 — 2026-08-23
+
+> **Painéis mais enxutos.** O checkbox *Calcular contagem de passagens* foi
+> removido — a contagem agora é sempre calculada (igual a deixá-lo sempre
+> marcado; bundles antigos ganham passes ao recarregar). Renomes em 1B:
+> *Interpolar campo de energia* e *Usar grafo viário ao invés de rasterizado*.
+> Os parâmetros numéricos da rede (1B) viraram uma grade 2×3 e os campos do 2A
+> (Modo → orçamento) foram compactados em duas colunas. Só UI — motores
+> intocados.
 
 **2A e 1B mais enxutos.** O checkbox **"Calcular contagem de passagens"** foi
 removido — a contagem agora é **sempre** calculada (comportamento idêntico a
@@ -323,6 +513,15 @@ Só UI — motores intocados.
 
 ## v67 — 2026-08-09
 
+> **"Soma" que soma de verdade.** Novo modo de mistura das passagens — *soma
+> de dados (A+B numa paleta)*: na vista de diferença, os dois cenários são
+> somados célula a célula e pintados numa paleta só, em composição normal —
+> escala honesta, sem o basemap entrar na conta. O modo antigo virou *soma de
+> cores (plus-lighter)*, que é o que ele sempre foi: soma as cores pintadas
+> contra todo o fundo, escalada pela opacidade (por isso satura pro branco
+> sobre mapa claro). No modo grafo a soma de dados não se aplica (um canal é
+> vetorial).
+
 **"Soma" que soma de verdade.** Novo modo de mistura das passagens — **"soma
 de dados (A+B numa paleta)"**: na vista de diferença (com rede × sem rede),
 os dois campos de passagens são somados **célula a célula** e a soma é
@@ -336,6 +535,15 @@ canal é vetorial) a soma de dados não é computável — o modo compõe normal
 Puro re-render (regra dos botões de estilo: nunca dispara recompute).
 
 ## v66 — 2026-08-09
+
+> **A família FGB agora alimenta a água e as pontes também.** Dois botões
+> novos, irmãos do pull de viário do v65: em 1C, *Puxar água do FGB* monta a
+> máscara d'água (áreas + rios) dos FlatGeobufs do projeto — mesmo cache e
+> mesma rasterização do pull do OSM, então o toggle de rios segue funcionando;
+> **sem litoral** (em DEM costeiro use o OSM) e sem filtro de rios em túnel.
+> Em 1D, *Puxar do FGB* traz pontes/túneis de vias do FGB do viário — mesmos
+> apoios/tabuleiros do Overpass, sem `ele` mapeado (os apoios caem no DEM) e
+> sem ferrovias. Tudo por HTTP Range, sem depender do servidor do OSM.
 
 **A família FGB agora alimenta a água (1C) e as pontes (1D) também.** Dois
 botões novos, irmãos do pull de viário do v65 — tudo servido por HTTP Range
@@ -359,6 +567,15 @@ Helper `fgbStream` compartilhado pelos três pulls; nenhuma mudança de engine.
 
 ## v65 — 2026-08-08
 
+> **Viário do FGB, sem Overpass.** Novo botão em 1B — *Puxar viário do FGB
+> (América do Sul · nuvem)* — carrega a mesma malha `highway=*` do botão
+> Overpass, mas do FlatGeobuf da América do Sul hospedado na nuvem do projeto:
+> só os bytes da janela viajam (HTTP Range contra o índice espacial), sem
+> depender do servidor do OSM, e pontes/túneis/layer já vêm em colunas,
+> normalizadas como no pull do Overpass. Também re-emite o v64: aquele deploy
+> saiu sem purge da Cloudflare e a edge serviu o app.js antigo por algumas
+> horas — quem pegou o v64 nessa janela re-precacheia agora o app certo.
+
 **Viário do FGB, sem Overpass.** Novo botão em 1B — **"Puxar viário do FGB
 (América do Sul · nuvem)"** — que carrega a mesma malha `highway=*` do botão
 Overpass, mas servida do FlatGeobuf da América do Sul (gerado pelo
@@ -377,6 +594,19 @@ navegador, não a edge). O v65 força o re-precache; `deploy.sh` agora carrega o
 `.env` (CF_API_TOKEN/CF_ZONE_ID) sozinho, então o purge roda em todo deploy.
 
 ## v64 — 2026-08-08
+
+> **Padrões de roteamento na prática recomendada** (journal do
+> bicycling-energy-model, Entry 74). Dois padrões de configuração mudam —
+> nenhuma mudança de engine: a suavização do MDT em "auto" passa a aplicar **σ =
+> 30 m em todas as fontes** (era σ = 10 m só em MDTs finos; agora o FABDEM
+> também é tratado — no relevo cru, o ruído fabrica micro-descidas íngremes
+> que a recuperação ε grade-local se recusa a creditar, e a energia sai alta),
+> e as **direções de movimento sobem de 8 para 16** por padrão — o ótimo do
+> levantamento local, a 0,20 pp do ótimo n=32 do FABDEM (8 segue como escolha
+> rápida; ganhos além de 32 são marginais frente a ≥2× o tempo). Pontes/túneis
+> já eram padrão — junto do σ30 fecha o pacote recomendado: ε grade-local em
+> mapa σ30-tratado, 16 direções, portais ligados. A guarda contra re-suavizar
+> um dem.tif exportado continua valendo.
 
 **Routing defaults follow the recommended practice** (`bicycling-energy-model`
 journal Entry 74 / paper 3 §3.2(d)). Two config defaults move — no engine
@@ -401,6 +631,21 @@ is unchanged — with σ30 this completes the recommended bundle: **grade-local 
 on a σ30-treated map, 16 directions, portals on**.
 
 ## v63 — 2026-07-25
+
+> **A gravidade de São Paulo, não a do livro-texto.** O `g` do modelo passa de
+> 9,81 para **9,7864 m/s²** — o valor *local*, medido por gravimetria absoluta
+> no IAG-USP. Os 9,81 são ≈0,24% altos aqui, e todo MDT que o app carrega e
+> todo passeio contra o qual o modelo foi calibrado ficam na região
+> metropolitana de São Paulo. Resultado: `β = m·g/k_eff` cai de 0,7585 para
+> **0,7567 kJ/m** (veja o leitor de coeficientes em Parâmetros) e **toda
+> energia cai ≈0,24%** em terreno de subida (≈0,2% em terreno misto). As rotas
+> ótimas quase não mudam — o custo inteiro reescala por um fator praticamente
+> comum; um bundle antigo, recarregado, recalcula com o `g` novo e lê ≈0,2%
+> abaixo do raster que guardou. A mudança re-sincroniza o app com o modelo do
+> repositório irmão (*bicycling-energy-model*, Entry 27): enquanto os dois
+> discordavam, o applet de lá lia exatamente essa diferença. É mudança só de
+> constante — nenhum motor mudou, e a paridade bit a bit com o backend Rust
+> segue exata.
 
 **São Paulo's gravity, not the textbook's.** The model's `g` moves from 9.81 to
 **9.7864 m/s²** — the **local** value from IAG-USP absolute gravimetry. 9.81 is
@@ -429,6 +674,15 @@ note saying so.
 
 ## v62 — 2026-07-12
 
+> **Direções ≠ 8 no backend nativo/nuvem.** O backend Rust (0.2.0) agora serve
+> o recurso completo de direções de movimento (4–128): conjuntos de Farey,
+> arestas longas integradas ao perfil e carimbo de passagens nas células
+> varridas, em *paridade bit a bit* com o motor JS (21 casos novos de
+> paridade, todos com delta zero). O app confere a versão do backend (≥ 0.2.0)
+> antes de despachar — um binário antigo ignoraria o campo silenciosamente — e
+> diz o motivo quando o backend é velho demais. A estimativa de tempo modela
+> os termos de memória das direções extras.
+
 **Directions ≠ 8 on the cloud/native backend.** The Rust backend (0.2.0)
 now serves the full v57 move-direction feature — Farey move sets (4–128),
 profile-integrated long edges, swept-cell passes stamping — in **bit-parity**
@@ -445,6 +699,13 @@ shared tables).
 
 ## v61 — 2026-07-12
 
+> **Fallback silencioso agora é opcional.** Nova opção *Falhar em vez de cair
+> pro navegador* no painel da nuvem: marcada, uma falha na nuvem (boot da VM,
+> senha, ou o próprio cálculo) aborta o run com o erro na linha de status, em
+> vez de recomputar silenciosamente nos workers do navegador — o fallback é
+> amigável pra runs casuais, mas mascara problemas da nuvem e gasta o laptop
+> num cálculo dimensionado pra 128 vCPUs.
+
 **Opt out of the silent browser fallback.** New "Falhar em vez de cair pro
 navegador" checkbox in the cloud panel (persisted per device): when ticked, a
 cloud failure — VM boot, auth, or a failed `/density`/`/single` dispatch —
@@ -454,6 +715,14 @@ casual runs but masks cloud problems and quietly burns laptop CPU on
 computes sized for a 128-vCPU VM.
 
 ## v60 — 2026-07-12
+
+> **Ergonomia da troca de máquina na nuvem.** Timeout do `/cloud/start` 15→45
+> s (o redimensionamento roda dentro dessa chamada — ~11 s medidos — e o
+> aborto do cliente virava um falso "orquestrador inacessível"); o religamento
+> no meio do boot leva o `machineType` selecionado; um aviso de estado indica
+> quando a VM ligada (keep-warm) difere do tamanho selecionado (a seleção só
+> vale no próximo boot); e o novo botão *Desligar VM agora* força esse próximo
+> boot — trocar de máquina vira desligar → selecionar → calcular.
 
 **Cloud machine-switch ergonomics.** The `/cloud/start` timeout goes 15 → 45 s
 (the orchestrator resizes the stopped VM *inside* that call — ~11 s measured,
@@ -465,6 +734,18 @@ new **"Desligar VM agora"** button in the cloud panel forces that next boot —
 switching sizes becomes stop → select → compute, no keep-warm toggling.
 
 ## v59 — 2026-07-12
+
+> **Nuvem funcionando de verdade — e com escolha de máquina.** A CSP agora
+> permite o host real do orquestrador (o modo Nuvem estava silenciosamente
+> bloqueado pela própria CSP desde que foi lançado), a URL padrão aponta pro
+> serviço vivo, e uma URL colada sem esquema ganha `https://` automático. Novo
+> seletor *Máquina da nuvem* (8/32/128 vCPUs, com preço de referência por hora
+> — a VM roda em modo spot, tipicamente 60–90% mais barato): o tamanho é
+> aplicado ao criar/religar a VM e a estimativa de tempo modela o tamanho
+> selecionado (curva de contenção de banda agora sublinear — 128 vCPUs não
+> estimam mais um absurdo 1,4× sobre 8). Cálculos na nuvem dizem *"Calculando
+> na nuvem…"*, e qualquer retorno aos workers do navegador agora diz o motivo
+> na linha de status.
 
 **Cloud compute actually works — and you pick the machine.** The CSP now
 allowlists the orchestrator's real `*.run.app` host (cloud mode had been
@@ -489,6 +770,20 @@ and the VM is pinned to Ice Lake (the cached backend binary is
 
 ## v58 — 2026-07-11
 
+> **Recortar e reduzir resolução do DEM (1A).** *Recortar à janela atual*
+> recorta o DEM carregado para a janela visível do mapa — aproxime de um
+> bairro num raster enorme (ex. o Sítio Urbano de 135 M células) e fique só
+> com aquela extensão, com cálculos mais rápidos e menos memória (só DEMs
+> geográficos, como os pulls OSM). *Reduzir resolução* (fator 2/3/4/6×) faz
+> média de blocos N×N ciente da máscara — a mesma transformação do `gdalwarp -r
+> average`: 6× num raster IGC de 5 m cai em ~30 m, o regime onde o modelo v2 é
+> mais preciso (journal, Entries 19/21); funciona também em DEMs projetados.
+> Ambos passam pelo caminho padrão de carregamento (exportação→reimportação em
+> memória), então herdam tudo: cancelamento de cálculo, máscara nodata, CRS,
+> invalidação de rede/grafo/sonda e a marca de suavização (uma derivação de
+> MDT já suavizado NÃO é re-suavizada), e removem a URL de origem dos
+> metadados de bundle (são derivações locais).
+
 **Crop DEM to the current view.** New "Recortar DEM à janela atual" button in
 1A: crops the loaded DEM to the visible map window — zoom into a
 neighbourhood of a huge raster (e.g. the 135 M-cell Sampa Sítio Urbano) and
@@ -510,6 +805,25 @@ viewport involved). Both derivations drop the source URL from bundle
 metadata (they are local derivations, like a file-picker load).
 
 ## v57 — 2026-07-11
+
+> **Direções de movimento, string pulling e correção de grade** — a nota de
+> pesquisa de conectividade da grade virou opção. Novo seletor **"Direções de
+> movimento"** (4/8/16/32/64/128; padrão 8 = motor clássico, bit-idêntico):
+> mais direções (escada de Farey, com movimentos longos integrados ao perfil
+> do terreno) reduzem a sobre-estimativa de energia ótima causada pelo
+> serrilhado das rotas (≈⅔ a menos com 16 direções, medido no MDT de SP), a
+> custo de cálculo proporcional. Cálculos de densidade amortizam tabelas de
+> custo pré-computadas por worker; as passagens são carimbadas nas células que
+> os movimentos longos atravessam (corredores contínuos). Valores ≠ 8 calculam
+> no navegador — o backend nativo segue servindo o motor de 8 movimentos. Nova
+> opção **"string pulling"**: encurta pós-cálculo a rota exibida e as top-N
+> (ida-e-volta e maximizar ficam de fora) — a energia mostrada é a soma
+> integrada da própria linha exibida. Novo campo **"correção de grade ×c"** no
+> bloco de acessibilidade: infla os limiares E₁/E₂ (equivale a deflacionar as
+> energias sobre-estimadas da grade; c\* ≈ 1,09–1,12 medido em 8 direções),
+> com aviso explícito de que a garantia de piso conservador deixa de valer;
+> desnecessária com ≥ 16 direções. As três opções persistem nos bundles; a
+> estimativa de tempo acompanha o número de direções.
 
 **Move directions, string pulling, KPI grid correction** — the
 grid-connectivity research note
@@ -540,6 +854,25 @@ string-pulling contract.
 
 ## v56 — 2026-07-11
 
+> **KPIs de acessibilidade — iniciativa "cidade 300 kJ"**. Cálculos de
+> densidade agora também amostram o campo de energia de cada referência na
+> célula de todas as outras — uma matriz K×K par-a-par sem custo extra de
+> Dijkstra. Novo bloco **"3B. Acessibilidade"** nos resultados avalia os dois
+> KPIs ao vivo a partir da matriz em cache: fração da população que alcança ≥
+> K pessoas com ≤ E₁ kJ (padrão 1 milhão / 200 kJ) e fração que alcança ≥ J%
+> da população com ≤ E₂ kJ (padrão 80% / 600 kJ). A amostragem censitária
+> (IBGE 2022) agora registra a população total M da extensão — cada referência
+> representa M/K pessoas; outras estratégias aceitam um M digitado (o KPI 2
+> dispensa M). Editar os limiares reavalia na hora, sem recalcular; os
+> marcadores das referências são recoloridos vermelho→amarelo→verde pelo
+> acesso atingido; exportações CSV por referência e da matriz completa. O
+> backend Rust ganha `want_matrix` no `/density` (f32×K² anexado, `"matrix":K`
+> no meta; paridade bit-a-bit com o worker JS, garantida por novos casos
+> `+matrix` no `test-backend.mjs`, incluindo regressão de índice com
+> referência descartada — um binário antigo degrada para "KPI indisponível",
+> nunca uma matriz errada). O bloco avisa quando um limiar excede o orçamento
+> de energia do cálculo — ali a matriz é truncada e os KPIs viram um piso.
+
 **Accessibility KPIs — "300 kJ city" initiative.** Density runs now also
 sample each reference's energy field at every other reference's cell,
 producing a pairwise K×K ref↔ref energy matrix at zero extra Dijkstra cost
@@ -568,6 +901,23 @@ budget bounds, maximize suppression).
 
 ## v55 — 2026-07-07
 
+> **Suavização do MDT + meta de precisão validada** (`bicycling-energy-model`
+> journal Entry 20). MDTs finos (pixel ≤ 10 m, como os rasters IGC-SP de 5 m)
+> agora recebem uma suavização gaussiana estática (σ = 10 m, normalizada por
+> máscara) aplicada uma vez ao carregar — a mitigação da sobrecarga de
+> resolução do Entry 19, na configuração validada. Novo controle "Suavização
+> do MDT" em 1A (auto / desligada / 10 / 20 / 30 m; o auto pula fontes grossas
+> como FABDEM e re-importações já suavizadas, que o `dem.tif` exportado agora
+> marca via tag). As alturas são suavizadas no app antes de irem aos motores —
+> paridade JS/Rust intocada; mudar o controle vale no próximo carregamento de
+> MDT. Com esse σ + parâmetros calibrados por ciclista (CdA, Crr, k_s
+> ajustados no próprio histórico — procedimento no journal), o erro validado
+> em passeios não vistos ficou em mediana |Δ%| 3.7 / 2.7 / 4.9 com viés < ±1%
+> em três ciclistas independentes — atingindo a meta de ±5% / ±2%. Nota
+> honesta: a calibração é a alavanca maior; a suavização é o padrão validado
+> que também ameniza o viés sem calibração. Novo `test-dem-smoothing.mjs`
+> trava a transformação.
+
 **DEM pre-smoothing + validated accuracy goal** (`bicycling-energy-model`
 journal Entry 20). Fine DTMs (pixel ≤ 10 m, e.g. the IGC-SP 5 m rasters) now
 get a static, mask-normalized Gaussian pre-smoothing (σ = 10 m) applied once
@@ -588,6 +938,20 @@ the app.js copy).
 
 ## v54 — 2026-07-07
 
+> **Energy-model journal alignment** (`bicycling-energy-model` journal Entries
+> 18/19). Reference-geometry (imported/drawn track) energy readout only —
+> routed-path/field energy is untouched. `refEnergyKJ`'s descent-recovery ε
+> now ports the champion harness's `epsGeom` estimator exactly: drop-weighted
+> over 30 m-resampled cells, replacing a lumped mean-descent-grade
+> approximation its own comment had claimed but never implemented. Also
+> clarified (comments only, no behaviour change): the v2 engine's trailing
+> descent-cost clamp is provably dead code — a 1.78 M-combo sweep plus 1 402
+> real rides never triggered it — kept only for JS/Rust bit-parity. New
+> disclosures: the v2 model is tuned for ~30 m DEM sampling, so on the
+> deployed 5 m IGC-SP DTM energies read conservatively high on hilly terrain;
+> and FABDEM is not recommended for energy work on flat/urban terrain, since
+> its per-pixel noise inflates measured ascent.
+
 **Energy-model journal alignment** (`bicycling-energy-model` journal Entries
 18/19; `docs/energy-journal-2026-07-06-workorder.md`). Reference-geometry
 (imported/drawn track) energy readout only — routed-path/field energy is
@@ -605,6 +969,14 @@ terrain, since its per-pixel noise inflates measured ascent.
 
 ## v53 — 2026-07-03
 
+> **Icon cache-bust fix.** v50's icon redesign kept every filename identical,
+> colliding with the 30-day cache `deploy.sh` sets on `icons/` — a browser or
+> CDN edge that had cached the old bytes wouldn't see the new icon for up to
+> 30 days regardless of redeploys. Every shipped icon file now carries a `-v2`
+> suffix, bypassing every existing cache outright. `favicon.ico` can't be
+> renamed (fixed well-known path), so its cache lifetime is cut from 30 days
+> to 1 instead.
+
 **Icon cache-bust fix.** v50's icon redesign kept every filename identical to
 minimize the diff — but `deploy.sh` sets a 30-day `Cache-Control` on `icons/`,
 and its own comment already warned about exactly this: a browser or
@@ -620,6 +992,14 @@ every filename to `-v3` (see the comment above the icon `gcloud storage
 objects update` call in `deploy.sh`).
 
 ## v52 — 2026-07-03
+
+> **Cross-repo energy-model audit fixes.** An audit against
+> `bicycling-energy-model` (the energy law's spec repo) confirmed `v2Edge` is
+> correct everywhere it's called, but found graph-mode **maximize** ignoring
+> mode "to" (always scored forward, unlike top-N and the raster path) and
+> **round-mode** path energy reporting only the outbound leg instead of the
+> round-trip total. Both fixed, with new regression tests. Removed the legacy
+> QGIS plugins this app was ported from.
 
 **Cross-repo energy-model audit fixes.** An adversarial audit against
 `bicycling-energy-model` (the energy law's spec repo) confirmed `v2Edge` is
@@ -637,6 +1017,19 @@ ported from — long superseded by `energy-worker.js`'s v2 engine and never
 part of the deployed file set.
 
 ## v51 — 2026-07-03
+
+> **Second full-repo review fix batch** (see
+> `docs/review-2026-07-02-round2-workorder.md`). Top-N and
+> length-constrained-DP correctness fixes (true route energy, "até"-mode
+> direction, repulsion clamp); graph-mode spatial-hash rewrite and a
+> T-junction merge fix; bundle geotransform check and a zip-bomb cap; DEM-load
+> and OSM-loader identity guards; worker-pool teardown; export georeferencing
+> fixes; cloud VM lease + boot-order + spoofing hardening; a
+> Content-Security-Policy and help-dialog focus trap; remaining i18n gaps and
+> doc corrections. An adversarial re-review of the batch's own diff caught two
+> more races it had introduced: a water-mask rebuild's staleness check and a
+> DEM load's generation guard could each be fooled by unrelated concurrent
+> activity — both now check the right thing.
 
 **Second full-repo review fix batch** (`docs/review-2026-07-02-round2-workorder.md`),
 covering rendering/export, bundle round-trip, data loaders, cloud-ops, i18n
@@ -699,6 +1092,13 @@ installed).
 
 ## v50 — 2026-07-02
 
+> **New app icon** — a yellow ascent arrow crossing a blue topographic contour
+> field, replacing the old bicycle glyph. Regenerated every size (favicon,
+> 192/512, apple-touch, maskable 192/512) from the new design source; same
+> file names throughout, so no manifest changes were needed. Also placed
+> beside the **"Simujaules"** title in the panel header, which was text-only
+> before.
+
 **New app icon.** Replaced the old bicycle glyph with a yellow ascent arrow
 crossing a blue topographic contour field — closer to what the app actually
 computes (climbing effort over terrain relief). Regenerated every size
@@ -713,6 +1113,22 @@ and `deploy.sh` needed no changes. The same icon now also sits beside the
 decorative/`alt=""`) — previously the header had text only.
 
 ## v49 — 2026-07-02
+
+> **Full-repo review fix batch** (see `docs/review-2026-07-01.md`). Top-N: an
+> admissible A\* heuristic (the old one overcharged gentle descents, so route #1
+> could cost more than the field's own optimum) and correct route direction in
+> "até" mode. "Maximizar" no longer silently empties under an energy budget.
+> Graph mode: fixed a half-cell terrain/rasterisation/snapping registration
+> error, T-junctions now join the network, chained bridge/tunnel decks flatten
+> as one continuous span, and node snap tolerance is capped at 15 m on coarse
+> DEMs. Native backend: maximize now matches the browser engine under a
+> network constraint, and `/single` passes are exact on very large DEMs.
+> Hardened a crafted-.gpkg XSS, bundle import now cancels an in-flight compute
+> first, and the compute-time estimate no longer sticks on "estimating…" if
+> calibration fails. Deploy no longer deletes the cloud VM startup script; the
+> service worker installs past the HTTP cache and stops caching large
+> DEM/GeoPackage files. i18n and v1→v2 cost-model doc fixes; the offline
+> census pipeline works again.
 
 **Correctness fixes from a full-repo review** (`docs/review-2026-07-01.md`), spanning
 the browser engine, the graph engine, the Rust backend, and app.js:
@@ -772,6 +1188,16 @@ live `gs://simujaules` bucket instead of the retired `telhas` one.
 
 ## v48 — 2026-06-29
 
+> **Comparação de rotas origem→destino.** Com *“Comparar com cenário sem
+> rede”* ligado, o seletor *“Cenário exibido”* passa a alternar também a
+> melhor *rota*, não só o campo: rota no *terreno* (sem restrição) em azul,
+> rota na *rede* (restrita) em laranja, as duas juntas na vista de diferença —
+> as mesmas cores da diferença de densidade. Uma melhor rota por cenário. Vale
+> no modo raster (máscara de rede) e no modo grafo (“seguir os vetores”).
+> Passe o mouse ou toque em qualquer uma das rotas para ver a energia e o
+> comprimento das *duas* de uma vez (mais o Δ — o custo de ficar na rede);
+> funciona com hover no desktop e com toque no celular.
+
 **Source→destination route comparison.** With *"Comparar com cenário sem
 rede"* on, the *"Cenário exibido"* picker now switches the best **route** too,
 not just the energy/passes field:
@@ -802,10 +1228,17 @@ only — no change to the energy engine or the Rust backend.
 
 ## v47 — 2026-06-29
 
+> Reverted the MTPI basemaps added in v46 — they were meant for amora, not
+> Simujaules.
+
 Reverted the MTPI basemaps added in v46 — they were meant for amora, not
 Simujaules.
 
 ## v46 — 2026-06-29
+
+> Two *MTPI* (multi-scale topographic position index) basemaps in the basemap
+> dropdown — Pindorama 90 m (COP90, South America, native z10) and Bacia do
+> Paraná 30 m (native z12), XYZ tiles from telhas.pedalhidrografi.co.
 
 Two **MTPI** (multi-scale topographic position index) basemaps in the basemap
 dropdown — **Pindorama 90 m** (COP90, South-America-wide, native zoom 10) and
@@ -815,6 +1248,12 @@ dropdown — **Pindorama 90 m** (COP90, South-America-wide, native zoom 10) and
 
 ## v45 — 2026-06-29
 
+> Bridge/tunnel *deck passes* read as a continuous line again. A deck is a
+> 1-cell line over water (unreached by the compute), so its stamped density
+> was faint and dropped by the passes-overlay downsample on big DEMs — a gap
+> along the bridge. The stamp is now dilated by the render stride.
+> Render-only.
+
 Bridge/tunnel **deck passes** read as a continuous line again. A bridge deck is a
 1-cell-wide line over water (`mask=0`, unreached by the compute), so its stamped
 density was faint and got dropped by the passes-overlay downsample on large DEMs
@@ -823,6 +1262,16 @@ by the render stride so it always lands on a sampled cell. Render-only; the
 engine/routing is unchanged.
 
 ## v44 — 2026-06-29
+
+> **v2 energy model.** The cost is now physics-based — mass, Crr, CdA, air
+> density, drivetrain efficiency, power on the flat and a climb threshold
+> replace the α/β/η knobs. Per edge it splits rolling from aero (aero charged
+> only off the climbs) with a per-grade descent recovery ε = clamp(min(1,
+> (α/β)/s) − 0.13). Worker, graph engine and the Rust backend move together
+> (bit-parity); reference-geometry energy uses the closed form with a 2 m
+> elevation deadband. Defaults are São Paulo-context (ρ=1.1, Crr=0.008, 75 kg,
+> ~80 W flat); the panel shows the derived α_r / α_a / β coefficients (kJ/m)
+> and a k_smooth knob. See bicycling-energy-model/notas.md.
 
 The **v2 energy model**. The cost is now **physics-parameterised** — *mass, Crr
 (rolling), CdA (drag), ρ (air density), drivetrain efficiency, power on the flat*
@@ -843,6 +1292,14 @@ an adjustable **elevation deadband** for the reference-geometry energy (default
 
 ## v43 — 2026-06-26
 
+> New *Geometria de referência* layer: its layer-control row has an ↑ upload
+> button (instead of opacity) that loads a GPX track, drawn as a magenta
+> overlay. Hover or click the track to see its metrics — distance, total
+> energy (the app's α·dist+β·dh model with the current parameters), total
+> ascent and total descent; elevation comes from the GPX or is sampled from
+> the loaded DEM. Also: energy now reads as a plain decimal (e.g. “3357 kJ”)
+> instead of scientific notation. JS/UI only.
+
 A reference-geometry GPX layer + plain-decimal energy. **JS/UI only — engine
 untouched.**
 
@@ -861,6 +1318,11 @@ untouched.**
 
 ## v42 — 2026-06-26
 
+> Removed the on-map Leaflet attribution strip; the same credits (Leaflet,
+> Leaflet-Geoman, OpenStreetMap, CARTO, Esri, and the pedalhidrografi.co
+> hydrography overlay) now live in the *Atribuições / Attributions* section
+> above. JS/UI only.
+
 Moved the map attribution into the help modal. **JS/UI only — engine untouched.**
 
 - Removed the on-map Leaflet attribution strip (`attributionControl: false`). The
@@ -870,6 +1332,14 @@ Moved the map attribution into the help modal. **JS/UI only — engine untouched
   the help modal, with links.
 
 ## v41 — 2026-06-26
+
+> Mobile layout fix (JS/UI only). On phones the locate, hamburger and
+> layer-control buttons now mirror the desktop top-right stack instead of
+> being scattered to the bottom corners, and the layer-control modal opens
+> *below* them — before, the tall modal covered the bottom-corner buttons so
+> you couldn't tap the layer button to close its own modal. The modal also
+> scrolls vertically when space is tight (its 2-column flow moved into a
+> height:auto child) instead of spilling sideways. Sized for an iPhone SE.
 
 Mobile layout fix for the on-map buttons + the layer-control panel. **JS/UI
 only — engine untouched.**
@@ -887,6 +1357,16 @@ only — engine untouched.**
 
 ## v40 — 2026-06-25
 
+> Passes are now always shown as a *normalized density* rather than raw counts
+> (JS/UI only; display-only and colour-invariant). A single run's passes are
+> subtree-size counts, while the multi-reference density already normalizes by
+> H·W twice — so the two read on very different scales (a 3C channel showing
+> *12* instead of the density's *~1e-10*). Count-based passes are scaled by
+> *1/(H·W)²* into the same units as the density at every render point;
+> already-normalized fields are left untouched. The colour/pattern is
+> unchanged (a constant scale) — only the numbers and placeholders move to
+> density units. The GeoTIFF export stays counts.
+
 Passes are always visualized as a **normalized density**, never raw counts.
 **JS/UI only — display-only and colour-invariant; the engine, export and
 bit-parity are untouched.**
@@ -903,6 +1383,20 @@ bit-parity are untouched.**
   GeoTIFF export stays counts.
 
 ## v39 — 2026-06-25
+
+> Density-display polish, dataset export/import, and map fixes (JS/UI only;
+> engine untouched). Graph-mode passes: network vectors keep a true orange
+> (terrain a true azure) — intensity is now opacity, not a multiply that
+> muddied mid-values into yellow-brown — and the *filtro média N* filter
+> applies to the network channel (precise vectors when empty, a rasterised +
+> mean-smoothed field when set; the difference view composites both channels
+> into one orange/azure raster). The 3C.a passes and 3B energy min/max inputs
+> now show the resolved auto numbers instead of the static *p10/p90/auto*. The
+> sidebar balances its columns evenly once they overflow (was column-1-heavy).
+> The rmsampa-v2 hydrography is crisp on HiDPI displays and no longer vanishes
+> past z17. New in Group 0: *export/import* of the four inputs in matching
+> formats — DEM and mask as GeoTIFF, network and bridges as GeoPackage. The
+> layer-control panel is resizable to two columns.
 
 Density-display polish, dataset export/import, and map fixes. **JS/UI only —
 the compute engine, Web Worker and Rust backend are untouched and stay
@@ -929,6 +1423,21 @@ bit-parity.**
   edge, matching the sidebar.
 
 ## v38 — 2026-06-25
+
+> A UI/UX review pass (JS/UI only; engine untouched). Units: the budget stays
+> in kJ, so α/β are labelled *kJ/m* again (reverting v37's J/m); downhill
+> recovery is now a 0–100 % input (default 10), mapped to the engine's 0–1
+> fraction. The collapse/expand group cue is a quiet grey bar now (was a loud
+> near-white border that out-shouted the status colours); *Baixar bundle* is
+> secondary so *Calcular* is the only primary. Drawing shows an *armed* button
+> state and Esc cancels; the “Concluído em…” pill auto-dismisses; the disabled
+> *Calcular* button explains what it needs; enabling density auto-opens the
+> points/references group. Accessibility: bilingual accessible names on the
+> icon buttons, file pickers and layer-panel rows, accent-color on native
+> controls, ≥24px touch targets, reduced-motion support. Plus i18n/copy fixes,
+> shorter (non-clipping) select options, and mobile button placement fixes.
+> New cloud example datasets: *Viário RMSampa* (road network, 1B) and *Águas
+> RMSampa* (water mask, 1C), covering the full RMSampa region.
 
 A UI/UX review pass. **JS/UI only — the compute engine, Web Worker and Rust
 backend are untouched and stay bit-parity.**
@@ -975,6 +1484,19 @@ backend are untouched and stay bit-parity.**
 
 ## v37 — 2026-06-25
 
+> UI refinements on top of v36 (JS/UI only; engine untouched). Sidebar groups
+> reordered/renamed (1B–1D, 2A–2C; "maximizar energia" and "origem das
+> referências" removed); the multi-column sidebar fills each column
+> top-to-bottom before the next and scrolls vertically only. The 1B network
+> params and 2A parameters are now 2-col label|input tables (cost coefficients
+> in *J/m*, budget in kJ). The energy-field / density / legend controls moved
+> into the *Controle de camadas* panel (its × removed — the layer button
+> toggles it, Esc closes it); Statistics stay in the sidebar. Collapsed groups
+> read grey, expanded white (under the green/orange/yellow/red status
+> colours); 1C/1D go green on drawn geometry alone. The app is now titled
+> *Simujaules* with a tagline. Fixes: collapsing the sidebar no longer blanks
+> the map; the rmsampa-v2 overlay no longer 404s tiles past zoom 16.
+
 UI refinements on top of v36. **JS/UI only — the compute engine, Web Worker and
 Rust backend are untouched and stay bit-parity.**
 
@@ -1012,6 +1534,23 @@ Rust backend are untouched and stay bit-parity.**
   FlatGeobuf survives deploys.
 
 ## v36 — 2026-06-24
+
+> Big UI overhaul (JS/UI only — engine, worker and backend untouched,
+> bit-parity preserved). The sidebar is reorganised into nested, collapsible
+> numbered groups (*0* Import/Export · *1* Inputs [1A–1D] · *2* Compute setup
+> [2A–2C] · *3* Results [3A–3D]) with per-group status colours, auto-expand,
+> and a draggable 1–4-column resizer. Layer visibility/opacity/order + basemap
+> (now with an *Esri satellite* option) + reference markers moved into a
+> non-blocking on-map *Controle de camadas* panel (floating button, unified
+> per-layer rows). Compute progress/log float in a dismissable bottom pill.
+> Full config persistence + Export/Import/Reset (Group 0), and bundles embed
+> the entire UI state. On-map drawing (Leaflet-Geoman): *barrier* + *passable
+> corridor* polygons (1C) and *portal* lines (1D) feed the compute and
+> round-trip through config/bundles. Smaller: density tweaks follow the
+> displayed channel (terrain vs network), passes auto-max = p90 above
+> auto-min, scientific-notation density bounds, desktop sidebar collapse,
+> locate marker + accuracy circle, credit moved here. Sampling order is now
+> Censo / Sobol / Uniforme (Halton dropped).
 
 A large UI/UX overhaul. **JS/UI only — the compute engine, Web Worker and Rust
 backend are untouched and stay bit-parity; the no-op invariant holds (with no
@@ -1058,6 +1597,19 @@ drawings/overrides the compute grid is byte-identical).**
 
 ## v35 — 2026-06-24
 
+> App moved to its own domain: now served from the root of
+> `simujaules.pedalhidrografi.co` (dedicated bucket) instead of
+> `telhas.pedalhidrografi.co/simujoules/`, and branded *Simujaules* (an
+> affective typo of *joules*); absolute URLs repoint to the new root (the RDF
+> vocabulary namespace stays on telhas as a stable identifier, resolved via
+> redirect). And cloud compute (*Nuvem — VM orquestrada*) now works when the
+> app is accessed remotely: a public, password-gated Cloud Run orchestrator
+> creates/starts/ stops/deletes the GCP VM on demand, and the browser sends
+> the big compute payloads directly to the VM over HTTPS — fill in the
+> Orchestrator URL and the new Cloud password to use it. The VM uses an
+> ephemeral IP and is deleted after 30 days idle (cost → 0). No engine
+> changes.
+
 Two changes ship together, numbered **v35** to avoid a version clash with the
 in-flight `feature/ui-overhaul` branch (which already uses v33).
 
@@ -1099,6 +1651,16 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
 
 ## v32 — 2026-06-24
 
+> New *IBGE 2022 census (population density)* reference-sampling strategy.
+> Instead of spreading references uniformly, it samples them by where people
+> actually live: a live, in-browser port of `census/sample_census.py` that
+> fetches the census setores inside the DEM from a cloud FlatGeobuf over HTTP
+> Range requests (only the bbox slice transfers, not the ~450 MB national
+> file), weights each setor by population × (area inside the DEM / full area),
+> picks setores by a 1-D Sobol inverse-CDF and drops points inside them with a
+> 2-D Sobol rejection draw. Brazil-only and online-only (like the OSM and
+> cloud features); replaces the current reference set.
+
 ### Features
 
 - **New "IBGE 2022 census (population density)" reference-sampling strategy.** A
@@ -1124,6 +1686,12 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
 
 ## v30 — 2026-06-23
 
+> Bundles now round-trip the "Comparar com cenário sem rede" (compare) view:
+> the unconstrained energy/passes and the saved difference field are written
+> to the bundle, the compare toggle + e-max-mode are recorded, and load
+> rebuilds the scenario picker and difference view — no recompute. (Graph-mode
+> compare restore is still a follow-up.)
+
 ### Fixes
 
 - **Bundles now round-trip the "Comparar com cenário sem rede" (compare) view.**
@@ -1141,6 +1709,12 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
 
 ## v29 — 2026-06-23
 
+> Difference (network-cost) passes view recoloured from red/green to *orange*
+> (network) + *azure-blue* (terrain) — additive complements that sum to white
+> (max brightness on overlap) and stay distinguishable under red–green
+> colour-blindness. The two passes control groups now have colour-chip labels
+> (Network / Terrain).
+
 ### Features
 
 - **Difference (network-cost) passes view: colourblind-safe recolour.** The
@@ -1155,6 +1729,10 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
 
 ## v28 — 2026-06-23
 
+> Faster network interpolation on large DEMs: the post-compute IDW fill now
+> sizes its worker pool by `deviceMemory` instead of a fixed budget that
+> pinned big DEMs to a single worker. Output unchanged.
+
 ### Internal
 
 - **Network interpolation pool budgeted by `deviceMemory`.** The post-compute IDW
@@ -1167,6 +1745,12 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
 
 ## v27 — 2026-06-23
 
+> Cloud *keep VM warm between runs* toggle: when ticked, a run leaves the VM
+> up to reuse on the next run (only the first run pays the boot); the
+> orchestrator lease + in-VM idle-watchdog stop it after ~15 min idle.
+> Tab-hide no longer stops the VM in keep-warm mode. Default stays
+> stop-after-each-run.
+
 ### Features
 
 - **Cloud "keep VM warm between runs" toggle.** With it ticked, a run no longer
@@ -1177,6 +1761,18 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
   only a real page unload does. Default stays "stop after each run" (cost-safe).
 
 ## v26 — 2026-06-23
+
+> Cloud compute source. The "Use native backend (Rust)" checkbox is now a
+> three-way *Compute source* selector: *Browser* (in-page worker pool, the
+> default), *Localhost* (the native Rust backend, with its URL field), and
+> *Cloud*. Cloud drives a small local orchestrator (`http://127.0.0.1:8079`)
+> that boots a pre-baked VM on demand, waits for it to be healthy, runs the
+> compute through it, then stops the VM after the run (and on tab hide). A
+> transfer-size estimate (upload / download / wire time) shows beforehand.
+> Cloud is only available when the applet is served locally (the orchestrator
+> listens on loopback). On any orchestrator or boot failure the run falls back
+> to the in-browser worker pool. Browser/Localhost behaviour and engine
+> bit-parity are unchanged.
 
 ### Features
 
@@ -1201,6 +1797,20 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
   compute path is untouched; Cloud just sends the same bytes to a proxy URL.
 
 ## v25 — 2026-06-22
+
+> Graph mode now RUNS the comparison instead of disabling it. "Constrain to
+> network" is forced on + locked while "Compute on network graph (follow the
+> vectors)" is on (graph mode is inherently network-constrained), but "Compare
+> with unconstrained" stays togglable: graph mode then computes a full-DEM
+> unconstrained *raster* scenario alongside the graph compute and exposes the
+> energy difference (the cost of being restricted to the network) through the
+> "Displayed scenario" picker (graph / unconstrained / difference). Native
+> backend: "Use native backend (Rust)" moved out of the density panel (always
+> visible) and now also accelerates single-source from/to/round ENERGY fields
+> via a new `POST /single` endpoint — top-N routes, the destination path and
+> "maximize" stay browser-only (the backend produces no routes), auto-fallback
+> unchanged. energy-worker.js + backend/src/main.rs kept bit-parity
+> (test-backend.mjs `+single` cases).
 
 ### Fixes
 
@@ -1231,6 +1841,13 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
 
 ## v24 — 2026-06-21
 
+> Fix: "Calcular sobre o grafo da rede (seguir os vetores)" takes precedence
+> over the raster "Restringir cálculo à rede" / "Comparar com cenário sem
+> rede" toggles, so with graph mode on (it's remembered between sessions) the
+> comparison never ran and its "Cenário exibido" dropdown never appeared.
+> Graph mode now greys out and disables those two toggles (with a tooltip)
+> while it's on, so the precedence is visible.
+
 ### Fixes
 
 - **Graph mode silently suppressed the constrained-vs-unconstrained compare.**
@@ -1243,6 +1860,14 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
   while it's on, both on toggle and on load, so the precedence is visible.
 
 ## v23 — 2026-06-21
+
+> OSM `ele` on bridge/tunnel decks (group 1d): "Pull bridges & tunnels from
+> OSM" now also reads node `ele` tags and uses the mapped deck elevation for
+> the raster portal endpoint heights (per-abutment, with way-`ele` /
+> nearest-node fallback) instead of guessing from the bare-earth DEM. Unmapped
+> ends fall back to the DEM, so a pull without `ele` is identical to v22.
+> Persisted in the bundle; engine/backend kept bit-parity. Graph mode stays
+> DEM-based.
 
 ### Features
 
@@ -1264,6 +1889,14 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
   unchanged (still DEM-based). A* top-N / maximise still ignore portals.
 
 ## v22 — 2026-06-21
+
+> New 1c source: "Pull water from OSM" builds the impassable mask straight
+> from Overpass — water areas (natural=water / riverbank / reservoir, incl.
+> multipolygon relations), the open sea/ocean (from natural=coastline, with
+> land-left/water-right orientation), and non-tunnelled waterway=river lines
+> (with a "Rivers (lines) impassable" toggle). Streams and tunnelled waterways
+> stay passable. It reuses the uploaded-mask pipeline (Invert, corridors,
+> overlay, bundle). Needs a geographic DEM.
 
 ### Features
 
@@ -1288,6 +1921,11 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
 
 ## v21 — 2026-06-21
 
+> Fix: "Load FABDEM for current viewport" crashed with "TypeError: t is not a
+> function" — the tile-mosaic loop variable shadowed the i18n t() function
+> after status strings were migrated to it. Renamed the loop variable; the
+> button works again.
+
 ### Fixes
 
 - **"Load FABDEM for current viewport" crashed** with `TypeError: t is not a
@@ -1298,6 +1936,15 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
   (both tile loops in `loadFabdemForView`). App-only; engine/backend unchanged.
 
 ## v20 — 2026-06-20
+
+> Bridge follow-ups. Deck passes/density now show up: a bridge portal jumps
+> abutment→abutment, so deck cells previously rendered no passes even when the
+> bridge carried heavy traffic — they're now painted with the crossing flow.
+> Groups 1c (impassable mask) and 1d (bridges) light up when their data is
+> loaded. And a new 1d "Extract from loaded network" button derives
+> bridge/tunnel decks from the network already loaded in 1b (gpkg tags / OSM
+> other_tags) — offline, no Overpass. Both 1c and 1d now have an "Apply to
+> compute" toggle to enable/disable their effect without clearing the data.
 
 ### Fixes & improvements
 
@@ -1321,6 +1968,22 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
   compute without clearing the loaded data (and it round-trips in bundles).
 
 ## v19 — 2026-06-19
+
+> Optional OSM bridges & tunnels (group 1d). A dedicated "Pull bridges &
+> tunnels from OSM" control queries Overpass for bridge (and optionally
+> tunnel) ways over the DEM extent and models each as a level deck between its
+> two ground abutments — useful for inland viaducts over valleys/saddles, not
+> just water (a bare-earth DEM omits the deck, so routing over a bridge
+> otherwise dives into the gap below). Each deck becomes a portal edge between
+> its end cells at the flat-deck cost, relaxed alongside the grid edges, so
+> the route over a bridge and the route under it (a cross-street beneath a
+> viaduct) both stay correct — true multi-level routing on a 2.5-D grid. Graph
+> mode ("follow the vectors") also goes multi-level: the OSM streets pull
+> captures bridge/tunnel/layer tags, so a deck crossing a road at a different
+> layer doesn't connect and deck edges read ~flat. Decks render on the map and
+> persist in bundles as bridges.geojson. The native backend gained matching
+> portal support (bit-for-bit parity). With no bridges loaded, results are
+> unchanged.
 
 ### New features
 
@@ -1355,6 +2018,18 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
 
 ## v18 — 2026-06-19
 
+> Optional impassable mask (group 1c). Upload a binary GeoTIFF (1 =
+> impassable, e.g. water bodies); it's resampled onto the DEM grid by
+> area-coverage majority (≥50% of a cell's footprint impassable ⇒ blocked;
+> outside the mask's extent = passable), so it can have a different extent /
+> resolution / CRS than the DEM. Masked cells block routing. With a vector
+> network loaded (1b), an optional toggle carves narrow passable "bridge"
+> corridors across the mask, each levelled to a smooth profile (land elevation
+> at the shores, ramping to a ±offset at the bridge centre, clamped −5…+15 m).
+> A "show on map" toggle paints blocked water (red) and corridors (green), and
+> bundles gain impassable.tif. Engines unchanged — a run with no mask
+> reproduces prior results exactly.
+
 ### New features
 
 - **Impassable mask (group 1c).** Upload a binary GeoTIFF (1 = impassable,
@@ -1381,6 +2056,18 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
   all-zero mask) reproduces prior results exactly.
 
 ## v17 — 2026-06-19
+
+> UI / accessibility pass. The "Load DEM" and "vector network" groups now
+> light up once their data is loaded. Parameter & visualization choices
+> persist across reloads (localStorage; session data like the DEM and points
+> isn't saved — that's what bundles are for). The clear-points / place-random
+> / clear-refs buttons are clustered together, and only the src/dst picker
+> fades in density mode. The sidebar hint paragraphs were removed and their
+> content moved into this Help modal (now also covering maximize, the OSM
+> pull, the native backend, worker sizing and QMC sampling). Accessibility:
+> the status line is an aria-live region, field labels are associated with
+> their inputs, opacity sliders have labels, there's a keyboard focus ring,
+> and the example loaders are buttons.
 
 ### Improvements
 
@@ -1417,6 +2104,14 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
 
 ## v16 — 2026-06-19
 
+> Time estimate fixed for network/graph runs. Graph mode ("follow the
+> vectors") was estimated with the raster model (~1000× too high — a graph
+> search is ∝ edges, not 135 M cells); it now uses a graph-size model. The IDW
+> interpolation fill is now a separate phase (often the larger one) that
+> scales with the max ray distance, and it's corrected independently of the
+> compute. Toggling interpolate / compute-on-graph / constrain-to-network now
+> updates the estimate. Native backend log line now echoes Emax / mode / type.
+
 ### Fixes
 
 - Compute-time estimate is now correct for **network-graph and interpolation**
@@ -1443,6 +2138,13 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
 
 ## v15 — 2026-06-19
 
+> Reloading a bundle now restores all saved layers, not just the energy/passes
+> fields. Top-N routes and the maximize path were already in the exported zip
+> (routes.geojson / path.geojson) but the loader never read them back — it
+> redrew the fields and asked you to recompute. They now come back and recolor
+> exactly like a fresh compute, no recompute needed. (Graph-mode edges aren't
+> restored yet.)
+
 ### Improvements
 
 - Reloading an exported bundle now restores **all** saved layers, not just
@@ -1459,6 +2161,16 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
   needs the full graph object, not just edge geometry.)
 
 ## v14 — 2026-06-19 (unreleased)
+
+> Compute-time estimate accuracy fix (was up to ~3× low, now ~±20% with no
+> bias). Backend density on a large DEM was the main culprit: the estimate
+> assumed all cores parallelise, ignoring that the server caps concurrent
+> slices to a memory budget (1-2 fit on a 135 M-cell DEM, not cores-many) — it
+> now replicates that cap (`/health` reports the memory budget). The
+> calibration probe is now cell-capped (≤~1.5 s on any DEM, anchored on an
+> unsaturated point — fixes a separate up-to-3.8× error on small DEMs), and an
+> online correction learns actual/predicted per engine so the estimate
+> converges to your machine within a run or two.
 
 ### Fixes
 
@@ -1489,6 +2201,12 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
 
 ## v13 — 2026-06-18 (unreleased)
 
+> "Follow the vectors" network-graph mode (new graph-engine.js): with a vector
+> network loaded, an optional toggle routes on the real polyline graph
+> (planarised — junctions at crossings or only at shared endpoints) instead of
+> the rasterised mask, so passes/paths trace the vectors with no staircase;
+> all compute modes; colored-vector overlay; JS-only.
+
 ### Features
 
 - "Follow the vectors" network-graph mode (new `graph-engine.js`). When a
@@ -1507,6 +2225,37 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
   is untouched.
 
 ## v12 — 2026-06-12 (unreleased)
+
+> Density worker pool (multi-core) + Dijkstra heap optimisations (~10× density
+> runs). Optional native Rust backend (off by default, density only,
+> auto-fallback). QMC (Sobol/Halton) sampling option for random reference
+> placement. Round-trip budget mode: cap each leg or the round-trip total;
+> round-mode passes count only completable (in-budget) trajectories. "Energy
+> color" passes blend (hue from energy, opacity from passes). Optional
+> vector-network rendering (black lines, configurable ground width + opacity;
+> passes overlay stacks above the network; stacking reorderable via a modal)
+> and a "constrain compute to network" toggle. Basemap selector (OSM / Carto
+> minimal / solid colours). Export of rendered energy/passes PNGs with world
+> files. OSM (Overpass) street-network pull. Constrained-vs-unconstrained
+> comparison: interpolated energy difference + additive red/green passes
+> overlay with per-channel controls (regular and density modes). Interpolation
+> prefilter + worker-pool banding. Density radix-heap engine (in-browser
+> density within ~20% of the native backend on huge DEMs). Compute-time
+> estimate is now budget- and engine-aware (per-DEM calibration probe at
+> load): changing the energy budget, alpha, worker count, or backend now moves
+> the estimate (it previously ignored the budget entirely). Density scales to
+> large workloads: leaner f32 workers + deviceMemory-budgeted pool + opt-in
+> "max compute workers" override; the native backend caps parallel slices to a
+> memory budget (SIMU_MAX_MEM_GB) so it no longer OOM-crashes at high ref
+> counts. Backend liveness/progress fixes. SEO/LLM metadata (description,
+> canonical, Open Graph, JSON-LD, llms.txt, sitemap). Fixes: PWA manifest
+> restored, service-worker install bug, offline caching of CDN libs (SRI +
+> crossorigin), 3-D GeoPackage (Z/M) parsing, stale-result race on DEM/network
+> swap mid-compute, worker-crash handling, XSS hardening of Bundle-before-DEM
+> loading order now restores correctly (pending-bundle re-apply).
+> Density+network Compute no longer aborts silently (null-src re-snap bug);
+> network clicks snap grid-wide (no more snap-radius dead-end); .gpkg geometry
+> column name read from metadata; empty-on-DEM networks rejected loudly.
 
 ### Performance
 
@@ -1651,11 +2400,17 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
 
 ## v11 — 2026-05-13
 
+> Wasm engine removed (JS worker only). Fix layered-DP backtrack direction bug
+> (spurious "backtrack_fail"); fix ReferenceError in result metadata.
+
 - Wasm engine removed — JS worker is the only compute engine.
 - Fix layered-DP backtrack direction bug (spurious `backtrack_fail`).
 - Fix ReferenceError on `autoMax`/`passesMax` in result metadata.
 
 ## v8–v10 — 2026-05
+
+> Reverse-optimisation (maximize energy) toggle; length-constrained max-cost
+> path via layered DP; DP failures surfaced in the UI instead of the console.
 
 - Reverse-optimisation toggle (maximize energy): edge costs inverted
   against a precomputed `MAX_EDGE_COST`.
@@ -1666,6 +2421,10 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
 
 ## v4–v7 — 2026-05
 
+> DEM relief layer (cmocean.phase + slope); locate-me button; OOM fixes for
+> huge DEMs (reservoir-sampled percentiles, stride-capped canvas);
+> drawer/z-index and iOS private-browsing fixes.
+
 - DEM relief layer: cmocean.phase elevation × slope hillshade.
 - Locate-me button; mobile drawer refinements.
 - OOM fixes for 100 M-cell DEMs: reservoir-sampled percentiles,
@@ -1674,6 +2433,11 @@ in-flight `feature/ui-overhaul` branch (which already uses v33).
   non-geographic DEMs; harden localStorage for iOS private browsing.
 
 ## v1–v3 — 2026-05-08
+
+> First public shell: GeoTIFF DEM loading, asymmetric-cost Dijkstra energy
+> fields, passes count, top-N routes, multi-reference density, vector-network
+> constraint, bundle export (GeoTIFF + JSON-LD), PT/EN, FABDEM viewport
+> loader, PWA shell.
 
 - First public shell: GeoTIFF DEM loading (geotiff.js 3.x), asymmetric-cost
   8-connected Dijkstra energy fields (α/β/η model), passes count, top-N

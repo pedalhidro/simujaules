@@ -66,12 +66,13 @@ impassable/drawn layers:
 
 - DEM read (`census/census-density.mjs` `loadDem`, the app's loader: band 0,
   f32-rounded nodata, GeoKey-first CRS test, flat-earth cell size), then
-  `smoothHeightsInPlace` (imported from `test-dem-smoothing.mjs`, the
-  byte-identical mirror) under the app's auto rule — σ 30 m unless the file
+  `smoothHeightsInPlace` (imported from `lib/dem-smoothing.js`, the app's
+  own function) under the app's auto rule — σ 30 m unless the file
   is an app `dem.tif` export carrying its smoothing tag.
-- The run message is app.js's `baseMsg` (`lib.mjs` `buildRunMessage`): dx/dy
+- The run message is the app's `baseMsg` (`app/run.js`; mirrored by `lib.mjs` `buildRunMessage`): dx/dy
   in metres, `wantPasses` always on, the v2 cost bundle from `deriveCost`
-  (the `readCost` mirror — São Paulo gravity lives there, not here).
+  (`lib/cost.js`, the function the app's `readCost` calls — São Paulo gravity
+  lives there, not here).
 - Density is the app's pool merge with one slice (`census` `runDensity`,
   which builds its own run message — keep both in step with app.js).
 - Energies shown are the engine's own numbers: `pathEnergy` is the f32 field
