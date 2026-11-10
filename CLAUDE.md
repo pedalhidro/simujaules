@@ -87,7 +87,8 @@ hashes.
   (`refEnergyKJ`, `deadband` — the GPX-overlay closed form),
   `dem-smoothing.js` (`smoothHeightsInPlace`), `water-raster.js` (the OSM
   water-mask rasterisers), `census-sampler.js` (Sobol/Halton + polygon
-  helpers), `maxseg-coarsen.js`, `run-message.js` (the engine's run
+  helpers), `maxseg-coarsen.js`, `pool-merge.js` (the density pool's
+  slot-order merge), `run-message.js` (the engine's run
   message — one builder for the app, MCP and census), `changelog.js` (the
   `CHANGELOG.md` parser behind the help modal). RULE: a pure helper that a test or headless tool
   needs goes HERE and is imported — never copy a function out of `app/` or
@@ -118,7 +119,16 @@ hashes.
   (the spec caps it at 8 GB). A `#max-workers` input overrides this (clamped
   by K) for users on big-RAM machines deviceMemory can't see. Each worker
   gets `densityPartial: true` and returns raw accumulators (density,
-  energySum, energyCount) that `app.js` merges and normalises. On a 135 M-cell
+  energySum, energyCount) that the app merges and normalises. The merge is
+  in SLOT order, never arrival order (`lib/pool-merge.js`
+  `createSlotMerger`, v82): f64 addition is not associative, and summing
+  slices as they arrived made a ≥ 3-worker wasm pool's `passes.tif` differ
+  in the last digits between identical runs. An early slice is held (its
+  three transferred arrays only — its worker is already terminated, so the
+  held bytes are part of what `densityPoolSize` budgeted for that worker)
+  until every lower slot has merged. Keep any new pool that SUMS worker
+  outputs on this helper; positional copies (the matrix rows, the interp
+  bands) are order-independent already. On a 135 M-cell
   DEM this is 1 worker (two won't fit 16 GB) — the honest ceiling. The
   optional network IDW fill runs AFTER the merge as a separate
   `kind: "interp"` worker message — never per-slice.
@@ -492,6 +502,7 @@ node test-water-raster.mjs                 # OSM water-mask rasterisation (areas
 node test-app-shell.mjs                    # imports ≡ sw.js precache ≡ deploy.sh staging + stamps (needs bash)
 node test-changelog.mjs                    # CHANGELOG.md parser + newest entry ≡ sw.js VERSION
 node test-run-message.mjs                  # run-message builder ≡ keys the worker reads; every sender uses it
+node test-pool-merge.mjs                   # density-pool merge: every arrival order gives the same bits
 node census/test-census-sampler.mjs        # in-browser census sampler helpers (lib/census-sampler.js)
 node census/test-census-density.mjs        # census density harness end-to-end (needs npm install in census/)
 node mcp/test-mcp.mjs                      # MCP server over real stdio vs direct engine runs (needs npm install in census/ AND mcp/)

@@ -19,8 +19,11 @@ history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 > na página (a página encolhe ~30% e o service worker ~85%). E o código do
 > app, que era um arquivo único de 13 mil linhas, foi dividido em módulos por
 > assunto. Sai de vez o encanamento do antigo modo "maximizar energia", que
-> já não tinha controle na tela. Nada muda nos cálculos nem nos resultados —
-> conferido de ponta a ponta, byte a byte, contra a versão anterior.
+> já não tinha controle na tela. Uma correção: a densidade com 3 ou mais
+> workers e o motor WebAssembly agora dá sempre o mesmo resultado, bit a bit
+> — antes os últimos dígitos das passagens podiam variar entre duas rodadas
+> idênticas. Fora isso, nada muda nos cálculos — conferido de ponta a ponta
+> contra a versão anterior.
 
 **Changelog em fonte única.** O histórico vivia em três lugares mantidos à
 mão — este arquivo, a seção recolhida da Ajuda (`index.html`, 748 linhas) e
@@ -55,6 +58,24 @@ aleatórios, zero diferenças). Seguem como cópias, por o `energy-worker.js`
 ser um script clássico: `v2Edge` (`test-worker-pool.mjs`), `epsEstimate`
 (`test-energy-v2.mjs`) e a tabela de curvas (`test-maxseg.mjs`). O
 `lib/package.json` só diz ao Node que são módulos ES e não é publicado.
+
+**Densidade em pool reprodutível bit a bit.** Cada worker do pool devolve os
+acumuladores crus da sua fatia de referências e a página os somava **na
+ordem em que as fatias chegavam**. Soma em ponto flutuante não é associativa:
+com 3 ou mais fatias o total dependia de qual worker terminava primeiro. No
+motor WebAssembly (densidade acumulada em f64) o `passes.tif` exportado saía
+com 2–3 hashes diferentes em 20 rodadas idênticas (3 workers, 8 e 16
+direções); o motor JS não variava nesses tamanhos (suas fatias somam sem
+arredondamento) e o `energy.tif` nunca variou. Agora a soma é sempre na
+ordem das fatias (`lib/pool-merge.js`): a fatia que chega adiantada espera
+as anteriores, e só os seus três vetores ficam retidos — o worker dela já foi
+encerrado, então a memória retida é parte do que o `densityPoolSize` já
+orçava para aquele worker (16 B/célula no JS, 20 no wasm, contra 38 e 69
+orçados); nenhum pool mudou de tamanho. Depois da correção: um único hash por
+configuração em todas as rodadas. Com 1 ou 2 workers o resultado é o de
+antes. Novo `test-pool-merge.mjs`: todas as permutações de chegada de 3 e 4
+fatias reais (JS e wasm32) dão os mesmos bits, e a soma antiga na ordem de
+chegada difere em 4 de 6 e 22 de 24 permutações nos dados do wasm.
 
 **Mensagem de execução com um só construtor.** O `energy-worker.js` assume
 um valor padrão, em silêncio, para qualquer chave que falte na mensagem

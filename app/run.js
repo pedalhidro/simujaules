@@ -31,6 +31,7 @@ import {
   updateEstimateCorrection,
 } from "./estimate.js";
 import { buildComputeGrid, buildPortals, stampBridgeDeckPasses } from "./grid.js";
+import { addDensityPartial, createSlotMerger } from "../lib/pool-merge.js";
 
 // ------- Run -------
 runBtn.addEventListener("click", async () => {
@@ -519,6 +520,14 @@ runBtn.addEventListener("click", async () => {
       const workerFrac = new Float64Array(poolN);
       const sliceLen = new Float64Array(poolN);
       let remaining = poolN;
+      // Slices are summed in SLOT order, not arrival order: f64 addition is
+      // not associative, so with ≥ 3 slices an arrival-order sum made the
+      // exported passes/energy depend on worker timing. A slice that finishes
+      // before a lower slot is held (its transferred density/energySum/
+      // energyCount only — its worker is still terminated at once) and merged
+      // when its turn comes; each held buffer is released as it is merged.
+      const sums = { density, energySum, energyCount };
+      const merger = createSlotMerger({ slots: poolN, onMerge: (_s, part) => addDensityPartial(sums, part) });
 
       const poolProgress = () => {
         let acc = 0;
@@ -543,9 +552,7 @@ runBtn.addEventListener("click", async () => {
             workerFrac[slot] = m.progress;
             poolProgress();
           } else if (m.kind === "done") {
-            for (let i = 0; i < N; i++) density[i] += m.density[i];
-            for (let i = 0; i < N; i++) energySum[i] += m.energySum[i];
-            for (let i = 0; i < N; i++) energyCount[i] += m.energyCount[i];
+            merger.add(slot, { density: m.density, energySum: m.energySum, energyCount: m.energyCount });
             if (matrix && m.matrix) matrix.set(m.matrix, lo * K);
             workerFrac[slot] = 1;
             poolProgress();
@@ -573,6 +580,7 @@ runBtn.addEventListener("click", async () => {
             noteEngineFallback(m);
           } else if (m.kind === "error") {
             stopTicker();
+            merger.drop(); // the run is dead — release any held slices now
             computeFailed(m.message);
           }
         }, engine ? WASM_WORKER_URL : WORKER_URL);
