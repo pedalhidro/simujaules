@@ -117,7 +117,12 @@ hashes.
 - `deploy.sh` — stages and rsyncs to `gs://simujaules`, served at
   `simujaules.pedalhidrografi.co` behind Cloudflare (cache invalidation is a
   CF purge, not a Cloud CDN invalidation). Only explicitly listed files ship;
-  backend/ and tests never deploy. `DEPLOY_STAGE_ONLY=<dir> ./deploy.sh`
+  backend/ and tests never deploy. Upload ORDER is load-bearing since `app.js`
+  imports `app/` and `lib/`: the directories go up first (add/update only),
+  then the top-level entry files, then the directories again with delete —
+  so the live entry never references a module that is not in the bucket,
+  and an aborted upload leaves the previous version intact.
+  `DEPLOY_STAGE_ONLY=<dir> ./deploy.sh`
   stages + version-stamps into `<dir>` and stops before any gcloud call —
   the hook `test-app-shell.mjs` uses to check the real staging.
 - `test-worker-pool.mjs` — run with `node`; self-contained worker
