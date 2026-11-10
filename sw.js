@@ -30,7 +30,7 @@
 // lingering until manual reload.
 // The per-version history lives in CHANGELOG.md only (its newest heading
 // must equal VERSION — test-changelog.mjs checks it).
-const VERSION  = "v82";
+const VERSION  = "v83";
 const PRECACHE = `simu-precache-${VERSION}`;
 const RUNTIME  = `simu-runtime-${VERSION}`;
 

@@ -121,7 +121,7 @@ hashes.
   gets `densityPartial: true` and returns raw accumulators (density,
   energySum, energyCount) that the app merges and normalises. The merge is
   in SLOT order, never arrival order (`lib/pool-merge.js`
-  `createSlotMerger`, v82): f64 addition is not associative, and summing
+  `createSlotMerger`, v83): f64 addition is not associative, and summing
   slices as they arrived made a ≥ 3-worker wasm pool's `passes.tif` differ
   in the last digits between identical runs. An early slice is held (its
   three transferred arrays only — its worker is already terminated, so the
@@ -192,9 +192,9 @@ hashes.
   `test-app-shell.mjs` checks the chain, the import/export names, the
   setter rule (heuristically) and the precache list.
 
-- MAXIMIZE IS ENGINE-ONLY (v82). "Maximize mode" (inverted costs, plus the
+- MAXIMIZE IS ENGINE-ONLY (v83). "Maximize mode" (inverted costs, plus the
   layered-DP max-cost path via `maximizeLength`) had no UI control since
-  ~v36; v82 removed the app's dormant plumbing for it (the `#maximize` reads,
+  ~v36; v83 removed the app's dormant plumbing for it (the `#maximize` reads,
   its strings, the bundle-import handling). What REMAINS, deliberately:
   `energy-worker.js`, `graph-engine.js`, `backend/src/main.rs` (hence the
   wasm modules) still implement it and their suites still test it — every
@@ -206,7 +206,7 @@ hashes.
   ENGINES is a parity change — `energy-worker.js` and `main.rs` in lockstep,
   then `wasm/build.sh` — not a cleanup.
 
-- THE RUN MESSAGE HAS ONE BUILDER (v82). `energy-worker.js` destructures the
+- THE RUN MESSAGE HAS ONE BUILDER (v83). `energy-worker.js` destructures the
   `kind: "run"` message and silently DEFAULTS every missing key, so a sender
   that forgets a field does not fail — it runs a different computation.
   `lib/run-message.js` `buildRunMessage` (the base message) and

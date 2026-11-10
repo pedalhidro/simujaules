@@ -12,18 +12,70 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v83 — 2026-11-10
+
+> **Densidade reprodutível.** A densidade com 3 ou mais workers e o motor
+> WebAssembly agora dá sempre o mesmo resultado, bit a bit — antes os últimos
+> dígitos das passagens podiam variar entre duas rodadas idênticas. Sai também
+> o encanamento do antigo modo "maximizar energia", que já não tinha controle
+> na tela. Fora isso, nada muda nos cálculos.
+
+**Densidade em pool reprodutível bit a bit.** Cada worker do pool devolve os
+acumuladores crus da sua fatia de referências e a página os somava **na
+ordem em que as fatias chegavam**. Soma em ponto flutuante não é associativa:
+com 3 ou mais fatias o total dependia de qual worker terminava primeiro. No
+motor WebAssembly (densidade acumulada em f64) o `passes.tif` exportado saía
+com 2–3 hashes diferentes em 20 rodadas idênticas (3 workers, 8 e 16
+direções); o motor JS não variava nesses tamanhos (suas fatias somam sem
+arredondamento) e o `energy.tif` nunca variou. Agora a soma é sempre na
+ordem das fatias (`lib/pool-merge.js`): a fatia que chega adiantada espera
+as anteriores, e só os seus três vetores ficam retidos — o worker dela já foi
+encerrado, então a memória retida é parte do que o `densityPoolSize` já
+orçava para aquele worker (16 B/célula no JS, 20 no wasm, contra 38 e 69
+orçados); nenhum pool mudou de tamanho. Depois da correção: um único hash por
+configuração em todas as rodadas. Com 1 ou 2 workers o resultado é o de
+antes. Novo `test-pool-merge.mjs`: todas as permutações de chegada de 3 e 4
+fatias reais (JS e wasm32) dão os mesmos bits, e a soma antiga na ordem de
+chegada difere em 4 de 6 e 22 de 24 permutações nos dados do wasm.
+
+**Sai o encanamento dormente do "maximizar".** O modo de maximizar energia
+(custos invertidos, mais o caminho de custo máximo por DP em camadas) não
+tem controle na interface desde ~v36, mas o app ainda lia
+`document.getElementById("maximize")?.checked` em sete módulos — sempre
+`false`, com todo o código por trás inalcançável. Removidos: as leituras de
+`#maximize`/`#maximize-length`, os ramos mortos no despacho do cálculo, na
+estimativa de tempo e na escolha de motor, a sincronização do painel, o
+tratamento na importação de bundle (um `maximize: true` importado é
+ignorado, como já era na prática) e três textos (`param.maximize`,
+`param.max_length`, `param.budget.maximize_title`). Ficam, de propósito: os
+motores (`energy-worker.js`, `graph-engine.js`, backend e wasm) continuam
+implementando o modo, com seus testes; as mensagens e requisições seguem
+levando `maximize: false, maximizeLength: 0` como constantes; e o
+`metadata.jsonld` do bundle mantém o campo `maximize: false` (esquema
+inalterado). O README e o `llms.txt` deixam de anunciar o modo.
+
+**Mensagem de execução com um só construtor.** O `energy-worker.js` assume
+um valor padrão, em silêncio, para qualquer chave que falte na mensagem
+`kind: "run"` — um remetente que esquece um campo não falha, calcula outra
+coisa. A mensagem era escrita à mão em três lugares (o app, o servidor MCP e
+o harness do censo), e o `CLAUDE.md` admitia que nenhum teste pegava a
+divergência entre eles. Agora os três chamam `lib/run-message.js`
+(`buildRunMessage` e `densitySliceMessage`), que é estrito: toda entrada tem
+de ser dada (`null` para "nenhum") e entradas desconhecidas são erro. Novo
+`test-run-message.mjs`: as chaves que o construtor envia têm de ser
+exatamente as que o worker lê, nos dois sentidos, e nenhum remetente pode
+escrever o literal à mão. As mensagens do MCP saem idênticas; a do censo
+ganha as chaves que antes ficavam no padrão do worker (resultado da densidade
+idêntico bit a bit em quatro configurações).
+
 ## v82 — 2026-11-10
 
 > **Arrumação por dentro.** A seção "Histórico de versões" da Ajuda agora é
 > lida do `CHANGELOG.md` na hora em que você a abre, em vez de vir embutida
 > na página (a página encolhe ~30% e o service worker ~85%). E o código do
 > app, que era um arquivo único de 13 mil linhas, foi dividido em módulos por
-> assunto. Sai de vez o encanamento do antigo modo "maximizar energia", que
-> já não tinha controle na tela. Uma correção: a densidade com 3 ou mais
-> workers e o motor WebAssembly agora dá sempre o mesmo resultado, bit a bit
-> — antes os últimos dígitos das passagens podiam variar entre duas rodadas
-> idênticas. Fora isso, nada muda nos cálculos — conferido de ponta a ponta
-> contra a versão anterior.
+> assunto. Nada muda nos cálculos nem nos resultados — conferido de ponta a
+> ponta, byte a byte, contra a versão anterior.
 
 **Changelog em fonte única.** O histórico vivia em três lugares mantidos à
 mão — este arquivo, a seção recolhida da Ajuda (`index.html`, 748 linhas) e
@@ -58,54 +110,6 @@ aleatórios, zero diferenças). Seguem como cópias, por o `energy-worker.js`
 ser um script clássico: `v2Edge` (`test-worker-pool.mjs`), `epsEstimate`
 (`test-energy-v2.mjs`) e a tabela de curvas (`test-maxseg.mjs`). O
 `lib/package.json` só diz ao Node que são módulos ES e não é publicado.
-
-**Densidade em pool reprodutível bit a bit.** Cada worker do pool devolve os
-acumuladores crus da sua fatia de referências e a página os somava **na
-ordem em que as fatias chegavam**. Soma em ponto flutuante não é associativa:
-com 3 ou mais fatias o total dependia de qual worker terminava primeiro. No
-motor WebAssembly (densidade acumulada em f64) o `passes.tif` exportado saía
-com 2–3 hashes diferentes em 20 rodadas idênticas (3 workers, 8 e 16
-direções); o motor JS não variava nesses tamanhos (suas fatias somam sem
-arredondamento) e o `energy.tif` nunca variou. Agora a soma é sempre na
-ordem das fatias (`lib/pool-merge.js`): a fatia que chega adiantada espera
-as anteriores, e só os seus três vetores ficam retidos — o worker dela já foi
-encerrado, então a memória retida é parte do que o `densityPoolSize` já
-orçava para aquele worker (16 B/célula no JS, 20 no wasm, contra 38 e 69
-orçados); nenhum pool mudou de tamanho. Depois da correção: um único hash por
-configuração em todas as rodadas. Com 1 ou 2 workers o resultado é o de
-antes. Novo `test-pool-merge.mjs`: todas as permutações de chegada de 3 e 4
-fatias reais (JS e wasm32) dão os mesmos bits, e a soma antiga na ordem de
-chegada difere em 4 de 6 e 22 de 24 permutações nos dados do wasm.
-
-**Mensagem de execução com um só construtor.** O `energy-worker.js` assume
-um valor padrão, em silêncio, para qualquer chave que falte na mensagem
-`kind: "run"` — um remetente que esquece um campo não falha, calcula outra
-coisa. A mensagem era escrita à mão em três lugares (o app, o servidor MCP e
-o harness do censo), e o `CLAUDE.md` admitia que nenhum teste pegava a
-divergência entre eles. Agora os três chamam `lib/run-message.js`
-(`buildRunMessage` e `densitySliceMessage`), que é estrito: toda entrada tem
-de ser dada (`null` para "nenhum") e entradas desconhecidas são erro. Novo
-`test-run-message.mjs`: as chaves que o construtor envia têm de ser
-exatamente as que o worker lê, nos dois sentidos, e nenhum remetente pode
-escrever o literal à mão. As mensagens do MCP saem idênticas; a do censo
-ganha as chaves que antes ficavam no padrão do worker (resultado da densidade
-idêntico bit a bit em quatro configurações).
-
-**Sai o encanamento dormente do "maximizar".** O modo de maximizar energia
-(custos invertidos, mais o caminho de custo máximo por DP em camadas) não
-tem controle na interface desde ~v36, mas o app ainda lia
-`document.getElementById("maximize")?.checked` em sete módulos — sempre
-`false`, com todo o código por trás inalcançável. Removidos: as leituras de
-`#maximize`/`#maximize-length`, os ramos mortos no despacho do cálculo, na
-estimativa de tempo e na escolha de motor, a sincronização do painel, o
-tratamento na importação de bundle (um `maximize: true` importado é
-ignorado, como já era na prática) e três textos (`param.maximize`,
-`param.max_length`, `param.budget.maximize_title`). Ficam, de propósito: os
-motores (`energy-worker.js`, `graph-engine.js`, backend e wasm) continuam
-implementando o modo, com seus testes; as mensagens e requisições seguem
-levando `maximize: false, maximizeLength: 0` como constantes; e o
-`metadata.jsonld` do bundle mantém o campo `maximize: false` (esquema
-inalterado). O README e o `llms.txt` deixam de anunciar o modo.
 
 **`app.js` dividido em 27 módulos (`app/`).** O `app.js` (13 006 linhas, 302
 funções de topo) vira só o ponto de entrada; o código passa a morar em
