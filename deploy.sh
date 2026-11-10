@@ -24,6 +24,10 @@
 # set Browser Cache TTL to "Respect Existing Headers"), or SW updates stall.
 #
 # Usage: ./deploy.sh
+#
+# Test hook: DEPLOY_STAGE_ONLY=<dir> ./deploy.sh stages and version-stamps into
+# <dir> (steps 1–2 below) and stops before any gcloud call. test-app-shell.mjs
+# uses it to check that what gets shipped is what index.html and sw.js expect.
 
 set -euo pipefail
 
@@ -46,13 +50,19 @@ fi
 # 1. Stage the deploy. Keeps source-only files (QGIS plugins,
 #    test harnesses, this script) out of the public bucket.
 echo ">> Staging files…"
-STAGE="$(mktemp -d)"
 RSYNC_LOG="$(mktemp)"
 CDN_ERR="$(mktemp)"
 # Single EXIT trap for every temp path — a second `trap ... EXIT` would
 # silently REPLACE the first one (the old script leaked the ~575 MB
 # staging dir on every run because of exactly that).
-trap 'rm -rf "$STAGE" "$RSYNC_LOG" "$CDN_ERR"' EXIT
+if [[ -n "${DEPLOY_STAGE_ONLY:-}" ]]; then
+  STAGE="$DEPLOY_STAGE_ONLY"   # the caller owns (and removes) this directory
+  mkdir -p "$STAGE"
+  trap 'rm -rf "$RSYNC_LOG" "$CDN_ERR"' EXIT
+else
+  STAGE="$(mktemp -d)"
+  trap 'rm -rf "$STAGE" "$RSYNC_LOG" "$CDN_ERR"' EXIT
+fi
 
 cp index.html app.js energy-worker.js graph-engine.js favicon.ico "$STAGE/"
 # v80 WebAssembly engine: the worker + both prebuilt modules (wasm/build.sh
@@ -62,7 +72,16 @@ cp wasm-worker.js engine32.wasm engine64.wasm "$STAGE/"
 # trailing-slash semantics (GNU nests a second dem/ level, breaking the
 # example-DEM URLs hardcoded in app.js).
 mkdir -p "$STAGE/dem"
-cp dem/*.tif "$STAGE/dem/"
+# dem/*.tif are gitignored (the live bucket is their home; CI pulls them
+# first). A real deploy must have them — staging an empty dem/ would DELETE
+# every example DEM from the bucket. Only the stage-only test hook may go
+# without.
+if ls dem/*.tif >/dev/null 2>&1; then
+  cp dem/*.tif "$STAGE/dem/"
+elif [[ -z "${DEPLOY_STAGE_ONLY:-}" ]]; then
+  echo "no dem/*.tif to stage — pull them first: gcloud storage cp 'gs://simujaules/dem/*.tif' dem/" >&2
+  exit 1
+fi
 
 # JSON-LD vocab document referenced by SIMU_CONTEXT["@vocab"] — bundles point
 # at this URL, so it has to be present at every deploy or @vocab 404s.
@@ -125,19 +144,47 @@ stamp() { # stamp <sed-script> <arquivo>
   rm -f "$tmp"
 }
 stamp "s|src=\"./app.js\"|src=\"./app.js?v=${V}\"|" "$STAGE/index.html"
-stamp "s|const WORKER_URL = \"./energy-worker.js\"|const WORKER_URL = \"./energy-worker.js?v=${V}\"|" "$STAGE/app.js"
+# Every staged ES module (app.js, plus app/ and lib/ when present): each
+# relative static import gets the stamp — `from "./x.js"` and the bare
+# `import "./x.js"` form — and so do the worker / engine URL constants,
+# whichever module holds them. All importers of a module must end up with the
+# SAME specifier (two spellings = two module instances), which stamping every
+# file with the one version guarantees.
+shopt -s nullglob
+MODULES=("$STAGE"/app.js "$STAGE"/app/*.js "$STAGE"/lib/*.js)
+shopt -u nullglob
+for f in "${MODULES[@]}"; do
+  stamp "s|from \"\(\.\.*/[^\"]*\.js\)\"|from \"\1?v=${V}\"|g; s|^import \"\(\.\.*/[^\"]*\.js\)\"|import \"\1?v=${V}\"|" "$f"
+  stamp "s|const WORKER_URL = \"./energy-worker.js\"|const WORKER_URL = \"./energy-worker.js?v=${V}\"|; s|const WASM_WORKER_URL = \"./wasm-worker.js\"|const WASM_WORKER_URL = \"./wasm-worker.js?v=${V}\"|; s|wasm32: \"./engine32.wasm\", wasm64: \"./engine64.wasm\"|wasm32: \"./engine32.wasm?v=${V}\", wasm64: \"./engine64.wasm?v=${V}\"|" "$f"
+done
 stamp "s|importScripts(\"graph-engine.js\")|importScripts(\"graph-engine.js?v=${V}\")|" "$STAGE/energy-worker.js"
-stamp "s|\"./app.js\",|\"./app.js?v=${V}\",|; s|\"./energy-worker.js\",|\"./energy-worker.js?v=${V}\",|; s|\"./graph-engine.js\",|\"./graph-engine.js?v=${V}\",|; s|\"./wasm-worker.js\",|\"./wasm-worker.js?v=${V}\",|; s|\"./engine32.wasm\",|\"./engine32.wasm?v=${V}\",|" "$STAGE/sw.js"
-stamp "s|const WASM_WORKER_URL = \"./wasm-worker.js\"|const WASM_WORKER_URL = \"./wasm-worker.js?v=${V}\"|; s|wasm32: \"./engine32.wasm\", wasm64: \"./engine64.wasm\"|wasm32: \"./engine32.wasm?v=${V}\", wasm64: \"./engine64.wasm?v=${V}\"|" "$STAGE/app.js"
 stamp "s|importScripts(\"energy-worker.js\")|importScripts(\"energy-worker.js?v=${V}\")|" "$STAGE/wasm-worker.js"
+# sw.js: every .js / .wasm entry of PRECACHE_URLS (and only inside that
+# array), so the SW caches exactly the URLs the pages request.
+stamp "/^const PRECACHE_URLS = \[/,/^\];/ s|\"\(\./[^\"]*\.js\)\",|\"\1?v=${V}\",|" "$STAGE/sw.js"
+stamp "/^const PRECACHE_URLS = \[/,/^\];/ s|\"\(\./[^\"]*\.wasm\)\",|\"\1?v=${V}\",|" "$STAGE/sw.js"
 grep -q "app\.js?v=${V}" "$STAGE/index.html"        || { echo "stamp failed: index.html" >&2; exit 1; }
-grep -q "energy-worker\.js?v=${V}" "$STAGE/app.js"  || { echo "stamp failed: app.js" >&2; exit 1; }
+grep -q "energy-worker\.js?v=${V}" "${MODULES[@]}"  || { echo "stamp failed: WORKER_URL" >&2; exit 1; }
+grep -q "wasm-worker\.js?v=${V}" "${MODULES[@]}"    || { echo "stamp failed: WASM_WORKER_URL" >&2; exit 1; }
+grep -q "engine64\.wasm?v=${V}" "${MODULES[@]}"     || { echo "stamp failed: WASM_ENGINE_URLS" >&2; exit 1; }
 grep -q "graph-engine\.js?v=${V}" "$STAGE/energy-worker.js" || { echo "stamp failed: energy-worker.js" >&2; exit 1; }
-grep -q "app\.js?v=${V}" "$STAGE/sw.js"             || { echo "stamp failed: sw.js" >&2; exit 1; }
-grep -q "wasm-worker\.js?v=${V}" "$STAGE/app.js"    || { echo "stamp failed: app.js (wasm worker)" >&2; exit 1; }
-grep -q "engine64\.wasm?v=${V}" "$STAGE/app.js"     || { echo "stamp failed: app.js (wasm engines)" >&2; exit 1; }
 grep -q "energy-worker\.js?v=${V}" "$STAGE/wasm-worker.js" || { echo "stamp failed: wasm-worker.js" >&2; exit 1; }
+grep -q "app\.js?v=${V}" "$STAGE/sw.js"             || { echo "stamp failed: sw.js" >&2; exit 1; }
 grep -q "engine32\.wasm?v=${V}" "$STAGE/sw.js"      || { echo "stamp failed: sw.js (wasm)" >&2; exit 1; }
+# Nothing left unstamped: a relative import in a module, or a .js/.wasm
+# precache entry, without the version would be a second cache key / a second
+# module instance.
+if grep -nE "(from|^import) \"\.\.?/[^\"]*\.js\"" "${MODULES[@]}"; then
+  echo "stamp failed: unstamped relative import(s) above" >&2; exit 1
+fi
+if sed -n '/^const PRECACHE_URLS = \[/,/^\];/p' "$STAGE/sw.js" | grep -nE "\.(js|wasm)\","; then
+  echo "stamp failed: unstamped precache entry above" >&2; exit 1
+fi
+
+if [[ -n "${DEPLOY_STAGE_ONLY:-}" ]]; then
+  echo ">> Stage-only: staged and stamped ${V} into $STAGE — nothing uploaded."
+  exit 0
+fi
 
 if ! command -v gcloud >/dev/null 2>&1; then
   echo "gcloud not on PATH. Install the Google Cloud SDK." >&2
@@ -280,21 +327,30 @@ gcloud storage objects update "$BUCKET/favicon.ico" \
 #    so this is a CF cache purge — there is no Google Cloud CDN url-map). Purges
 #    the EXACT URLs just staged (works on every CF plan; prefix purge is
 #    Enterprise-only). The list is derived from the staging dir, so it stays in
-#    sync automatically and never exceeds the 30-URL per-request limit here.
+#    sync automatically; it is sent in batches of 30, the per-request limit.
 #    Skipped — with a notice — when CF_API_TOKEN / CF_ZONE_ID aren't set.
 if [[ -n "${CF_API_TOKEN:-}" && -n "${CF_ZONE_ID:-}" ]]; then
   echo ">> Purging Cloudflare cache…"
   # "" → the bare directory URL (serves index.html); then every staged file.
-  PURGE_JSON=""
+  # Sent in batches: Cloudflare takes at most 30 URLs per purge request.
+  PURGE_URLS=()
   for rel in "" $(cd "$STAGE" && find . -type f | sed 's|^\./||'); do
-    PURGE_JSON+="\"${PUBLIC_URL}${rel}\","
+    PURGE_URLS+=("${PUBLIC_URL}${rel}")
   done
-  PURGE_JSON="[${PURGE_JSON%,}]"
-  if ! curl -fsS -X POST \
-        "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/purge_cache" \
-        -H "Authorization: Bearer ${CF_API_TOKEN}" \
-        -H "Content-Type: application/json" \
-        --data "{\"files\":${PURGE_JSON}}" >"$CDN_ERR" 2>&1; then
+  PURGE_OK=1
+  for ((i = 0; i < ${#PURGE_URLS[@]}; i += 30)); do
+    PURGE_JSON=""
+    for u in "${PURGE_URLS[@]:i:30}"; do PURGE_JSON+="\"${u}\","; done
+    if ! curl -fsS -X POST \
+          "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/purge_cache" \
+          -H "Authorization: Bearer ${CF_API_TOKEN}" \
+          -H "Content-Type: application/json" \
+          --data "{\"files\":[${PURGE_JSON%,}]}" >"$CDN_ERR" 2>&1; then
+      PURGE_OK=0
+      break
+    fi
+  done
+  if [[ "$PURGE_OK" != 1 ]]; then
     echo
     echo "WARNING: Cloudflare purge failed. Output:"
     cat "$CDN_ERR"

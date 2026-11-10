@@ -70,7 +70,9 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 - `deploy.sh` — stages and rsyncs to `gs://simujaules`, served at
   `simujaules.pedalhidrografi.co` behind Cloudflare (cache invalidation is a
   CF purge, not a Cloud CDN invalidation). Only explicitly listed files ship;
-  backend/ and tests never deploy.
+  backend/ and tests never deploy. `DEPLOY_STAGE_ONLY=<dir> ./deploy.sh`
+  stages + version-stamps into `<dir>` and stops before any gcloud call —
+  the hook `test-app-shell.mjs` uses to check the real staging.
 - `test-worker-pool.mjs` — run with `node`; self-contained worker
   regression test (invariants + pooled-density ≡ single-run equivalence).
 - `backend/test-backend.mjs` — starts the release binary and compares its
@@ -297,7 +299,13 @@ loads `app.js` directly and libraries come from CDNs with SRI hashes.
 - `sw.js`: bump `VERSION` (with a changelog line) on every deploy that
   changes app behaviour; keep `PRECACHE_URLS` in sync with what
   `index.html`/`deploy.sh` actually reference — `cache.addAll` is atomic,
-  one 404 blocks the SW install for every user.
+  one 404 blocks the SW install for every user. `test-app-shell.mjs` enforces
+  it: every module `app.js` imports, both workers and what they
+  `importScripts` must be precached AND staged by `deploy.sh`, under the same
+  `?v=` stamp their importers use (two spellings of one module URL = two
+  module instances). A new shipped `.js` file therefore needs three edits —
+  the import, `PRECACHE_URLS`, and (if it is in a new directory) `deploy.sh`
+  — and that test fails until all three agree.
 - The changelog lives in THREE places that must move together with every
   release: `CHANGELOG.md`, the collapsed `<details id="changelog">` in the
   help modal (`index.html`), and the `sw.js` version-history comment.
@@ -390,6 +398,7 @@ node test-dem-smoothing.mjs                # DEM pre-smoothing transform (mirror
 node test-graph-engine.mjs                 # vector-network graph engine
 node test-maxseg.mjs                       # max-density segment search + app-side coarsening
 node test-water-raster.mjs                 # OSM water-mask rasterisation (areas/sea/rivers)
+node test-app-shell.mjs                    # imports ≡ sw.js precache ≡ deploy.sh staging + stamps (needs bash)
 node census/test-census-sampler.mjs        # in-browser census sampler helpers (mirrors app.js)
 node census/test-census-density.mjs        # census density harness end-to-end (needs npm install in census/)
 node mcp/test-mcp.mjs                      # MCP server over real stdio vs direct engine runs (needs npm install in census/ AND mcp/)

@@ -76,6 +76,10 @@ jobs:
         run: node census/test-census-sampler.mjs
       - name: Max-density segment search
         run: node test-maxseg.mjs
+      # What index.html loads == what sw.js precaches == what deploy.sh stages
+      # and stamps (runs deploy.sh in its stage-only mode; no gcloud needed).
+      - name: App shell consistency (imports, precache, deploy staging)
+        run: node test-app-shell.mjs
       # Includes the staleness guard: fails when backend/src/main.rs (or another
       # build input) changed without wasm/build.sh + committing the .wasm files.
       # An engine64.wasm this Node's V8 cannot compile is skipped (engine32 is not).

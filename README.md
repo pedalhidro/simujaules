@@ -151,6 +151,7 @@ CI (`.github/workflows/deploy.yml`) runs these on PRs and on pushes to `deploy`;
     node test-worker-pool.mjs                 # worker regression suite
     node test-maxseg.mjs                      # max-density segment search
     node test-water-raster.mjs                # OSM water-mask rasterisation
+    node test-app-shell.mjs                   # imports ≡ sw.js precache ≡ deploy.sh staging
     node test-graph-engine.mjs                # graph-mode engine
     node test-dem-smoothing.mjs               # DEM pre-smoothing mirror
     node census/test-census-density.mjs       # headless density harness (npm install in census/)
