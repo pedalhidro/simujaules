@@ -171,7 +171,7 @@ CI (`.github/workflows/deploy.yml`) runs these on PRs and on pushes to `deploy`;
     node mcp/test-mcp.mjs                     # MCP server vs direct engine runs (npm install in census/ and mcp/)
     cd backend && cargo build --release && node test-backend.mjs   # JS↔Rust parity
     node wasm/test-wasm.mjs                   # wasm engines vs JS worker (+ stale-.wasm guard)
-    (cd e2e && npm ci) && node e2e/smoke.mjs  # the real page in headless Chromium (65 steps, ~30 s)
+    (cd e2e && npm ci) && node e2e/smoke.mjs  # the real page in headless Chromium (~65 steps, ~30 s)
 
 `backend/src/main.rs` is a line-for-line port of `energy-worker.js`'s cost model
 and density math — `test-backend.mjs` enforces energy bit-parity (passes may

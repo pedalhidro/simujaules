@@ -99,7 +99,7 @@ hashes.
   `flatEqSpeed`/`deriveCost`/`smoothHeightsInPlace`.
 - `e2e/` — the browser smoke harness (`smoke.mjs` + `fixtures.mjs`; dev
   tooling with its own `package.json`, never deployed). It serves a tree,
-  drives the REAL page in headless Chromium through 65 steps (fields,
+  drives the REAL page in headless Chromium through ~65 steps (fields,
   routes, top-N, density pools on both engines, GeoPackage network + graph
   mode, Geoman drawing, config / dataset / bundle round trips, GPX overlay,
   a canned Overpass pull) and writes a report of deterministic digests —
@@ -523,7 +523,7 @@ node census/test-census-density.mjs        # census density harness end-to-end (
 node mcp/test-mcp.mjs                      # MCP server over real stdio vs direct engine runs (needs npm install in census/ AND mcp/)
 cd backend && cargo build --release && node test-backend.mjs
 node wasm/test-wasm.mjs                    # wasm-worker.js + engine32/64.wasm vs energy-worker.js (after wasm/build.sh)
-(cd e2e && npm ci) && node e2e/smoke.mjs   # the real page in headless Chromium, 65 steps, ~30 s (needs Playwright's Chromium)
+(cd e2e && npm ci) && node e2e/smoke.mjs   # the real page in headless Chromium, ~65 steps, ~30 s (needs Playwright's Chromium)
 ```
 
 `e2e/smoke.mjs --root <dir> --out <report.json>` on two trees + `diff` is the

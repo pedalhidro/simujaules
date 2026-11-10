@@ -379,6 +379,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // radios, since they share a name rather than a single id).
   for (const id of ["mode", "want-topn", "n-routes", "want-density",
                     "n-refs", "e-max", "mass", "crr", "cda", "rho", "keff", "pflat", "ksmooth", "max-workers", "use-wasm",
+                    // Move directions scale the cost model (DIRS_COST_*), the
+                    // per-worker memory and therefore the engine and pool size.
+                    "n-dirs",
                     // Network/graph + interpolation controls — they move the
                     // estimate now that interp is a separate phase and graph
                     // mode has its own (much cheaper) compute model.

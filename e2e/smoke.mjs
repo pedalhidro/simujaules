@@ -172,7 +172,7 @@ function startServer(root) {
 // result-meta writes, and pins navigator.hardwareConcurrency / deviceMemory so the
 // worker-pool sizes (and so the pooled float sums) are machine-independent.
 const INIT_SCRIPT = `(() => {
-  const S = window.__smoke = { created: 0, live: 0, workerUrls: [], metaWrites: 0, maxsegWrites: 0, statusWrites: 0 };
+  const S = window.__smoke = { created: 0, live: 0, workerUrls: [], metaWrites: 0, maxsegWrites: 0, statusWrites: 0, estimateWrites: 0 };
   try {
     Object.defineProperty(Navigator.prototype, "hardwareConcurrency", { configurable: true, get: () => 4 });
     Object.defineProperty(Navigator.prototype, "deviceMemory", { configurable: true, get: () => 8 });
@@ -209,6 +209,7 @@ const INIT_SCRIPT = `(() => {
     watch("result-meta", "metaWrites");
     watch("maxseg-meta", "maxsegWrites");
     watch("status", "statusWrites");
+    watch("time-estimate", "estimateWrites");
   });
 })();`;
 
@@ -642,6 +643,26 @@ async function groupCore(browser, port, F) {
       await loadDem(page, F.dem);
       const txt = await uiText(page, ["dem-meta", "src-display", "dst-display"]);
       return { ...txt, map: await mapDigest(page) };
+    });
+
+    // The time estimate must follow the move-directions select on its own:
+    // they scale the cost model, the per-worker memory and so the engine and
+    // pool size. (Until v83 nothing refreshed it; the stale estimate stayed
+    // until some other input changed.) Counted as DOM writes, never read as
+    // text — the number itself is machine-dependent.
+    await step("c.estimate-follows-ndirs", async () => {
+      // Let the load-time calibration probe finish first: it writes the
+      // estimate itself, which would otherwise count as the refresh.
+      await page.waitForFunction(() => /≈/.test(document.getElementById("time-estimate").textContent) && window.__smoke.live === 0, null, { timeout: STEP_TIMEOUT });
+      const refreshed = {};
+      for (const v of ["64", "16"]) {
+        const w0 = await page.evaluate(() => window.__smoke.estimateWrites);
+        await setValue(page, "n-dirs", v);
+        await page.waitForFunction((w0) => window.__smoke.estimateWrites > w0, w0, { timeout: 5000 })
+          .catch(() => { throw new Error(`changing #n-dirs to ${v} did not refresh the time estimate`); });
+        refreshed[v] = true;
+      }
+      return { refreshed };
     });
 
     // d. single-source "from" field (passes are always computed since v68)
@@ -1380,12 +1401,17 @@ async function groupConfig(browser, port, F) {
       await waitIdle(page);
       const st = (await uiText(page, ["status"])).status;
       const after = await panelState(page);
-      // Compare exactly what the config file carries (its params keys + the
-      // language); controls the app does not export are listed, not failed.
+      // Everything the step changed must come back. A control that changed
+      // but is not in the config file is a hole in the export — fail on it,
+      // unless it is on this allow-list of deliberately per-device settings
+      // (kept out of configs and bundles on purpose; see app/boot.js).
+      const PER_DEVICE = ["use-wasm"];
       const carried = Object.keys(JSON.parse(cfg.buf.toString("utf8")).params || {});
       const diff = stateDiff(before, after).filter((k) => carried.includes(k) || k === "__lang");
       if (diff.length) throw new Error("imported config differs from the exported state in: " + diff.join(", "));
       const notCarried = stateDiff(before, after).filter((k) => !carried.includes(k) && k !== "__lang");
+      const holes = notCarried.filter((k) => !PER_DEVICE.includes(k));
+      if (holes.length) throw new Error("changed controls the config export does not carry: " + holes.join(", "));
       return { status: st, carriedControls: carried.length, panelShaCarried: stateSha(Object.fromEntries(carried.map((k) => [k, after[k]]))), changedButNotInConfig: notCarried };
     });
   } finally {

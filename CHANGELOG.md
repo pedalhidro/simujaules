@@ -18,7 +18,11 @@ history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 > WebAssembly agora dá sempre o mesmo resultado, bit a bit — antes os últimos
 > dígitos das passagens podiam variar entre duas rodadas idênticas. Sai também
 > o encanamento do antigo modo "maximizar energia", que já não tinha controle
-> na tela. Fora isso, nada muda nos cálculos.
+> na tela. Duas correções pequenas: o **número de direções** e o **string
+> pulling** agora são lembrados entre sessões e entram no arquivo de
+> configuração exportado (antes, importar uma configuração podia calcular com
+> outra vizinhança), e mudar o número de direções atualiza na hora a
+> estimativa de tempo. Fora isso, nada muda nos cálculos.
 
 **Densidade em pool reprodutível bit a bit.** Cada worker do pool devolve os
 acumuladores crus da sua fatia de referências e a página os somava **na
@@ -37,6 +41,25 @@ configuração em todas as rodadas. Com 1 ou 2 workers o resultado é o de
 antes. Novo `test-pool-merge.mjs`: todas as permutações de chegada de 3 e 4
 fatias reais (JS e wasm32) dão os mesmos bits, e a soma antiga na ordem de
 chegada difere em 4 de 6 e 22 de 24 permutações nos dados do wasm.
+
+**Configuração completa: direções e string pulling.** Os dois controles da
+v57 que mudam o que uma rodada calcula e mostra — `#n-dirs` (4–128
+direções) e `#string-pull` — iam para o `metadata.jsonld` dos bundles, mas
+não estavam em `PERSIST_IDS`: não eram lembrados entre recargas nem entravam
+em "Exportar configuração" (grupo 0). Exportar com 32 direções, zerar e
+importar de volta deixava o app no padrão, e a rodada seguinte calculava
+números diferentes dos que o arquivo descrevia. Agora os dois são
+persistidos e exportados como os demais parâmetros (e a configuração
+embutida nos bundles os leva também). O `#use-wasm` continua fora, de
+propósito: é uma escolha por dispositivo. No mesmo caminho, `maxWorkers`
+passa a ser lido do próprio campo — um "0" nunca alterado voltava como
+campo vazio depois de exportar e importar. E `#n-dirs` entra na lista de
+controles que recalculam a estimativa de tempo: ela já dependia das
+direções (custo, memória por worker, motor e tamanho do pool), mas só era
+refeita quando outro campo mudava. Achados pelo novo harness de navegador
+(`e2e/`), que agora falha se um controle alterado não voltar pela
+importação da configuração, e se trocar as direções não atualizar a
+estimativa.
 
 **Sai o encanamento dormente do "maximizar".** O modo de maximizar energia
 (custos invertidos, mais o caminho de custo máximo por DP em camadas) não

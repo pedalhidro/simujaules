@@ -135,6 +135,10 @@ const PERSIST_IDS = [
   // Parameters
   "mode", "mass", "crr", "cda", "rho", "keff", "pflat", "climb-thr", "ksmooth", "deadband", "dem-smooth", "e-max", "e-max-mode",
   "want-topn", "want-density",
+  // Move directions + string pulling (v57) change what a run computes and
+  // shows, so they belong to the remembered / exported configuration like
+  // every other parameter (they were only in bundle metadata until v83).
+  "n-dirs", "string-pull",
   "n-refs", "ref-sampling", "refs-visible",
   "backend-url", "orchestrator-url", "cloud-keep-warm", "cloud-machine", "cloud-no-fallback", "n-routes", "penalty", "repulsion-mode",
   "routes-colormap", "colormap",
@@ -256,8 +260,12 @@ export function collectConfig(opts = {}) {
     const el = document.getElementById(id);
     if (el) params[id] = el.type === "checkbox" ? !!el.checked : el.value;
   }
-  let maxWorkers = "";
-  try { maxWorkers = localStorage.getItem("simu-max-workers") || ""; } catch {}
+  // The control's own value ("0" = automatic; boot.js mirrors it to
+  // localStorage "simu-max-workers" on change). Reading the stored copy
+  // instead turned a never-touched "0" into "" on an export → import.
+  const mwEl = document.getElementById("max-workers");
+  let maxWorkers = mwEl ? mwEl.value : "";
+  if (!mwEl) { try { maxWorkers = localStorage.getItem("simu-max-workers") || ""; } catch {} }
   return {
     kind: "simujoules-config",
     version: 1,
