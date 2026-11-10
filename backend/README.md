@@ -82,9 +82,11 @@ Little-endian binary framing, see `src/main.rs` header comment:
   → `[u32 json_len][json {elapsed_ms, passes}][f32 energy×N][f64 passes×N?]`
 - `GET /health` — `{"ok":true,"version":…,"cores":…,"mem_budget_bytes":…}`
 
-> **Move directions:** this backend serves the CLASSIC 8-move engine only.
-> The app's `#n-dirs` option (4–128 directions, v57) is browser-only — app.js
-> never routes a non-8 run here, same pattern as top-N/maximize.
+> **Move directions:** since 0.2.0 the backend serves the app's `#n-dirs`
+> option too (`nDirs` ∈ {4, 8, 16, 32, 64, 128}, bit-parity with the JS
+> worker; anything else is a 400). An OLDER binary silently ignores the
+> `nDirs` field, so the app only sends a non-8 run here when `/health`
+> reports version ≥ 0.2.0. Top-N and maximize stay browser-only.
 
 The cost model and passes/density math are a port of `energy-worker.js`
 (`dijkstra()` with `wantPasses`, and the from/to/round single-source branch);

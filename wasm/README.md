@@ -12,7 +12,7 @@ the Localhost/Cloud engine running inside the page's Web Workers:
 `wasm-worker.js` (repo root) loads `energy-worker.js` and serves two jobs on
 the module — density-pool slices and plain single-source fields — speaking the
 JS worker's message protocol; everything else, and any wasm failure, runs on
-the JS engine. `app.js` decides the engine per job (`wasmEngineFor`,
+the JS engine. The app (`app/engines.js`) decides the engine per job (`wasmEngineFor`,
 `densityEngine`, `singleEngine`) and compiles each module once.
 
 ## Build

@@ -58,7 +58,7 @@ FlatGeobuf carries a packed Hilbert R-tree, so the browser fetches only the
 bbox slice (a few hundred KB for a city), never the whole file — a raw `.gpkg`
 **cannot** be range-queried over HTTP, which is why we convert. The app reads
 the **direct GCS URL** (`storage.googleapis.com/simujaules/…`, native Range +
-bucket CORS), set as `CENSUS_FGB_URL` in `app.js`. To repoint, change that
+bucket CORS), set as `CENSUS_FGB_URL` in `app/points.js`. To repoint, change that
 constant.
 
 **CORS (one-time, bucket-level).** Cross-origin Range reads from the app origin

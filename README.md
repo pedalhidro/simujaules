@@ -129,8 +129,11 @@ and `POST /single` (single-source field); top-N, the destination path, and
 maximize stay browser-only. Memory-budget tuning, the binary protocol, and the
 `energy-worker.js` parity contract are in [backend/README.md](backend/README.md).
 
-> The old in-page **wasm** engine was removed — native compute now lives in the
-> standalone Rust server above, and the browser engine is always JS.
+> The browser can also run this SAME engine without a server: since v80 the
+> workers load `backend/src/main.rs` compiled to WebAssembly (`wasm/`, on by
+> default, any failure re-runs the job on the JS engine) — see
+> [wasm/README.md](wasm/README.md). (The pre-v11 in-page wasm engine, a
+> separate reimplementation, was removed.)
 
 ## Deploy
 
