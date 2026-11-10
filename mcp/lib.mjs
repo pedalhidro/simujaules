@@ -6,12 +6,14 @@
 //     the one G_SP; this file adds NO copy);
 //   - census/census-density.mjs: loadDem (app-identical GeoTIFF read),
 //     loadWorker (sync engine shim), runDensity (the
-//     app's pool merge with poolN = 1 — it builds its OWN run message, so a
-//     new engine field must land there as well as in buildRunMessage below),
+//     app's pool merge with poolN = 1),
 //     tiffMetadataForDem / writeRasterAsGeoTIFF / writeBundle;
-//   - lib/dem-smoothing.js: smoothHeightsInPlace (the function app.js runs).
-// What this file adds is the app's DEM-load smoothing rule, the run-message
-// construction the app does in baseMsg (app/run.js; no network / bridges / impassable
+//   - lib/dem-smoothing.js: smoothHeightsInPlace (the function app.js runs);
+//   - lib/run-message.js: the engine's run message — the SAME builder the app
+//     (app/run.js) and the census harness call, so a new engine field cannot
+//     land in one sender and not the others.
+// What this file adds is the app's DEM-load smoothing rule, the headless
+// choice of run inputs (no network / bridges / impassable
 // layers — those stay browser-only for now), worker_threads runners for the
 // engine and the DEM load, and the GeoJSON / bundle output shapes
 // downloadBundle writes.
@@ -25,6 +27,7 @@ import {
   writeBundle, writeRasterAsGeoTIFF, ENERGY_NODATA_MD, SIMU_CONTEXT,
 } from "../census/census-density.mjs";
 import { smoothHeightsInPlace } from "../lib/dem-smoothing.js";
+import { buildRunMessage as buildEngineRunMessage } from "../lib/run-message.js";
 
 export { deriveCost, loadWorker, SIMU_CONTEXT };
 
@@ -221,9 +224,9 @@ export function runEngine(msg, { onProgress, onWarning, signal } = {}) {
 }
 
 // ---- single-source run (from / to / round, optional goal + top-N) ----------------
-// Mirror of the app's baseMsg (app/run.js) + startSingleWorker's `{ ...baseMsg, height, mask,
-// networkMask }` for a run with NO network constraint, NO bridges and NO
-// impassable/drawn layers (those are the only app inputs missing here).
+// The app's single-worker message — lib/run-message.js's base message plus
+// `{ height, mask, networkMask }` — for a run with NO network constraint, NO
+// bridges and NO impassable/drawn layers (the only app inputs missing here).
 // Like the app it permits seed === goal; callers that need two distinct
 // cells (a LineString) guard for it themselves.
 export function buildRunMessage(dem, opts) {
@@ -238,28 +241,27 @@ export function buildRunMessage(dem, opts) {
   const wantTopN = topN > 0;
   if (wantTopN && !goal) throw new Error("top-N routes need a destination");
   return {
-    kind: "run",
-    H: dem.H, W: dem.W,
-    dx: dem.dxM, dy: dem.dyM,                         // METRES — the cost model's units
-    seedR: seed[0], seedC: seed[1],
-    goalR: goal ? goal[0] : -1, goalC: goal ? goal[1] : -1,
-    mode,
-    cost: deriveCost({ ...DEFAULT_PHYSICS, ...physics }),
-    eMax: eMax > 0 ? eMax : 0,
-    eMaxMode: eMaxMode === "total" ? "total" : "leg",
-    wantPasses: true,                                 // always, like the app since v68
-    wantTopN,
-    nRoutes: Math.max(1, Math.min(20, topN | 0)),
-    penalty: Math.max(0, penalty || 2.0),
-    repulsionMode: ["per-cell", "linear", "square"].includes(repulsionMode) ? repulsionMode : "per-cell",
-    wantDensity: false,
-    refPoints: null,
-    densityMode: mode,
-    wantNetworkInterp: false, interpMaxDistance: 50, interpSmoothing: 0,
-    maximize: false, maximizeLength: 0,
-    nDirs: nDirsEff,
-    stringPull: !!stringPull,
-    portalU: null, portalV: null, portalLenM: null, portalHU: null, portalHV: null,
+    ...buildEngineRunMessage({
+      H: dem.H, W: dem.W,
+      dxM: dem.dxM, dyM: dem.dyM,                     // METRES — the cost model's units
+      seed, goal,
+      mode,
+      cost: deriveCost({ ...DEFAULT_PHYSICS, ...physics }),
+      eMax: eMax > 0 ? eMax : 0,
+      eMaxMode: eMaxMode === "total" ? "total" : "leg",
+      wantPasses: true,                               // always, like the app since v68
+      wantTopN,
+      nRoutes: Math.max(1, Math.min(20, topN | 0)),
+      penalty: Math.max(0, penalty || 2.0),
+      repulsionMode: ["per-cell", "linear", "square"].includes(repulsionMode) ? repulsionMode : "per-cell",
+      wantDensity: false,
+      refPoints: null,
+      densityMode: mode,
+      wantNetworkInterp: false, interpMaxDistance: 50, interpSmoothing: 0,
+      nDirs: nDirsEff,
+      stringPull: !!stringPull,
+      portals: null,
+    }),
     height: new Float32Array(dem.height),
     mask: new Uint8Array(dem.mask),
     networkMask: null,

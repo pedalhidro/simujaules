@@ -50,8 +50,6 @@ first load).
   large runs.
 - **Energy budgets** — prune the search at a maximum energy; in round-trip mode,
   cap each leg or the out-plus-back total.
-- **Maximize mode** — invert the optimisation to find the most *expensive*
-  routes, optionally length-constrained (layered dynamic programming).
 - **Graph mode** ("follow the vectors") — compute on an OSM-derived street graph
   instead of the raster grid, honouring bridges/tunnels by layer; can run a
   full-DEM unconstrained scenario alongside it and expose the difference (the
@@ -94,6 +92,9 @@ first load).
 - `mcp/` — MCP server (stdio) so an agent (Claude Code / Desktop) can load a DEM
   and ask for energy fields, routes and density through the same engine; see
   [mcp/README.md](mcp/README.md). Dev tooling, never deployed.
+- `e2e/` — browser smoke harness: drives the real page in headless Chromium and
+  hashes what it renders and exports, for CI and for before/after comparisons.
+  Dev tooling, never deployed.
 - `census/` — headless population-weighted density harness (node); see
   [census/README.md](census/README.md).
 - `deploy.sh` — stages and rsyncs the deployable files to `gs://simujaules`.
@@ -125,8 +126,8 @@ density). It's **off by default**:
 Then tick **Use native backend** in the app's parameters panel (URL defaults to
 `http://127.0.0.1:8077`). The app falls back to the browser workers automatically
 if the server isn't reachable. It accelerates `POST /density` (multi-reference)
-and `POST /single` (single-source field); top-N, the destination path, and
-maximize stay browser-only. Memory-budget tuning, the binary protocol, and the
+and `POST /single` (single-source field); top-N and the destination path stay
+browser-only. Memory-budget tuning, the binary protocol, and the
 `energy-worker.js` parity contract are in [backend/README.md](backend/README.md).
 
 > The browser can also run this SAME engine without a server: since v80 the
@@ -162,12 +163,15 @@ CI (`.github/workflows/deploy.yml`) runs these on PRs and on pushes to `deploy`;
     node test-water-raster.mjs                # OSM water-mask rasterisation
     node test-app-shell.mjs                   # imports ≡ sw.js precache ≡ deploy.sh staging
     node test-changelog.mjs                   # CHANGELOG.md parser, newest entry ≡ sw.js VERSION
+    node test-run-message.mjs                 # the engine's run message: one builder, keys ≡ what the worker reads
+    node test-pool-merge.mjs                  # density-pool merge is arrival-order independent
     node test-graph-engine.mjs                # graph-mode engine
     node test-dem-smoothing.mjs               # DEM pre-smoothing transform (lib/dem-smoothing.js)
     node census/test-census-density.mjs       # headless density harness (npm install in census/)
     node mcp/test-mcp.mjs                     # MCP server vs direct engine runs (npm install in census/ and mcp/)
     cd backend && cargo build --release && node test-backend.mjs   # JS↔Rust parity
     node wasm/test-wasm.mjs                   # wasm engines vs JS worker (+ stale-.wasm guard)
+    (cd e2e && npm ci) && node e2e/smoke.mjs  # the real page in headless Chromium (~65 steps, ~30 s)
 
 `backend/src/main.rs` is a line-for-line port of `energy-worker.js`'s cost model
 and density math — `test-backend.mjs` enforces energy bit-parity (passes may

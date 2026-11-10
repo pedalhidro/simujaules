@@ -26,6 +26,7 @@ import { basename, dirname, join, resolve } from "path";
 import * as GeoTIFF from "geotiff";
 import JSZip from "jszip";
 import { deriveCost, flatEqSpeed } from "../lib/cost.js";
+import { buildRunMessage, densitySliceMessage } from "../lib/run-message.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ENGINE = join(here, "..", "energy-worker.js");
@@ -155,27 +156,34 @@ export function pointsToRefs(dem, features) {
 // `runFn` may be synchronous (the loadWorker shim) or return a Promise (the
 // worker_threads runner in mcp/lib.mjs) — the result is awaited either way.
 // `params.nDirs` (4|8|16|32|64|128) is forwarded when given; when omitted the
-// message carries no nDirs and the engine's classic-8 default applies (the
-// historical harness behaviour). `params.eMaxMode` ("leg" | "total") likewise.
+// classic 8 is used (the historical harness behaviour, and the engine's own
+// default). `params.eMaxMode` ("leg" | "total") defaults to "leg".
+// The message is the app's pool-slice message (lib/run-message.js — the same
+// builders app/run.js calls), with the one slice holding every ref and no
+// network, bridges or impassable layers.
 export async function runDensity(dem, refs, params, runFn = loadWorker()) {
   const N = dem.H * dem.W;
-  const msg = {
-    kind: "run",
+  const base = buildRunMessage({
     H: dem.H, W: dem.W,
-    dx: dem.dxM, dy: dem.dyM,                 // metres — matches the app's baseMsg (app/run.js)
-    seedR: refs[0]?.[0] ?? -1, seedC: refs[0]?.[1] ?? -1,
-    goalR: -1, goalC: -1,
+    dxM: dem.dxM, dyM: dem.dyM,               // metres — the cost model's unit
+    seed: refs[0] ?? null, goal: null,
     mode: params.mode, densityMode: params.mode,
     cost: deriveCost(params),                 // v2 bundle, folded once like readCost
     eMax: params.eMax || 0, eMaxMode: params.eMaxMode || "leg",
+    wantPasses: true, wantTopN: false, nRoutes: 1, penalty: 2.0, repulsionMode: "per-cell",
     wantDensity: true,
     refPoints: refs,
-    densityPartial: true,                     // raw accumulators (first /N only)
-    maximize: false, maximizeLength: 0,
+    wantNetworkInterp: false, interpMaxDistance: 50, interpSmoothing: 0,
+    nDirs: params.nDirs ?? 8,
+    stringPull: false,
+    portals: null,
+  });
+  const msg = {
+    ...densitySliceMessage(base, { refPoints: refs, matrixCells: null }),   // raw accumulators (first /N only)
     height: new Float32Array(dem.height),
     mask: new Uint8Array(dem.mask),
+    networkMask: null,
   };
-  if (params.nDirs != null) msg.nDirs = params.nDirs;
   const t0 = performance.now();
   const part = await runFn(msg);
   if (!part) throw new Error("engine returned no 'done' message");

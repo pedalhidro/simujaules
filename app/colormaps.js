@@ -145,7 +145,7 @@ export function routeColour(i, n) {
 
 // Recolour the existing top-N route polylines in place from the current
 // routes-colormap. Cheap setStyle on the already-drawn lines — no recompute
-// and no energy/passes raster re-render (the maximize path is a fixed colour,
+// and no energy/passes raster re-render (the single path is a fixed colour,
 // unaffected). Used by the routes-colormap selector, which previously called
 // the full rerenderCachedResult() and re-rasterised both W×H field canvases.
 export function recolorRouteLines() {

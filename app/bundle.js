@@ -119,7 +119,8 @@ function routesFromFC(fc, dem) {
   return routes.length ? routes : null;
 }
 
-// Rebuild the maximize `path` index array from path.geojson.
+// Rebuild a `path` index array from a path GeoJSON (path.geojson or its
+// compare-partner twin).
 function pathFromFC(fc, dem) {
   const feat = fc?.features?.find((f) => f.geometry?.type === "LineString");
   if (!feat) return null;
@@ -231,8 +232,10 @@ function buildMetadata(result, withOutputs = true) {
     wantDensity:   !!document.getElementById("want-density")?.checked,
     nRefs:         parseInt(document.getElementById("n-refs")?.value, 10) || 10,
     refSource:     document.getElementById("ref-sampling")?.value || "random",
-    maximize:      !!document.getElementById("maximize")?.checked,
-    maximizeLength: parseInt(document.getElementById("maximize-length")?.value, 10) || 0,
+    // The engines still implement maximize, but the app never asks for it —
+    // kept as constants so the bundle schema is unchanged.
+    maximize:      false,
+    maximizeLength: 0,
     nDirs:         parseInt(document.getElementById("n-dirs")?.value, 10) || 8,
     stringPull:    !!document.getElementById("string-pull")?.checked,
     kpiCorr:       parseFloat(document.getElementById("kpi-corr")?.value) || 1,
@@ -842,8 +845,6 @@ export function applyMetadataToUI(md, bin = {}) {
   set("penalty", p.penalty);
   set("repulsion-mode", p.repulsionMode);
   check("want-density", p.wantDensity);
-  check("maximize", p.maximize);
-  set("maximize-length", p.maximizeLength);
   // v57 additions — old bundles carry none of these; leave the UI alone then.
   if ([4, 8, 16, 32, 64, 128].includes(p.nDirs)) set("n-dirs", p.nDirs);
   if (p.stringPull != null) check("string-pull", p.stringPull);
@@ -938,10 +939,6 @@ export function applyMetadataToUI(md, bin = {}) {
   if (topnCheck) topnCheck.dispatchEvent(new Event("change"));
   const densityCheck = document.getElementById("want-density");
   if (densityCheck) densityCheck.dispatchEvent(new Event("change"));
-  // maximize reveals the L-length input and greys out the (inapplicable)
-  // energy-budget field — resync those too.
-  const maximizeCheck = document.getElementById("maximize");
-  if (maximizeCheck) maximizeCheck.dispatchEvent(new Event("change"));
   // #mode toggles the "Budget applies to" (e-max-mode) row's visibility —
   // v3 app-exported bundles get this for free via applyConfig's
   // PERSIST_REFIRE, but bundles with no md.config (census/CLI bundles,
@@ -1072,8 +1069,8 @@ export function applyMetadataToUI(md, bin = {}) {
   // recompute needed. Skip if the DEM dimensions don't match (or no DEM
   // is loaded yet). Routes/path come back from GeoJSON (converted to cell
   // indices); the energy/passes rasters come back from the GeoTIFFs. Any
-  // subset is fine — a maximize bundle has a path but no top-N routes, a
-  // density bundle has neither.
+  // subset is fine — a destination-path bundle has a path but no top-N
+  // routes, a density bundle has neither.
   let restored = false;
   if (state.dem && demMatch === true) {
     const N = state.dem.H * state.dem.W;
@@ -1084,7 +1081,7 @@ export function applyMetadataToUI(md, bin = {}) {
     const pathAlt = pathFromFC(bin.pathAltFC || null, state.dem);
     // Render whenever we recovered anything drawable; routes take precedence
     // over a lone path (renderResult draws one or the other, mirroring a
-    // fresh compute where top-N and maximize are mutually exclusive).
+    // fresh compute, which returns either top-N routes or a single path).
     if (energyOk || passesOk || routes || path || pathAlt) {
       // Rebuild the compare scenarios from the alt rasters so the displayed-
       // scenario picker + the difference/unconstrained views come back (not just

@@ -76,6 +76,14 @@ jobs:
         run: node census/test-census-sampler.mjs
       - name: Max-density segment search
         run: node test-maxseg.mjs
+      # Density-pool slices merge in slot order: same inputs, same bits,
+      # whatever order the workers finish in (real JS + wasm32 slices).
+      - name: Pool merge is arrival-order independent
+        run: node test-pool-merge.mjs
+      # The engine's run message: one builder, three senders; its keys must be
+      # exactly the keys energy-worker.js reads.
+      - name: Run message (builder ≡ worker, every sender uses it)
+        run: node test-run-message.mjs
       - name: Changelog (single source, matches sw.js VERSION)
         run: node test-changelog.mjs
       # What index.html loads == what sw.js precaches == what deploy.sh stages
@@ -128,9 +136,30 @@ jobs:
       - name: MCP server vs direct engine runs
         run: node mcp/test-mcp.mjs
 
+  # The real page in headless Chromium (e2e/smoke.mjs): ~65 steps — fields,
+  # routes, density pools on both engines, network + graph mode, drawing
+  # tools, config / dataset / bundle round trips. Pass/fail only: no page
+  # error, no failed same-origin request, every step's own invariants. There
+  # is no golden report (overlay hashes are not portable across Chromium
+  # builds). The page loads its CDN libraries live.
+  browser-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the harness and Chromium
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Browser smoke
+        run: node e2e/smoke.mjs --no-cdn-cache
+
   deploy:
     runs-on: ubuntu-latest
-    needs: [test, backend-parity, harness-suites]
+    needs: [test, backend-parity, harness-suites, browser-smoke]
     # Deploy only on the deploy branch (never for PRs), and stay INERT
     # ("skipped") until the WIF setup above is done.
     if: >-

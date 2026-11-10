@@ -52,7 +52,7 @@ hashes.
   the density panel) selects it, and falls back to browser workers on any
   failure. Two endpoints: `POST /density`
   (multi-reference density) and `POST /single` (single-source from/to/round
-  energy field + optional passes). Top-N / destination path / maximize stay
+  energy field + optional passes). Top-N / destination path stay
   browser-only — the backend produces no routes.
 - `mcp/` — MCP server (stdio) exposing the engine to agents (Claude Code /
   Desktop): `load_dem`, `energy_field`, `route` (+ top-N, string pull),
@@ -62,15 +62,11 @@ hashes.
   GeoTIFF/bundle writers, and `deriveCost` re-exported from `lib/cost.js`)
   and `lib/dem-smoothing.js` (`smoothHeightsInPlace`), and hosts `energy-worker.js` in a
   `worker_threads` Worker (`mcp/engine-thread.mjs`, the threaded twin of the
-  census `loadWorker()` shim). `mcp/lib.mjs` `buildRunMessage` is the
-  headless mirror of the app's `baseMsg` (built in `app/run.js`; no network /
-  bridges / impassable layers yet) — a new run-message field there must land
-  in `buildRunMessage` AND in
-  `census/census-density.mjs` `runDensity`'s own `msg` literal (the `density`
-  tool is the app's pool merge with one slice and builds its message there;
-  the engine silently defaults any missing key, and `test-mcp.mjs` compares
-  `density` against that same harness, so it will not catch drift between
-  the two). See `mcp/README.md`.
+  census `loadWorker()` shim). The engine's run message is NOT mirrored any
+  more: the app (`app/run.js`), `mcp/lib.mjs` and
+  `census/census-density.mjs` `runDensity` all call `lib/run-message.js`
+  (see the RUN MESSAGE invariant below). MCP runs still have no network /
+  bridges / impassable layers. See `mcp/README.md`.
 - `wasm/` + `wasm-worker.js` + `engine32.wasm` / `engine64.wasm` — the v80
   in-browser WebAssembly engine (2C "Motor WebAssembly", default ON).
   `wasm/src/lib.rs` `include!`s `backend/src/main.rs` VERBATIM and adds a
@@ -91,15 +87,31 @@ hashes.
   (`refEnergyKJ`, `deadband` — the GPX-overlay closed form),
   `dem-smoothing.js` (`smoothHeightsInPlace`), `water-raster.js` (the OSM
   water-mask rasterisers), `census-sampler.js` (Sobol/Halton + polygon
-  helpers), `maxseg-coarsen.js`, `changelog.js` (the `CHANGELOG.md` parser
-  behind the help modal). RULE: a pure helper that a test or headless tool
+  helpers), `maxseg-coarsen.js`, `pool-merge.js` (the density pool's
+  slot-order merge), `run-message.js` (the engine's run
+  message — one builder for the app, MCP and census), `changelog.js` (the
+  `CHANGELOG.md` parser behind the help modal). RULE: a pure helper that a test or headless tool
   needs goes HERE and is imported — never copy a function out of `app/` or
   `app.js` into a test again. What still IS hand-mirrored, because
   `energy-worker.js` is a classic `importScripts` script: `v2Edge` in
   `test-worker-pool.mjs`, `epsEstimate` in `test-energy-v2.mjs`, the
-  turn-factor table in `test-maxseg.mjs`; plus `mcp/lib.mjs`
-  `buildRunMessage` (below) and the dated `docs/grid-*.mjs` copies of
+  turn-factor table in `test-maxseg.mjs`; plus the dated `docs/grid-*.mjs` copies of
   `flatEqSpeed`/`deriveCost`/`smoothHeightsInPlace`.
+- `e2e/` — the browser smoke harness (`smoke.mjs` + `fixtures.mjs`; dev
+  tooling with its own `package.json`, never deployed). It serves a tree,
+  drives the REAL page in headless Chromium through ~65 steps (fields,
+  routes, top-N, density pools on both engines, GeoPackage network + graph
+  mode, Geoman drawing, config / dataset / bundle round trips, GPX overlay,
+  a canned Overpass pull) and writes a report of deterministic digests —
+  every overlay image, vector layer and exported bundle file hashed. Two
+  uses: (1) CI pass/fail (`browser-smoke` job); (2) proving a refactor
+  changes nothing — run it on the tree before and after and `diff` the two
+  reports (same machine and Chromium only; never commit a report). It is
+  the only check that exercises `app/` end to end: USE IT for any change to
+  `app/`, the workers' message protocol, `index.html` or `sw.js`. The app's
+  code is module-scoped, so the harness hooks the page from outside
+  (`L.Map.addInitHook`, a `Worker` wrapper, MutationObservers) — nothing in
+  `app/` exists for its sake.
 - `sw.js` — service worker (precache + runtime cache). `index.html`,
   `manifest.webmanifest`, `icons/` are the PWA shell.
 - `deploy.sh` — stages and rsyncs to `gs://simujaules`, served at
@@ -115,14 +127,23 @@ hashes.
 
 ## Compute architecture
 
-- Regular runs (from/to/round, top-N, maximize): ONE worker per compute.
+- Regular runs (from/to/round, top-N): ONE worker per compute.
 - Multi-reference density: a POOL of workers sized by the shared
   `densityPoolSize()` helper — `min(K, cores−1, memCap)`, where memCap
   budgets each worker (~38 B/cell, ~55 round) against `navigator.deviceMemory`
   (the spec caps it at 8 GB). A `#max-workers` input overrides this (clamped
   by K) for users on big-RAM machines deviceMemory can't see. Each worker
   gets `densityPartial: true` and returns raw accumulators (density,
-  energySum, energyCount) that `app.js` merges and normalises. On a 135 M-cell
+  energySum, energyCount) that the app merges and normalises. The merge is
+  in SLOT order, never arrival order (`lib/pool-merge.js`
+  `createSlotMerger`, v83): f64 addition is not associative, and summing
+  slices as they arrived made a ≥ 3-worker wasm pool's `passes.tif` differ
+  in the last digits between identical runs. An early slice is held (its
+  three transferred arrays only — its worker is already terminated, so the
+  held bytes are part of what `densityPoolSize` budgeted for that worker)
+  until every lower slot has merged. Keep any new pool that SUMS worker
+  outputs on this helper; positional copies (the matrix rows, the interp
+  bands) are order-independent already. On a 135 M-cell
   DEM this is 1 worker (two won't fit 16 GB) — the honest ceiling. The
   optional network IDW fill runs AFTER the merge as a separate
   `kind: "interp"` worker message — never per-slice.
@@ -186,6 +207,36 @@ hashes.
   `test-app-shell.mjs` checks the chain, the import/export names, the
   setter rule (heuristically) and the precache list.
 
+- MAXIMIZE IS ENGINE-ONLY (v83). "Maximize mode" (inverted costs, plus the
+  layered-DP max-cost path via `maximizeLength`) had no UI control since
+  ~v36; v83 removed the app's dormant plumbing for it (the `#maximize` reads,
+  its strings, the bundle-import handling). What REMAINS, deliberately:
+  `energy-worker.js`, `graph-engine.js`, `backend/src/main.rs` (hence the
+  wasm modules) still implement it and their suites still test it — every
+  engine rule below that mentions maximize describes that path. No sender
+  asks for it: `lib/run-message.js` hard-codes `maximize: false,
+  maximizeLength: 0`, the app's backend/graph params carry the same
+  constants, and exported bundles still write `maximize: false` (schema
+  unchanged; an imported `maximize: true` is ignored). Removing it from the
+  ENGINES is a parity change — `energy-worker.js` and `main.rs` in lockstep,
+  then `wasm/build.sh` — not a cleanup.
+
+- THE RUN MESSAGE HAS ONE BUILDER (v83). `energy-worker.js` destructures the
+  `kind: "run"` message and silently DEFAULTS every missing key, so a sender
+  that forgets a field does not fail — it runs a different computation.
+  `lib/run-message.js` `buildRunMessage` (the base message) and
+  `densitySliceMessage` (one pool slice: raw accumulators, no IDW fill) are
+  the only place the literal is written; the app, the MCP server and the
+  census harness call them and attach their own `height`/`mask`/
+  `networkMask`. The builders are STRICT (every input explicit, `null` for
+  "none"; unknown inputs throw), so adding an engine field means: add it to
+  the worker's destructuring AND to the builder, then make each sender
+  state it — `test-run-message.mjs` fails if the builder's keys and the
+  keys the worker reads differ in either direction, or if a sender writes
+  the literal by hand. The NATIVE backend's request params (`/density`,
+  `/single`) are a separate wire format, still built in `app/run.js` and
+  mirrored by hand in `backend/test-backend.mjs`.
+
 - THE WASM ENGINE IS THE BACKEND ENGINE (v80). `wasm/src/lib.rs`
   `include!`s `backend/src/main.rs` verbatim, so there is no third engine to
   keep in parity (the pre-v11 Wasm engine was a separate reimplementation —
@@ -212,8 +263,8 @@ hashes.
   `BACKEND_BYTES_PER_CELL`) — the wasm worker holds MORE per worker than the
   JS one, so a pool only switches engine when workers × `wasmSpeedup` beats
   JS, and jobs over `memBudgetBytes()` stay JS unless `#max-workers` is set.
-  The single-source gate mirrors `/single`'s (no destination, top-N,
-  maximize; graph and the compare pair stay JS). Modules compile ONCE on the
+  The single-source gate mirrors `/single`'s (no destination, top-N;
+  graph and the compare pair stay JS). Modules compile ONCE on the
   page (`loadWasmEngine`) and travel to workers as `WebAssembly.Module`s.
   `engine64.wasm` MUST keep `--max-memory`: without a declared maximum
   Firefox copies a Memory64 memory on every grow (measured quadratic —
@@ -325,7 +376,7 @@ hashes.
   anchor stability / admissible-heuristic scope); the estimator scales by
   `DIRS_COST_SINGLE`/`DIRS_COST_DENSITY`.
 - STRING PULLING (`#string-pull`) post-hoc shortens the displayed route(s)
-  (single path + top-N; round and maximize excluded) by windowed DP over
+  (single path + top-N; round excluded) by windowed DP over
   the path's own nodes with profile-integrated straight segments. Viewing ≡
   routing holds by construction: the energy shown for a pulled line is that
   polyline's own per-sub-step v2Edge sum, and the drawn line IS the
@@ -465,12 +516,19 @@ node test-maxseg.mjs                       # max-density segment search + app-si
 node test-water-raster.mjs                 # OSM water-mask rasterisation (areas/sea/rivers)
 node test-app-shell.mjs                    # imports ≡ sw.js precache ≡ deploy.sh staging + stamps (needs bash)
 node test-changelog.mjs                    # CHANGELOG.md parser + newest entry ≡ sw.js VERSION
+node test-run-message.mjs                  # run-message builder ≡ keys the worker reads; every sender uses it
+node test-pool-merge.mjs                   # density-pool merge: every arrival order gives the same bits
 node census/test-census-sampler.mjs        # in-browser census sampler helpers (lib/census-sampler.js)
 node census/test-census-density.mjs        # census density harness end-to-end (needs npm install in census/)
 node mcp/test-mcp.mjs                      # MCP server over real stdio vs direct engine runs (needs npm install in census/ AND mcp/)
 cd backend && cargo build --release && node test-backend.mjs
 node wasm/test-wasm.mjs                    # wasm-worker.js + engine32/64.wasm vs energy-worker.js (after wasm/build.sh)
+(cd e2e && npm ci) && node e2e/smoke.mjs   # the real page in headless Chromium, ~65 steps, ~30 s (needs Playwright's Chromium)
 ```
+
+`e2e/smoke.mjs --root <dir> --out <report.json>` on two trees + `diff` is the
+before/after proof for refactors (the v82 split of `app.js` and the v83
+changes were verified that way). `--only <letters>` runs single groups.
 
 `census/test-census-sampler.mjs` tests the app's own census-sampling helpers
 (`pointInPolygon`, `ringArea`/`polyArea`, `clipRingToBbox`/`clippedPolyArea`,
