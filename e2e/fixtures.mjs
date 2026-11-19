@@ -1,6 +1,8 @@
 // Deterministic input fixtures for smoke.mjs (all generated in Node, no
 // randomness, no clock): the synthetic DEM, a street-network GeoPackage, an
-// impassable-mask GeoTIFF, two GPX tracks and a canned Overpass response.
+// impassable-mask GeoTIFF, two GPX tracks, a canned Overpass response, and the
+// coastal set for the water pulls (a second DEM with a sea, canned Overpass
+// water/coastline answers, FlatGeobuf-shaped features and their oracle).
 //
 // Everything lives on ONE grid: 240 x 200 cells of 1 arc-second, EPSG:4326,
 // north-west corner (-46.66, -23.53) near Sao Paulo centre. Geometry is placed
@@ -179,4 +181,131 @@ export function overpassResponse() {
       way(1006, [[140, 140], [140, 220]], { highway: "primary", name: "Rampa Leste" }),
     ],
   };
+}
+
+// ---------------------------------------------------------------- coast (group t)
+// A coastal scene on the SAME grid, shaped like Fortaleza: sea to the NORTH and
+// EAST of a cape. The coastline (cells [row, col], vertices at cell centres) is
+// directed like OSM's — land on the LEFT of travel: north up the east coast,
+// round the cape, west along the north shore — and starts/ends OUTSIDE the grid.
+// Rows above its northernmost in-grid point (~45) and columns east of its
+// easternmost one (~201) never cross it: that north-east block is the sea
+// sweep's far field (COAST.farField), the corner the app left open until v84.
+export const COAST = {
+  line: [[206, 201], [150, 196], [100, 186], [72, 174], [66, 150], [74, 120], [60, 60], [44, -6]],
+  // OSM hands the coast over in several ways; split at these vertex indices.
+  splits: [0, 2, 5, 7],
+  farField: { r0: 0, r1: 40, c0: 205, c1: 239 },
+  lagoon: { r0: 120, r1: 140, c0: 60, c1: 90 },   // natural=water, closed way
+  river: [[180, 30], [150, 110]],                 // waterway=river
+  tunnelRiver: [[100, 30], [100, 100]],           // waterway=river + tunnel=yes: stays passable
+};
+
+// Even-odd point-in-polygon in (row, col) space — the ORACLE, deliberately not
+// the app's rasteriser. Land = left of the coastline, closed far to the SW.
+const COAST_LAND_RING = [...COAST.line, [900, -6], [900, 201]];
+function inRing(r, c, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [ri, ci] = ring[i], [rj, cj] = ring[j];
+    if ((ri > r) !== (rj > r) && c < ci + (r - ri) / (rj - ri) * (cj - ci)) inside = !inside;
+  }
+  return inside;
+}
+function distToLine(r, c, line) {
+  let best = Infinity;
+  for (let i = 0; i + 1 < line.length; i++) {
+    const [r0, c0] = line[i], [r1, c1] = line[i + 1];
+    const dr = r1 - r0, dc = c1 - c0;
+    const u = Math.max(0, Math.min(1, ((r - r0) * dr + (c - c0) * dc) / (dr * dr + dc * dc)));
+    best = Math.min(best, Math.hypot(r - (r0 + u * dr), c - (c0 + u * dc)));
+  }
+  return best;
+}
+export const coastIsLand = (r, c) => inRing(r, c, COAST_LAND_RING);
+
+// Float32 DEM for the coastal scene: the sea is VALID terrain at exactly 0 m
+// (as in FABDEM), the land a low, gently rolling plain (3–40 m).
+export function makeCoastDemTiff() {
+  const { W, H } = DEM;
+  const z = new Float32Array(W * H);
+  for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
+    if (!coastIsLand(r, c)) continue;
+    z[r * W + c] = 3 + 0.12 * (r - 40) * (c < 200 ? 1 : 0.5) / 2 + 6 * (1 + Math.sin(r * 0.21) * Math.cos(c * 0.17)) + 0.02 * (240 - c);
+  }
+  return Buffer.from(writeArrayBuffer(z, { width: W, height: H, ...GEO() }));
+}
+
+const osmWay = (id, cells, tags) => ({
+  type: "way", id, tags,
+  geometry: cells.map(([r, c]) => { const [lat, lon] = cellLL(r, c); return { lat, lon }; }),
+});
+const lagoonRing = () => { const { r0, r1, c0, c1 } = COAST.lagoon; return [[r0, c0], [r0, c1], [r1, c1], [r1, c0], [r0, c0]]; };
+function coastWays() {
+  const ways = [];
+  for (let i = 0; i + 1 < COAST.splits.length; i++) {
+    ways.push(osmWay(2001 + i, COAST.line.slice(COAST.splits[i], COAST.splits[i + 1] + 1), { natural: "coastline" }));
+  }
+  return [ways[1], ways[2], ways[0]]; // Overpass does not return them in travel order
+}
+const osmEnvelope = (elements) => ({
+  version: 0.6, generator: "simujaules-e2e canned",
+  osm3s: { timestamp_osm_base: "2026-01-01T00:00:00Z" },
+  elements,
+});
+// What the OSM water pull's query returns (areas + rivers + coastline).
+export function overpassWaterResponse() {
+  return osmEnvelope([
+    osmWay(2101, lagoonRing(), { natural: "water", water: "lagoon" }),
+    osmWay(2102, COAST.river, { waterway: "river" }),
+    osmWay(2103, COAST.tunnelRiver, { waterway: "river", tunnel: "yes" }),
+    ...coastWays(),
+  ]);
+}
+// What the FGB pull's coastline-only query returns.
+export function overpassCoastResponse() { return osmEnvelope(coastWays()); }
+// Overpass's HTTP-200 answer to a query that timed out server-side.
+export function overpassTimeoutResponse() {
+  return { ...osmEnvelope([]), remark: 'runtime error: Query timed out in "query" at line 1 after 16 seconds.' };
+}
+// The same lagoon and river as GeoJSON features, as the water FlatGeobufs would
+// stream them (no tunnel tag there — and no tunnelled river in this fixture, so
+// the two pulls must build the same mask).
+export function fgbWaterFeatures() {
+  const ll = ([r, c]) => { const [lat, lon] = cellLL(r, c); return [lon, lat]; };
+  return {
+    areas: [{ type: "Feature", properties: { natural: "water" }, geometry: { type: "Polygon", coordinates: [lagoonRing().map(ll)] } }],
+    rivers: [{ type: "Feature", properties: { waterway: "river" }, geometry: { type: "LineString", coordinates: COAST.river.map(ll) } }],
+  };
+}
+
+// Check an exported impassable mask (Uint8, 1 = impassable) of the coastal
+// scene against the oracle. `sea`: whether the sea is expected to be blocked
+// (true) or left open (false — the coastline was unavailable). Cells within 1.5
+// cells of the coastline, the lagoon edge or the river are not judged (the app
+// stamps the shore and the river with a supercover line).
+export function checkCoastMask(mask, { sea }) {
+  const { W, H } = DEM;
+  const errors = [];
+  const n = { seaCells: 0, seaBlocked: 0, landCells: 0, landBlocked: 0, lagoonCells: 0, lagoonBlocked: 0, farFieldCells: 0, farFieldBlocked: 0, impassable: 0 };
+  const L = COAST.lagoon, F = COAST.farField;
+  for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
+    const m = mask[r * W + c] ? 1 : 0;
+    n.impassable += m;
+    if (r >= F.r0 && r <= F.r1 && c >= F.c0 && c <= F.c1) { n.farFieldCells++; n.farFieldBlocked += m; }
+    if (distToLine(r, c, COAST.line) <= 1.5) continue;
+    if (!coastIsLand(r, c)) { n.seaCells++; n.seaBlocked += m; continue; }
+    if (r > L.r0 && r < L.r1 && c > L.c0 && c < L.c1) { n.lagoonCells++; n.lagoonBlocked += m; continue; }
+    if (distToLine(r, c, lagoonRing()) <= 1.5 || distToLine(r, c, COAST.river) <= 1.5) continue;
+    n.landCells++; n.landBlocked += m;
+  }
+  if (sea && n.seaBlocked !== n.seaCells) errors.push(`${n.seaCells - n.seaBlocked} of ${n.seaCells} sea cells are passable`);
+  if (sea && n.farFieldBlocked !== n.farFieldCells) errors.push(`far-field corner: ${n.farFieldCells - n.farFieldBlocked} of ${n.farFieldCells} sea cells are passable`);
+  if (!sea && n.seaBlocked) errors.push(`${n.seaBlocked} sea cells are blocked although the coastline was unavailable`);
+  if (n.landBlocked) errors.push(`${n.landBlocked} of ${n.landCells} land cells are blocked`);
+  if (n.lagoonBlocked !== n.lagoonCells) errors.push(`lagoon: ${n.lagoonCells - n.lagoonBlocked} of ${n.lagoonCells} cells are passable`);
+  for (const [r, c] of COAST.river) if (!mask[r * W + c]) errors.push(`river cell [${r},${c}] is passable`);
+  const [tr, tc] = [COAST.tunnelRiver[0][0], 60];
+  if (mask[tr * W + tc]) errors.push(`tunnelled river cell [${tr},${tc}] is blocked`);
+  return { errors, counts: n };
 }

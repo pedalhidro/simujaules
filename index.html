@@ -1206,9 +1206,10 @@
         </button>
         <button type="button" class="secondary" id="impassable-osm" data-i18n="imp.osm" style="margin-top: 4px;">Pull water from OSM</button>
         <!-- Mesmas classes d'água do pull OSM, servidas dos FGBs de água do
-             projeto (build-viario.py --water no gs://telhas) via HTTP Range —
-             sem Overpass. Sem litoral (mar não é preenchido) e sem filtro de
-             rios em túnel — ver o title/i18n. -->
+             projeto (build-viario.py --water no gs://telhas) via HTTP Range.
+             O FGB não traz litoral: o mar vem de uma consulta leve ao Overpass
+             (só natural=coastline, e só se o DEM desce perto do nível do mar);
+             sem filtro de rios em túnel — ver o title/i18n. -->
         <button type="button" class="secondary" id="impassable-fgb" data-i18n="imp.fgb" data-i18n-title="imp.fgb.title" style="margin-top: 4px;">Puxar água do FGB (América do Sul · nuvem)</button>
         <label id="imp-corridor-row" style="display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text); opacity: 0.55;">
           <input type="checkbox" id="imp-corridor" checked disabled />

@@ -39,8 +39,9 @@ hashes.
   `installNetworkFromLines` tail, flatgeobuf 3.36.0 already shipped for the
   census sampler). v66 extended the FGB family to 1C and 1D: `loadFgbWater`
   (water areas + rivers FGBs → the same `osmWaterGeom` cache and
-  `rebuildOsmWaterMask` tail; NO coastline layer — the sea is not filled —
-  and no tunnel filter on rivers) and `loadFgbBridges` (deck ways from the
+  `rebuildOsmWaterMask` tail; the FGBs have NO coastline layer, so since v84
+  the sea comes from a coastline-only Overpass query — see THE SEA below —
+  and there is no tunnel filter on rivers) and `loadFgbBridges` (deck ways from the
   viário FGB → `installBridgesFromWays`; `eleA/eleB` null → DEM fallback,
   highway-only so railway decks are absent). All three share `fgbStream`.
 - `energy-worker.js` — the compute engine (Web Worker): Dijkstra with
@@ -99,10 +100,11 @@ hashes.
   `flatEqSpeed`/`deriveCost`/`smoothHeightsInPlace`.
 - `e2e/` — the browser smoke harness (`smoke.mjs` + `fixtures.mjs`; dev
   tooling with its own `package.json`, never deployed). It serves a tree,
-  drives the REAL page in headless Chromium through ~65 steps (fields,
+  drives the REAL page in headless Chromium through ~70 steps (fields,
   routes, top-N, density pools on both engines, GeoPackage network + graph
   mode, Geoman drawing, config / dataset / bundle round trips, GPX overlay,
-  a canned Overpass pull) and writes a report of deterministic digests —
+  a canned Overpass pull, the OSM and FGB water pulls on a coastal DEM) and
+  writes a report of deterministic digests —
   every overlay image, vector layer and exported bundle file hashed. Two
   uses: (1) CI pass/fail (`browser-smoke` job); (2) proving a refactor
   changes nothing — run it on the tree before and after and `diff` the two
@@ -412,6 +414,32 @@ hashes.
   `settled` byte array (not `g > E[idx]`) filters stale heap entries, and
   settled neighbours are never relaxed. Both guards exist because of the
   f32/f64 precision mismatch — removing either corrupts passes counts.
+- THE SEA (water mask, group 1C; v84). OSM has no sea polygon, only
+  `natural=coastline` lines (land on the LEFT of travel, water on the RIGHT),
+  and FABDEM stores the sea as VALID terrain at exactly 0 m — a water mask
+  without the sea leaves the ocean a passable plain. `lib/water-raster.js`
+  `seaSweepSteps` fills it under three rules, each of which fixed a failure
+  measured on Fortaleza's real coastline; drop one and the mask is wrong
+  without any error: (a) ORIENTATION SWEEPS, never a flood fill — a
+  horizontal and a vertical pass, each crossing SETTING sea/land for its span
+  (coastline gaps would leak a flood across all land); (b) IN-GRID ONLY —
+  crossings outside the grid are ignored: a bbox query returns whole ways, so
+  outside the DEM the coastline is loose ends, and trusting them painted
+  1-cell "sea" walls across land from top to bottom; (c) FAR FIELD — a cell
+  whose row AND column both miss the coastline is seen by neither sweep (on a
+  convex coast that is a whole corner of the grid) and takes the state of the
+  nearest crossed lines around it, per cell, by majority, a tie going to sea.
+  It is ONE generator: `fillSeaFromCoastlines` drains it synchronously, the
+  app (`fillSeaFromCoastlinesChunked`) in time slices — never copy the sweep
+  back into `app/water.js`. Both pulls must yield the SAME mask from the same
+  features (e2e group t asserts byte equality): the OSM pull has the
+  coastline in its own query; the FGB pull (`loadFgbWater`) fetches it with
+  `fetchOsmCoastlines`, in parallel with the FGB streams, under two rules that
+  keep it independent of Overpass — the GATE (`demMayHoldSea`: no valid cell
+  ≤ 100 m → no shore → no query; São Paulo never asks) and the SOFT FAIL (a
+  failed or timed-out query installs the mask WITHOUT the sea and says so in
+  the status line and, persistently, in the mask's meta line via
+  `impassableMeta.noCoast`). Never let a missing coastline pass silently.
 - `sw.js`: bump `VERSION` (with a `CHANGELOG.md` entry) on every deploy that
   changes app behaviour; keep `PRECACHE_URLS` in sync with what
   `index.html`/`deploy.sh` actually reference — `cache.addAll` is atomic,
@@ -528,7 +556,7 @@ node census/test-census-density.mjs        # census density harness end-to-end (
 node mcp/test-mcp.mjs                      # MCP server over real stdio vs direct engine runs (needs npm install in census/ AND mcp/)
 cd backend && cargo build --release && node test-backend.mjs
 node wasm/test-wasm.mjs                    # wasm-worker.js + engine32/64.wasm vs energy-worker.js (after wasm/build.sh)
-(cd e2e && npm ci) && node e2e/smoke.mjs   # the real page in headless Chromium, ~65 steps, ~30 s (needs Playwright's Chromium)
+(cd e2e && npm ci) && node e2e/smoke.mjs   # the real page in headless Chromium, ~70 steps, ~30 s (needs Playwright's Chromium)
 ```
 
 `e2e/smoke.mjs --root <dir> --out <report.json>` on two trees + `diff` is the
@@ -543,12 +571,12 @@ weighting, in-polygon placement, and the clip-area ratio. The cloud `.fgb`
 
 `test-water-raster.mjs` tests the app's own OSM water-mask helpers
 (`fillRingsEvenOdd`, `rasterPolylineSupercover`, `assembleRings`,
-`fillSeaFromCoastlines`), imported from `lib/water-raster.js`. The async
-`…Chunked` variants the app actually calls for big masks stay in the app and
-are NOT under test — keep them line-for-line with the lib versions. The SEA fill is the load-bearing case: OSM gives only
-`natural=coastline` lines (land-left/water-right), filled by a horizontal+vertical
-orientation SWEEP (sea/land set per span, never flood-filled — coastline gaps
-would otherwise leak the sea into all land).
+`fillSeaFromCoastlines` / `seaSweepSteps`), imported from
+`lib/water-raster.js`. The sea sweep has ONE implementation (v84): the app
+drains the same generator in time slices. The async `fillRingsEvenOddChunked`
+the app calls for big area fills still lives in `app/water.js` and is NOT
+under test — keep it line-for-line with the lib's `fillRingsEvenOdd`. The SEA
+fill is the load-bearing case — see THE SEA invariant.
 
 `docs/grid-*.mjs` are ANALYSIS harnesses, not tests (they need the
 `sampa_centro.tif` download + `census/node_modules`): they reproduce

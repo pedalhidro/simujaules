@@ -12,6 +12,105 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v84 — 2026-11-19
+
+> **O mar entra na máscara de água.** Em DEM de litoral — o caso que acusou
+> foi Fortaleza — a máscara de água deixava o oceano transitável. Eram dois
+> defeitos. O botão **Puxar água do FGB** não trazia litoral nenhum: o mar
+> inteiro ficava aberto. E o **Puxar água do OSM** deixava um canto do mar sem
+> barrar sempre que a costa faz uma ponta (em Fortaleza, o canto nordeste).
+> Agora os dois botões barram o mar inteiro e produzem a mesma máscara. No FGB
+> o litoral vem de uma consulta leve ao OSM; se ela falhar, a máscara entra
+> sem o mar e avisa em laranja. Em DEM longe do mar nada muda.
+
+**Por que o mar importa.** O FABDEM guarda o mar como terreno VÁLIDO a
+exatamente 0 m (não como nodata): sem máscara, o oceano é uma planície
+transitável. Numa janela de 0,35° × 0,30° em volta de Fortaleza são 616.123
+células de 1.360.800 (45%).
+
+**1. Varredura do litoral (pull do OSM): o canto que nenhuma linha vê.** O mar
+não é polígono no OSM — é o lado direito das linhas `natural=coastline` — e a
+máscara o preenche com duas varreduras (por linha e por coluna), em que cada
+cruzamento com a costa define mar/terra dali em diante. Uma célula cuja linha
+**e** cuja coluna não cruzam a costa em lugar nenhum não era classificada por
+nenhuma das duas. Numa costa convexa isso é um canto inteiro da grade: em
+Fortaleza, ao norte do ponto mais ao norte da costa × a leste do ponto mais a
+leste (a ponta do Mucuripe). Medido com o litoral real do OSM (123 ways, 1.597
+nós) em grade de 1″: num enquadramento típico da cidade (810 × 443 células)
+ficavam abertas 36.260 de 254.420 células de mar (14%); em 400 janelas
+aleatórias, 67 das 318 que contêm costa saíam erradas, com 2.167.403 células
+de mar abertas no total. Agora essas células tomam o estado das linhas
+cruzadas vizinhas (a linha de cima/baixo e a coluna da esquerda/direita, por
+maioria, empate vira mar) — célula a célula, de modo que além do fim de um
+litoral interrompido a costa segue reta em vez de alagar ou secar o bloco.
+
+**2. Só cruzamentos dentro da grade.** A consulta por bbox devolve cada way
+de costa que toca o DEM com a geometria INTEIRA, então fora da grade o litoral
+são pontas soltas: o way que traz o próximo cruzamento de uma coluna pode não
+ter vindo. A varredura confiava nesses cruzamentos de fora, e um deles (a
+perna de volta de um espigão na borda norte, com o trecho de praia seguinte
+num way não devolvido) pintava uma coluna inteira como "mar" — uma parede de
+1 célula cortando a terra de cima a baixo (275 células numa grade de 802 ×
+275; 1 das 318 janelas). Cruzamentos fora da grade agora são ignorados; as
+linhas que ficam sem cruzamento caem na regra 1, que só usa dado completo.
+
+Validação das duas regras contra um gabarito independente (polígono de terra
+fechado pelo interior, preenchimento par-ímpar; coincide com o FABDEM em
+99,99% das células de mar): 2.000 janelas aleatórias, 1.569 com costa, todas
+idênticas célula a célula fora da linha de costa. Repetido com o litoral
+girado e espelhado nas 8 orientações (mar ao norte, sul, leste, oeste…): 1.807
+janelas, todas exatas; a varredura antiga errava 318 delas (18%).
+
+**3. Pull do FGB: faltava o litoral.** Os FlatGeobufs de água trazem áreas e
+rios, mas não a linha de costa — lacuna documentada desde a v66 ("em DEM
+costeiro use o OSM"), só que silenciosa: em Fortaleza o pull marcava 32.321
+células de lagoas e rios e deixava abertas as cerca de 610 mil de mar. Agora o pull
+pede ao Overpass só as linhas `natural=coastline` da extensão do DEM (a
+consulta mais leve que existe — o litoral de uma cidade são algumas centenas
+de nós), em paralelo com os dois FGBs, e passa pela mesma varredura do pull do
+OSM. Duas regras preservam a razão de ser do FGB (não depender do Overpass):
+
+- **Só quando pode haver mar:** um DEM sem nenhuma célula válida a 100 m ou
+  menos não tem costa, e o Overpass nem é consultado (o planalto de São Paulo
+  segue sem tocar nele). Os 100 m são folgados de propósito: cobrem a
+  ondulação do geoide de qualquer litoral sul-americano, então até um DEM em
+  altitude elipsoidal que chega ao mar passa.
+- **Falha não derruba o pull:** se a consulta falhar ou estourar o tempo
+  (15 s no servidor, 20 s no cliente), a máscara entra assim mesmo, sem o
+  mar, com aviso em laranja na linha de status e — permanente — na linha de
+  resumo da máscara ("sem litoral: o mar (se houver) NÃO está barrado").
+
+Um FlatGeobuf de litoral ao lado dos de água (no `build-viario.py` do amora)
+tiraria essa dependência: trocaria `fetchOsmCoastlines` por um terceiro
+`fgbStream`.
+
+**Uma implementação só da varredura.** `app/water.js` mantinha uma segunda
+cópia assíncrona da varredura do mar (para não travar a aba), sem teste e
+sincronizada à mão com `lib/water-raster.js`. Agora a varredura é um gerador
+(`seaSweepSteps`) que pausa entre linhas: `fillSeaFromCoastlines` o esgota de
+uma vez e o app o esgota em fatias de tempo — o código testado é o que roda
+na página. (O `fillRingsEvenOddChunked` das áreas continua espelhado à mão.)
+
+Miudeza: a linha de status dos dois pulls dizia "Água do OSM: N células
+barradas" também para o FGB; agora diz "Máscara de água: N células barradas".
+
+Testes: `test-water-raster.mjs` passa de 20 para 50 verificações (cabo com
+canto cego nas 4 rotações, ilha e lago com os 4 cantos, litoral interrompido,
+parede por cruzamento de fora, máscara pré-marcada, gerador ≡ função); o
+mesmo arquivo contra a `lib/` da v83 falha em 15. O harness de navegador
+ganha o grupo **t** (5 passos, 71 no total): um DEM de litoral em que os dois
+pulls têm de barrar o mar inteiro e gerar a mesma máscara byte a byte, o FGB
+tem de sobreviver à falha do litoral avisando, e não pode consultar o
+Overpass num DEM de planalto. Na árvore da v83 o grupo falha como esperado
+(OSM: 1.710 de 21.465 células de mar abertas; FGB: todas as 21.465). Os 66
+passos anteriores dão relatório idêntico antes e depois, salvo o hash dos
+textos de dica (a dica do botão do FGB mudou) e o resumo do próprio changelog.
+
+Não verificado contra o serviço real: o Overpass não é alcançável do ambiente
+onde isto foi feito, então a consulta de litoral foi exercitada só com
+respostas enlatadas; o litoral real de Fortaleza usado nas medições veio da
+API do OSM (mesmos ways, mesma geometria).
+
 ## v83 — 2026-11-10
 
 > **Densidade reprodutível.** A densidade com 3 ou mais workers e o motor
