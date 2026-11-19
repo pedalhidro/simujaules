@@ -1,7 +1,7 @@
 // Impassable mask: the OSM / FlatGeobuf water pulls (group 1C), mask files,
 // corridor availability.
 import "./draw.js"; // evaluation order — see ../app.js
-import { assembleRings, rasterPolylineSupercover } from "../lib/water-raster.js";
+import { assembleRings, rasterPolylineSupercover, seaSweepSteps } from "../lib/water-raster.js";
 import { t } from "./i18n.js";
 import { setGroupOpen, syncLoadedHighlights } from "./panel.js";
 import { escapeHtml, state } from "./state.js";
@@ -60,22 +60,23 @@ export function llToGridFrac(lat, lng) {
 }
 
 // The pure rasterisers (fillRingsEvenOdd, rasterPolylineSupercover,
-// assembleRings, fillSeaFromCoastlines) live in lib/water-raster.js (shared
+// assembleRings, the coastline sea sweep) live in lib/water-raster.js (shared
 // with test-water-raster.mjs).
 
-// Async, chunked re-implementations of fillRingsEvenOdd/fillSeaFromCoastlines
-// for the main-thread caller (rebuildOsmWaterMask): SAME per-row/per-sweep math
-// as the pure functions in lib/water-raster.js, just batched with a TIME-based
-// yield so a single huge body (a reservoir ring with tens of thousands of
-// vertices) or the coastline sweep doesn't block the tab end-to-end. The pure
-// functions themselves are left untouched — test-water-raster.mjs tests them
-// directly (the …Chunked copies here are NOT under test, so keep their math in
-// step with lib/water-raster.js by hand) — and still used directly by
-// rasterizeRingsToMask (drawn-shape masks, small and synchronous)
-// and the rivers loop below. A fixed item count (e.g. "every 25 bodies") would
-// miss the actual cost concentration — a 10-vertex pond and a 30,000-vertex
-// reservoir ring differ by orders of magnitude — so the yield cadence here is
-// wall-clock based instead.
+// The main-thread caller (rebuildOsmWaterMask) must not block the tab
+// end-to-end on a single huge body (a reservoir ring with tens of thousands of
+// vertices) or on the coastline sweep, so both are batched with a TIME-based
+// yield. A fixed item count (e.g. "every 25 bodies") would miss the actual
+// cost concentration — a 10-vertex pond and a 30,000-vertex reservoir ring
+// differ by orders of magnitude — so the yield cadence is wall-clock based.
+//   - the SEA SWEEP is the lib's own code: lib/water-raster.js seaSweepSteps
+//     is a generator that pauses between scan lines, and
+//     fillSeaFromCoastlinesChunked below only drains it with awaits (v84 —
+//     until then this file kept a second, untested copy of the sweep);
+//   - fillRingsEvenOddChunked IS still an async re-implementation of the pure
+//     fillRingsEvenOdd (same per-row math, NOT under test — keep the two in
+//     step by hand). The pure one is used directly by rasterizeRingsToMask
+//     (drawn-shape masks, small and synchronous).
 const WATER_MASK_YIELD_MS = 50;
 
 async function fillRingsEvenOddChunked(rings, out, W, H) {
@@ -113,61 +114,13 @@ async function fillRingsEvenOddChunked(rings, out, W, H) {
 }
 
 async function fillSeaFromCoastlinesChunked(coastlines, data, W, H) {
-  if (!coastlines || !coastlines.length) return 0;
   let lastYield = performance.now();
-  const maybeYield = async () => {
+  for (const _step of seaSweepSteps(coastlines, data, W, H)) {
     if (performance.now() - lastYield > WATER_MASK_YIELD_MS) {
       await new Promise((res) => setTimeout(res, 0));
       lastYield = performance.now();
     }
-  };
-  for (const line of coastlines) { rasterPolylineSupercover(line, data, W, H); await maybeYield(); } // shore = impassable edge
-  const xs = []; // crossings of the current scan: { p = position along scan, sea = state past it }
-  // Horizontal sweep: per ROW, a crossing sets the state to its EAST
-  // (north-going coast, grid y decreasing → sea to the east).
-  for (let ry = 0; ry < H; ry++) {
-    const yc = ry + 0.5;
-    xs.length = 0;
-    for (const line of coastlines) for (let i = 0; i + 1 < line.length; i++) {
-      const y0 = line[i][1], y1 = line[i + 1][1];
-      if ((y0 > yc) !== (y1 > yc)) { const x0 = line[i][0], x1 = line[i + 1][0];
-        xs.push({ p: x0 + (yc - y0) / (y1 - y0) * (x1 - x0), sea: y1 < y0 }); }
-    }
-    if (xs.length) {
-      xs.sort((a, b) => a.p - b.p);
-      const base = ry * W;
-      let k = -1;
-      for (let c = 0; c < W; c++) {
-        const cx = c + 0.5;
-        while (k + 1 < xs.length && xs[k + 1].p <= cx) k++;
-        if (k >= 0 ? xs[k].sea : !xs[0].sea) data[base + c] = 1;
-      }
-    }
-    await maybeYield();
   }
-  // Vertical sweep: per COLUMN, a crossing sets the state to its SOUTH
-  // (east-going coast, x increasing → sea to the south).
-  for (let cx = 0; cx < W; cx++) {
-    const xc = cx + 0.5;
-    xs.length = 0;
-    for (const line of coastlines) for (let i = 0; i + 1 < line.length; i++) {
-      const x0 = line[i][0], x1 = line[i + 1][0];
-      if ((x0 > xc) !== (x1 > xc)) { const y0 = line[i][1], y1 = line[i + 1][1];
-        xs.push({ p: y0 + (xc - x0) / (x1 - x0) * (y1 - y0), sea: x1 > x0 }); }
-    }
-    if (xs.length) {
-      xs.sort((a, b) => a.p - b.p);
-      let k = -1;
-      for (let r = 0; r < H; r++) {
-        const cy = r + 0.5;
-        while (k + 1 < xs.length && xs[k + 1].p <= cy) k++;
-        if (k >= 0 ? xs[k].sea : !xs[0].sea) data[r * W + cx] = 1;
-      }
-    }
-    await maybeYield();
-  }
-  let filled = 0; for (let i = 0, N = W * H; i < N; i++) if (data[i]) filled++;
-  return filled;
 }
 
 // Whether river LINES count as impassable (the #imp-rivers toggle). Water areas
@@ -227,9 +180,21 @@ export async function rebuildOsmWaterMask() {
   const fi = document.getElementById("impassable-file"); if (fi) fi.value = "";
   // Wrap as a DEM-grid raster so the uploaded-mask pipeline consumes it
   // unchanged (resample is identity; Invert/corridors/overlay/bundle reused).
-  applyImpassableRaster({ width: W, height: H, data, dx, dy, originX, originY, epsg: 4326 }, g.label || "OSM water");
-  status.textContent = cells ? t("status.water_done", cells.toLocaleString()) : t("status.water_none");
+  // noCoast: the FGB pull could not get the coastline (see fetchOsmCoastlines)
+  // — carried on the raster so the mask's own meta line keeps saying that the
+  // sea, if any, is NOT in it (the status line is gone at the next action).
+  applyImpassableRaster({ width: W, height: H, data, dx, dy, originX, originY, epsg: 4326, noCoast: !!g.coastError }, g.label || "OSM water");
+  const done = cells ? t("status.water_done", cells.toLocaleString()) : t("status.water_none");
+  if (g.coastError) status.innerHTML = `${escapeHtml(done)} ${noCoastHtml(g.coastError)}`;
+  else status.textContent = done;
   progress.classList.remove("active");
+}
+
+// Overpass bbox filter (south,west,north,east) of the FULL DEM extent — a mask
+// should cover the whole grid, not just the view.
+function demOverpassBbox(dem) {
+  const { originX, originY, H, W, dx, dy } = dem;
+  return `${(originY - H * dy).toFixed(6)},${originX.toFixed(6)},${originY.toFixed(6)},${(originX + W * dx).toFixed(6)}`;
 }
 
 export async function loadOsmWater() {
@@ -238,16 +203,13 @@ export async function loadOsmWater() {
   // Epoch token: guards the async install tail below against a DEM swap
   // that happens while the Overpass fetch/parse is in flight.
   const demRef = state.dem;
-  const { originX, originY, H, W, dx, dy } = state.dem;
-  // Full DEM extent — a mask should cover the whole grid, not just the view.
-  const south = originY - H * dy, north = originY, west = originX, east = originX + W * dx;
   const btn = document.getElementById("impassable-osm");
   if (btn) btn.disabled = true;
   progress.classList.add("active");
   progressBar.style.width = "20%";
   status.textContent = t("status.water_querying");
   try {
-    const bbox = `${south.toFixed(6)},${west.toFixed(6)},${north.toFixed(6)},${east.toFixed(6)}`;
+    const bbox = demOverpassBbox(state.dem);
     const query = `[out:json][timeout:120];(` +
       `way["natural"="water"](${bbox});relation["natural"="water"](${bbox});` +
       `way["waterway"="riverbank"](${bbox});relation["waterway"="riverbank"](${bbox});` +
@@ -307,15 +269,79 @@ export async function loadOsmWater() {
   }
 }
 
+// ---- The sea, for the FGB pull --------------------------------------------
+// The water FlatGeobufs carry no coastline, and FABDEM stores the sea as VALID
+// terrain at exactly 0 m — so an FGB-only mask leaves the whole ocean a
+// passable plain (near Fortaleza: 45% of a city-sized grid). Since v84 the FGB
+// pull asks Overpass for the one layer the FGBs lack, natural=coastline over
+// the DEM extent — the lightest query there is (a city's coast is a few hundred
+// nodes) — in PARALLEL with the two FGB streams, and feeds it to the same sea
+// sweep as the OSM pull. Two rules keep the FGB pull's promise of not depending
+// on Overpass:
+//   - GATE: a DEM with no valid cell at or below SEA_POSSIBLE_MAX_ELEV_M holds
+//     no shore, so it is not asked at all (São Paulo's plateau never touches
+//     Overpass). 100 m is deliberately generous: it clears the geoid
+//     undulation of any South American coast (≤ ~45 m), so even a DEM in
+//     ELLIPSOIDAL heights that reaches the sea passes the gate.
+//   - SOFT FAIL: if the query fails or times out (short timeout — the answer
+//     is normally there in a second or two), the mask is installed anyway,
+//     without the sea, and says so: in the status line and, persistently, in
+//     the mask's meta line (state.impassableMeta.noCoast).
+// A coastline FlatGeobuf next to the water ones (amora's build-viario.py)
+// would replace fetchOsmCoastlines with a third fgbStream and drop both rules.
+const SEA_POSSIBLE_MAX_ELEV_M = 100;
+const COAST_QUERY_TIMEOUT_S = 15;
+
+function demMayHoldSea(dem) {
+  const { height, mask } = dem;
+  for (let i = 0; i < height.length; i++) if (mask[i] && height[i] <= SEA_POSSIBLE_MAX_ELEV_M) return true;
+  return false;
+}
+
+// natural=coastline ways of the DEM extent, as grid polylines (sea on the
+// right of travel). Throws on any failure — the caller decides what a missing
+// coastline means.
+async function fetchOsmCoastlines(dem) {
+  const query = `[out:json][timeout:${COAST_QUERY_TIMEOUT_S}];way["natural"="coastline"](${demOverpassBbox(dem)});out geom;`;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), (COAST_QUERY_TIMEOUT_S + 5) * 1000);
+  try {
+    const resp = await fetch(OVERPASS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "data=" + encodeURIComponent(query),
+      signal: ctl.signal,
+    });
+    if (!resp.ok) throw new Error(t("status.overpass_http", resp.status));
+    const json = await resp.json();
+    if (json.remark) throw new Error(json.remark); // timed out / OOM server-side: partial or empty, never trust it
+    const lines = [];
+    for (const el of json.elements || []) {
+      if (el.type === "way" && Array.isArray(el.geometry) && el.geometry.length >= 2) lines.push(el.geometry.map((g) => llToGridFrac(g.lat, g.lon)));
+    }
+    return lines;
+  } catch (err) {
+    if (err?.name === "AbortError") throw new Error("timeout");
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function noCoastHtml(reason) {
+  return `<span style="color:#ff9d3d">${t("status.water_no_coast", escapeHtml(reason))}</span>`;
+}
+
 // Pull the water mask from the project's water FlatGeobufs (amora's
 // build-viario.py --water on gs://telhas): areas (natural=water /
 // landuse=reservoir / waterway=riverbank polygons) + waterway=river lines —
-// the same feature classes as the Overpass pull, minus two documented gaps:
-// NO coastline layer (the open sea is not filled — use the OSM pull on
-// coastal DEMs) and no tunnel tag on rivers (tunnelled rivers stay blocked,
-// a tiny over-block the Overpass pull filters out). Fills the SAME
-// state.osmWaterGeom cache and reuses rebuildOsmWaterMask(), so the
-// #imp-rivers toggle re-applies without re-querying, exactly like OSM.
+// the same feature classes as the Overpass pull. The FGBs have no coastline:
+// the sea comes from a coastline-only Overpass query (see above), so a coastal
+// DEM gets the same sea as the OSM pull. One documented gap is left: no tunnel
+// tag on rivers (tunnelled rivers stay blocked, a tiny over-block the Overpass
+// pull filters out). Fills the SAME state.osmWaterGeom cache and reuses
+// rebuildOsmWaterMask(), so the #imp-rivers toggle re-applies without
+// re-querying, exactly like OSM.
 export async function loadFgbWater() {
   if (!state.dem) { status.innerHTML = `<span style="color:#ff6b6b">${t("status.load_dem_first")}</span>`; return; }
   if (!state.dem.isGeographic) { status.innerHTML = `<span style="color:#ff6b6b">${t("status.water_geographic")}</span>`; return; }
@@ -340,6 +366,8 @@ export async function loadFgbWater() {
     const toGrid = (c) => llToGridFrac(c[1], c[0]);          // [lng,lat] GeoJSON
     const bodies = [];
     const rivers = [];
+    let coastlines = [];
+    let coastError = null;  // why the coastline is missing (null = fetched, or not needed)
     // Áreas: cada polígono (anéis externo+furos) é UM corpo — o preenchimento
     // even-odd de rebuildOsmWaterMask corta os furos por paridade.
     // v73: áreas e rios são ARQUIVOS independentes — os dois streams rodam em
@@ -358,17 +386,26 @@ export async function loadFgbWater() {
         if (g?.type === "LineString") rivers.push(g.coordinates.map(toGrid));
         else if (g?.type === "MultiLineString") for (const part of g.coordinates) rivers.push(part.map(toGrid));
       }),
+      // O litoral (o mar) vem do OSM — ver "The sea, for the FGB pull" acima.
+      // Falha aqui NÃO derruba o pull: a máscara entra sem o mar e avisa.
+      demMayHoldSea(demRef)
+        ? fetchOsmCoastlines(demRef).then((lines) => { coastlines = lines; }, (err) => {
+          console.warn("[fgb-water] coastline", err);
+          coastError = err?.message || String(err);
+        })
+        : null,
     ]);
     progressBar.style.width = "45%";
-    if (!bodies.length && !rivers.length) {
-      status.textContent = t("status.water_none");
-      return;
-    }
     if (state.dem !== demRef) {
       status.textContent = t("status.load_superseded");
       return;
     }
-    state.osmWaterGeom = { bodies, rivers, coastlines: [], label: "FGB água" };
+    if (!bodies.length && !rivers.length && !coastlines.length) {
+      if (coastError) status.innerHTML = `${escapeHtml(t("status.water_none"))} ${noCoastHtml(coastError)}`;
+      else status.textContent = t("status.water_none");
+      return;
+    }
+    state.osmWaterGeom = { bodies, rivers, coastlines, coastError, label: "FGB água" };
     await rebuildOsmWaterMask();
   } catch (err) {
     console.error("[fgb-water]", err);
@@ -411,6 +448,7 @@ export function applyImpassableRaster(raster, name) {
   state.impassableMeta = {
     name: name ?? state.impassableMeta?.name ?? "mask",
     width: raster.width, height: raster.height, srs: raster.epsg, cellsImpassable: cells,
+    noCoast: !!raster.noCoast, // FGB pull without its coastline — see fetchOsmCoastlines
   };
   recomputeCorridors();
   updateImpassableMeta();
@@ -430,6 +468,7 @@ export function updateImpassableMeta() {
   let html = `${escapeHtml(m.name || "mask")} · ` +
     t("imp.meta.cells", (m.cellsImpassable || 0).toLocaleString(), pct);
   if (corr) html += `<br/>${t("imp.meta.corridor", corr.toLocaleString())}`;
+  if (m.noCoast) html += `<br/><span style="color:#ff9d3d">${t("imp.meta.no_coast")}</span>`;
   meta.innerHTML = html;
   syncLoadedHighlights();
 }

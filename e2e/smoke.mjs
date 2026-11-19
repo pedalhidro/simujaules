@@ -29,7 +29,8 @@
 //   --only   comma-separated step-name prefixes; runs every GROUP containing a
 //            matching step (groups share browser state, so they run whole):
 //            a–l core · m raster network · n graph mode · o drawing tools ·
-//            p config · q GPX overlay · r mask + dataset I/O · s Overpass (canned)
+//            p config · q GPX overlay · r mask + dataset I/O · s Overpass (canned) ·
+//            t water pulls on a coastal DEM (OSM + FGB, canned)
 //   --no-cdn-cache   fetch CDN libraries live instead of via ./cdn-cache/
 //   --chromium <path> (or env SMOKE_CHROMIUM)   explicit Chromium executable
 //   Exit code: 0 clean · 1 problems (listed in the report / on stderr) · 2 crash.
@@ -50,8 +51,9 @@
 //   Allowed: our own 127.0.0.1 server and the CDN hosts unpkg.com,
 //   cdn.jsdelivr.net, cdnjs.cloudflare.com (cached under ./cdn-cache/ — optional,
 //   gitignored, safe to delete; SRI still checked by the page). Overpass is
-//   answered with a canned fixture (group s). Everything else (tiles, fonts,
-//   geocoder, FABDEM, FlatGeobuf, census) is ABORTED.
+//   answered with canned fixtures (groups s and t). Everything else (tiles,
+//   fonts, geocoder, FABDEM, FlatGeobuf, census) is ABORTED — group t feeds the
+//   FGB water pull by replacing flatgeobuf.deserialize in the page instead.
 //
 // WHITELIST (the only one)
 //   A console error is tolerated only if its text is exactly
@@ -96,7 +98,7 @@ if (!fs.existsSync(path.join(ROOT, "index.html"))) {
 }
 // Step groups (see header). A group runs if --only is absent or any prefix's
 // first letter is one of its step letters.
-const GROUPS = { core: "abcdefghijkl", net: "m", graph: "n", draw: "o", config: "p", refgeom: "q", mask: "r", osm: "s" };
+const GROUPS = { core: "abcdefghijkl", net: "m", graph: "n", draw: "o", config: "p", refgeom: "q", mask: "r", osm: "s", water: "t" };
 const wantGroup = (g) => !ONLY || ONLY.some((p) => GROUPS[g].includes(p[0]));
 
 // ---------------------------------------------------------------- constants
@@ -244,7 +246,11 @@ async function newContext(browser, port, opts = {}) {
     try { u = new URL(url); } catch { return route.abort(); }
     if (url.startsWith(ownOrigin + "/")) return route.continue();
     if (opts.overpass && url.startsWith("https://overpass-api.de/api/interpreter")) {
-      return route.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": "*" }, body: JSON.stringify(opts.overpass) });
+      // A fixed answer, or a function of the Overpass QL query the page sent.
+      const body = typeof opts.overpass === "function"
+        ? opts.overpass(new URLSearchParams(route.request().postData() || "").get("data") || "")
+        : opts.overpass;
+      return route.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
     }
     if (u.protocol === "https:" && CDN_HOSTS.has(u.hostname) && route.request().method() === "GET") {
       if (NO_CDN_CACHE) return route.continue();
@@ -937,7 +943,7 @@ async function openGroup(browser, port, F, label, opts = {}) {
   const g = await freshPage(browser, port, label, opts);
   const ok = await step(`${label}.open`, async () => {
     await loadApp(g.page, port);
-    if (!opts.noDem) await loadDem(g.page, F.dem);
+    if (!opts.noDem) await loadDem(g.page, opts.dem || F.dem);
     return { demMeta: opts.noDem ? null : (await uiText(g.page, ["dem-meta"]))["dem-meta"] };
   });
   if (!ok) { await g.ctx.close(); throw new SkipRest(`${label}: app/DEM did not load — group skipped`); }
@@ -1601,6 +1607,104 @@ async function groupOsm(browser, port, F) {
   }
 }
 
+// ---------------------------------------------------------------- t. water pulls on a coastal DEM (canned)
+// The coastal scene of fixtures.mjs (sea = valid 0 m terrain north and east of
+// a cape). Both pulls must block the whole sea — including the north-east
+// corner no scan line of the coastline sweep can see — and build the SAME mask
+// from the same features; the FGB pull must survive a failed coastline query
+// and say so, and must not touch Overpass at all on a DEM that holds no shore.
+const NO_COAST_RE = /litoral|coastline/i; // the app's note/warning, PT or EN
+async function waitWaterMask(page, re, what) {
+  await page.waitForFunction(([src]) => {
+    if (document.getElementById("status").querySelector('span[style*="ff6b6b"]')) return true;
+    return new RegExp(src).test(document.getElementById("imp-meta").textContent);
+  }, [re.source], { timeout: STEP_TIMEOUT, polling: 50 }).catch(async (e) => {
+    throw new Error(`waiting for the ${what} mask failed: "${(await uiText(page, ["imp-meta"]))["imp-meta"]}" — ${String(e.message).split("\n")[0]}`);
+  });
+  const err = await page.evaluate(() => document.getElementById("status").querySelector('span[style*="ff6b6b"]')?.textContent || null);
+  if (err) throw new Error(`${what} pull failed: ${err}`);
+  const ui = await uiText(page, ["imp-meta", "status"]); // the status line as the pull left it
+  await waitIdle(page);
+  return ui;
+}
+async function exportedMask(page) {
+  const dl = await downloadFrom(page, "export-mask");
+  return Buffer.from(await readTif(dl.buf));
+}
+async function groupWater(browser, port, F) {
+  const queries = [];
+  let coastAvailable = true;
+  const overpass = (q) => {
+    queries.push(q);
+    if (q.includes('"natural"="water"')) return fx.overpassWaterResponse();
+    return coastAvailable ? fx.overpassCoastResponse() : fx.overpassTimeoutResponse();
+  };
+  const { ctx, page } = await openGroup(browser, port, F, "t.water", { overpass, dem: F.coastDem });
+  let osmMask = null;
+  const checked = (mask, sea) => {
+    const chk = fx.checkCoastMask(mask, { sea });
+    if (chk.errors.length) throw new Error(chk.errors.join("; "));
+    return chk.counts;
+  };
+  try {
+    await step("t.osm-water-sea", async () => {
+      await clickId(page, "impassable-osm");
+      const ui = await waitWaterMask(page, /OSM water/, "OSM water");
+      osmMask = await exportedMask(page);
+      return { ...ui, ...checked(osmMask, true), maskSha256: sha(osmMask), overpassQueries: queries.length };
+    });
+    await step("t.fgb-water-sea", async () => {
+      // The FlatGeobuf host is aborted by this harness: hand the pull its
+      // features through the library's own entry point instead.
+      await page.evaluate((feats) => {
+        window.__fgbUrls = [];
+        window.flatgeobuf.deserialize = async function* (url) {
+          window.__fgbUrls.push(String(url).split("/").pop());
+          yield* (/water-areas/.test(url) ? feats.areas : /water-rivers/.test(url) ? feats.rivers : []);
+        };
+      }, fx.fgbWaterFeatures());
+      const q0 = queries.length;
+      await clickId(page, "impassable-fgb");
+      const ui = await waitWaterMask(page, /FGB água/, "FGB water");
+      const mask = await exportedMask(page);
+      const counts = checked(mask, true);
+      const asked = queries.slice(q0);
+      if (asked.length !== 1 || !/"natural"="coastline"/.test(asked[0]) || /"natural"="water"|waterway/.test(asked[0])) {
+        throw new Error(`FGB pull: expected ONE coastline-only Overpass query, got ${JSON.stringify(asked)}`);
+      }
+      if (NO_COAST_RE.test(ui["imp-meta"] + ui.status)) throw new Error("FGB pull with a coastline shows the no-coastline note: " + JSON.stringify(ui));
+      const same = osmMask ? Buffer.compare(mask, osmMask) === 0 : null;
+      if (same === false) throw new Error("FGB pull and OSM pull built different masks from the same features");
+      return { ...ui, ...counts, maskSha256: sha(mask), sameAsOsmPull: same,
+        fgbFiles: (await page.evaluate(() => window.__fgbUrls)).sort() };
+    });
+    await step("t.fgb-water-coast-unavailable", async () => {
+      coastAvailable = false;
+      await clickId(page, "impassable-fgb");
+      const ui = await waitWaterMask(page, /sem litoral|no coastline/, "FGB water (no coastline)");
+      if (!/Litoral não consultado|Coastline not fetched/.test(ui.status)) throw new Error("no warning in the status line: " + ui.status);
+      const mask = await exportedMask(page);
+      return { ...ui, ...checked(mask, false), maskSha256: sha(mask) };
+    });
+    await step("t.fgb-water-inland-no-overpass", async () => {
+      coastAvailable = true;
+      await loadDem(page, F.dem); // the ~760 m plateau: no cell near sea level
+      const before = (await uiText(page, ["imp-meta"]))["imp-meta"];
+      if (/FGB/.test(before)) throw new Error("the DEM swap kept the old mask: " + before);
+      const q0 = queries.length;
+      await clickId(page, "impassable-fgb");
+      const ui = await waitWaterMask(page, /FGB água/, "FGB water (inland)");
+      if (queries.length !== q0) throw new Error(`inland DEM: the FGB pull asked Overpass ${queries.length - q0} time(s)`);
+      if (NO_COAST_RE.test(ui["imp-meta"] + ui.status)) throw new Error("inland DEM shows a coastline note: " + JSON.stringify(ui));
+      const mask = await exportedMask(page);
+      let n = 0; for (const v of mask) n += v ? 1 : 0;
+      return { ...ui, impassable: n, maskSha256: sha(mask), overpassQueries: queries.length - q0 };
+    });
+  } finally {
+    await ctx.close();
+  }
+}
+
 // ---------------------------------------------------------------- main
 async function writeFixtures() {
   const F = {};
@@ -1609,6 +1713,7 @@ async function writeFixtures() {
   const demBuf = makeDemTiff();
   report.dem.tiffSha256 = sha(demBuf);
   F.dem = put("synthetic-sp.tif", demBuf);
+  F.coastDem = put("synthetic-coast.tif", fx.makeCoastDemTiff());
   F.gpkg = put("streets.gpkg", await fx.makeNetworkGpkg());
   F.mask = put("river-mask.tif", fx.makeMaskTiff());
   F.gpxEle = put("track-ele.gpx", fx.makeGpx({ withEle: true }));
@@ -1643,6 +1748,7 @@ async function main() {
     if (wantGroup("refgeom")) await runGroup("refgeom", () => groupRefgeom(browser, port, F));
     if (wantGroup("mask")) await runGroup("mask", () => groupMask(browser, port, F));
     if (wantGroup("osm")) await runGroup("osm", () => groupOsm(browser, port, F));
+    if (wantGroup("water")) await runGroup("water", () => groupWater(browser, port, F));
   } finally {
     await browser.close().catch(() => {});
     server.close();
