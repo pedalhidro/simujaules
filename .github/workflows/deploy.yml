@@ -136,9 +136,10 @@ jobs:
       - name: MCP server vs direct engine runs
         run: node mcp/test-mcp.mjs
 
-  # The real page in headless Chromium (e2e/smoke.mjs): ~65 steps — fields,
+  # The real page in headless Chromium (e2e/smoke.mjs): ~70 steps — fields,
   # routes, density pools on both engines, network + graph mode, drawing
-  # tools, config / dataset / bundle round trips. Pass/fail only: no page
+  # tools, config / dataset / bundle round trips, water pulls on a coastal
+  # DEM. Pass/fail only: no page
   # error, no failed same-origin request, every step's own invariants. There
   # is no golden report (overlay hashes are not portable across Chromium
   # builds). The page loads its CDN libraries live.
