@@ -12,6 +12,79 @@ Backfill note: v1–v11 entries were reconstructed from the `sw.js` version
 history and git log on 2026-06-12; v4–v10 shipped between 2026-05-08 and
 2026-05-13 without individually recorded dates.
 
+## v85 — 2026-11-21
+
+> **O mar do FGB não depende mais do Overpass.** Na v84 o botão *Puxar água do
+> FGB* buscava o litoral no Overpass para barrar o mar, e essa consulta falhava
+> com frequência — a máscara entrava sem o mar, só com o aviso em laranja.
+> Agora o mar vem de um terceiro arquivo do projeto (os oceanos do mundo
+> inteiro como polígonos, derivados do litoral do OSM), lido como os outros
+> dois: só os bytes da janela, sem Overpass. O botão *Puxar água do OSM* não
+> muda.
+
+**De onde vem.** `world-sea.fgb` é o produto "water polygons" do
+osmdata.openstreetmap.de (FOSSGIS): o `osmcoastline` fecha o
+`natural=coastline` do OSM em polígonos de oceano, resolve a orientação e
+recorta em ladrilhos que se sobrepõem 0,001°. São 53.330 polígonos, 1,28 GB em
+FlatGeobuf com índice espacial. O `build-viario.py --sea` do amora baixa o zip
+(909 MB) e converte com um `ogr2ogr` (86 s); o job semanal de lá publica no
+bucket e espelha no R2, como os outros FGBs. É mundial porque o produto já é:
+recortar a América do Sul só economizaria armazenamento — o navegador lê
+apenas os bytes da janela.
+
+**No app.** `loadFgbWater` abre um terceiro stream (`WATER_SEA_FGB_URL`) em
+paralelo com áreas e rios, e cada polígono de mar entra como mais um corpo
+d'água, preenchido pelo mesmo par-ímpar de um lago. Sai a consulta de litoral
+ao Overpass (`fetchOsmCoastlines`) e, com ela, a varredura no caminho do FGB —
+a varredura continua sendo o que o pull do OSM usa.
+
+- **Cada feição é um corpo próprio.** Os ladrilhos se sobrepõem de propósito;
+  um par-ímpar único sobre dois polígonos sobrepostos cancelaria a faixa de
+  sobreposição de volta para terra.
+- **Só quando pode haver mar** (regra da v84, mantida): DEM sem célula válida
+  a 100 m ou menos não consulta a camada de mar.
+- **Falha não derruba o pull** (idem): se a camada de mar não puder ser lida,
+  a máscara entra sem o mar e avisa na linha de status e na linha de resumo
+  ("sem o mar: o mar (se houver) NÃO está barrado"). Um stream que morre no
+  meio não deixa meio oceano: só entra o que veio de um stream completo.
+
+**Diferença para o pull do OSM.** Fora das células da própria linha de costa
+as duas máscaras são iguais. Nelas diferem por construção: a varredura do OSM
+barra toda célula que a costa toca; o polígono barra a célula cujo CENTRO está
+no mar (a regra de qualquer lago). Na janela larga de Fortaleza são 1.384
+células, todas sobre a linha.
+
+**Medido** com o arquivo convertido aqui, lido por faixa de bytes (HTTP Range)
+como o navegador faz:
+
+- Fortaleza, contra o gabarito da v84 (polígono de terra do litoral do OSM):
+  janela larga e 300 janelas aleatórias, todas idênticas célula a célula fora
+  da linha de costa — 0 células de mar abertas, 0 de terra barradas.
+- Emendas entre ladrilhos: 336 janelas de 300 × 300 células (a 1″ e a 1/9″)
+  centradas em cantos de ladrilho em mar aberto, nenhuma célula sem marcar.
+- Custo por janela: Fortaleza inteira (0,35° × 0,30°) é 1 feição, 4
+  requisições, 40 kB; Rio 485 kB, Salvador 926 kB (58 mil vértices).
+- Mar + áreas d'água do FGB, contra o nível do mar do FABDEM (h = 0):
+  Fortaleza 99,6%, Belém 99,3% (lá é tudo área d'água: a baía fica rio acima
+  do litoral do OSM), Rio 98,7%, Santos 90,6% (o resto é mangue, que o FABDEM
+  achata a 0 e o OSM mapeia como terra — igual ao pull do OSM).
+
+- Página real, biblioteca flatgeobuf real, áreas e rios do R2 de verdade e o
+  `world-sea.fgb` servido na URL que o app pede, num DEM FABDEM de Fortaleza
+  (1260 × 1080): 641.682 células barradas, nenhuma de mar aberta, 4
+  requisições (40 kB) à camada de mar, nenhuma ao Overpass, 3,4 s.
+
+Harness de navegador, grupo **t** refeito (5 passos, 71 no total): o pull do
+FGB barra o mar inteiro a partir de dois polígonos SOBREPOSTOS, sem nenhuma
+consulta ao Overpass; bate com o pull do OSM fora da linha de costa; sobrevive
+à camada de mar ilegível avisando (e descarta o polígono que chegou antes da
+falha); e nem pede a camada de mar num DEM de planalto.
+
+**Ordem de publicação.** O arquivo precisa estar no ar antes desta versão:
+sem ele, quem está no litoral recebe a máscara sem o mar e o aviso. Quando
+isto foi escrito ele ainda não estava publicado — tudo acima usou uma cópia
+local servida por HTTP Range, não o arquivo hospedado.
+
 ## v84 — 2026-11-19
 
 > **O mar entra na máscara de água.** Em DEM de litoral — o caso que acusou

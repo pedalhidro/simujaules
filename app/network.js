@@ -810,6 +810,17 @@ export async function loadOsmNetwork() {
 export const VIARIO_FGB_URL = "https://fabdem.pedalhidrografi.co/viario/south-america-viario.fgb";
 export const WATER_AREAS_FGB_URL  = "https://fabdem.pedalhidrografi.co/viario/south-america-water-areas.fgb";
 export const WATER_RIVERS_FGB_URL = "https://fabdem.pedalhidrografi.co/viario/south-america-water-rivers.fgb";
+// O MAR (v85): polígonos de oceano do MUNDO inteiro, ~1,3 GB, ~53 mil feições.
+// Não vem do extrato Geofabrik como os outros: é o produto "water polygons"
+// do osmdata.openstreetmap.de (FOSSGIS), que o osmcoastline deriva do
+// natural=coastline do OSM e já entrega fechado, com a orientação resolvida e
+// recortado em ladrilhos que se sobrepõem 0,001° — o `build-viario.py --sea`
+// do amora só converte pra FlatGeobuf e o job semanal publica. Mundial porque
+// o produto já é: recortar a América do Sul só economizaria armazenamento, e
+// o navegador lê só os bytes da janela (Fortaleza inteira: 1 feição, 4
+// requisições, ~40 kB). Como passa de 500 MB, sai com `Cache-Control:
+// private` (ver a nota do v81 acima).
+export const WATER_SEA_FGB_URL    = "https://fabdem.pedalhidrografi.co/viario/world-sea.fgb";
 // Teto de janela dos pulls FGB = o MESMO teto do FABDEM (v71): a área em
 // graus² que o cap do loader FABDEM permite (bytes ÷ 4 células ×
 // (1″)² por célula — hoje 10°², via FABDEM_MAX_DEG2). Derivado das constantes do
