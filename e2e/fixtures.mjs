@@ -1,8 +1,8 @@
 // Deterministic input fixtures for smoke.mjs (all generated in Node, no
 // randomness, no clock): the synthetic DEM, a street-network GeoPackage, an
 // impassable-mask GeoTIFF, two GPX tracks, a canned Overpass response, and the
-// coastal set for the water pulls (a second DEM with a sea, canned Overpass
-// water/coastline answers, FlatGeobuf-shaped features and their oracle).
+// coastal set for the water pulls (a second DEM with a sea, a canned Overpass
+// water answer, FlatGeobuf-shaped features incl. sea polygons, and the oracle).
 //
 // Everything lives on ONE grid: 240 x 200 cells of 1 arc-second, EPSG:4326,
 // north-west corner (-46.66, -23.53) near Sao Paulo centre. Geometry is placed
@@ -262,26 +262,48 @@ export function overpassWaterResponse() {
     ...coastWays(),
   ]);
 }
-// What the FGB pull's coastline-only query returns.
-export function overpassCoastResponse() { return osmEnvelope(coastWays()); }
-// Overpass's HTTP-200 answer to a query that timed out server-side.
-export function overpassTimeoutResponse() {
-  return { ...osmEnvelope([]), remark: 'runtime error: Query timed out in "query" at line 1 after 16 seconds.' };
+// The sea as the sea FlatGeobuf delivers it: POLYGONS, cut into tiles that
+// overlap by a hair. Two pieces here, west and east of col ~100, sharing the
+// strip 99.7..100.3 — a fill that lumped both into one even-odd body would
+// cancel that strip (the whole of column 100) back to land.
+function seaPolygons() {
+  const rowOnNorthShore = (col) => { // the coast between [74,120] and [60,60]
+    const [r0, c0] = COAST.line[5], [r1, c1] = COAST.line[6];
+    return r0 + (col - c0) / (c1 - c0) * (r1 - r0);
+  };
+  const FAR_N = -300, FAR_E = 900, cutW = 100.3, cutE = 99.7;
+  const west = [[rowOnNorthShore(cutW), cutW], COAST.line[6], COAST.line[7], [FAR_N, COAST.line[7][1]], [FAR_N, cutW]];
+  const east = [...COAST.line.slice(0, 6), [rowOnNorthShore(cutE), cutE], [FAR_N, cutE], [FAR_N, FAR_E], [COAST.line[0][0], FAR_E]];
+  return [west, east].map((ring) => [...ring, ring[0]]);
 }
 // The same lagoon and river as GeoJSON features, as the water FlatGeobufs would
-// stream them (no tunnel tag there — and no tunnelled river in this fixture, so
-// the two pulls must build the same mask).
+// stream them (no tunnel tag there — and no tunnelled river in this fixture),
+// plus the sea polygons.
 export function fgbWaterFeatures() {
   const ll = ([r, c]) => { const [lat, lon] = cellLL(r, c); return [lon, lat]; };
   return {
     areas: [{ type: "Feature", properties: { natural: "water" }, geometry: { type: "Polygon", coordinates: [lagoonRing().map(ll)] } }],
     rivers: [{ type: "Feature", properties: { waterway: "river" }, geometry: { type: "LineString", coordinates: COAST.river.map(ll) } }],
+    sea: seaPolygons().map((ring) => ({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring.map(ll)] } })),
   };
+}
+// Cells where two masks of the coastal scene differ, counted OFF the coastline
+// (more than 1.5 cells from it). The two pulls agree there; on the line itself
+// they differ by construction (the OSM pull stamps every cell the coastline
+// touches, the FGB pull fills by cell centre).
+export function coastMaskDiffOffShore(a, b) {
+  const { W, H } = DEM;
+  let off = 0, onShore = 0;
+  for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
+    if (!!a[r * W + c] === !!b[r * W + c]) continue;
+    if (distToLine(r, c, COAST.line) <= 1.5) onShore++; else off++;
+  }
+  return { offShore: off, onShore };
 }
 
 // Check an exported impassable mask (Uint8, 1 = impassable) of the coastal
 // scene against the oracle. `sea`: whether the sea is expected to be blocked
-// (true) or left open (false — the coastline was unavailable). Cells within 1.5
+// (true) or left open (false — the sea layer was unavailable). Cells within 1.5
 // cells of the coastline, the lagoon edge or the river are not judged (the app
 // stamps the shore and the river with a supercover line).
 export function checkCoastMask(mask, { sea }) {
@@ -301,7 +323,7 @@ export function checkCoastMask(mask, { sea }) {
   }
   if (sea && n.seaBlocked !== n.seaCells) errors.push(`${n.seaCells - n.seaBlocked} of ${n.seaCells} sea cells are passable`);
   if (sea && n.farFieldBlocked !== n.farFieldCells) errors.push(`far-field corner: ${n.farFieldCells - n.farFieldBlocked} of ${n.farFieldCells} sea cells are passable`);
-  if (!sea && n.seaBlocked) errors.push(`${n.seaBlocked} sea cells are blocked although the coastline was unavailable`);
+  if (!sea && n.seaBlocked) errors.push(`${n.seaBlocked} sea cells are blocked although the sea layer was unavailable`);
   if (n.landBlocked) errors.push(`${n.landBlocked} of ${n.landCells} land cells are blocked`);
   if (n.lagoonBlocked !== n.lagoonCells) errors.push(`lagoon: ${n.lagoonCells - n.lagoonBlocked} of ${n.lagoonCells} cells are passable`);
   for (const [r, c] of COAST.river) if (!mask[r * W + c]) errors.push(`river cell [${r},${c}] is passable`);

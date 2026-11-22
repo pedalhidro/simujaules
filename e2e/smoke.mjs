@@ -1610,10 +1610,13 @@ async function groupOsm(browser, port, F) {
 // ---------------------------------------------------------------- t. water pulls on a coastal DEM (canned)
 // The coastal scene of fixtures.mjs (sea = valid 0 m terrain north and east of
 // a cape). Both pulls must block the whole sea — including the north-east
-// corner no scan line of the coastline sweep can see — and build the SAME mask
-// from the same features; the FGB pull must survive a failed coastline query
-// and say so, and must not touch Overpass at all on a DEM that holds no shore.
-const NO_COAST_RE = /litoral|coastline/i; // the app's note/warning, PT or EN
+// corner no scan line of the OSM pull's coastline sweep can see. The OSM pull
+// gets the coastline from Overpass; the FGB pull gets the sea as POLYGONS from
+// a third FlatGeobuf and must not touch Overpass at all. Off the coastline's
+// own cells the two masks must be identical. The FGB pull must survive a sea
+// layer that cannot be read, and say so, and must not even ask for it on a DEM
+// that holds no shore.
+const NO_SEA_RE = /sem o mar|no sea layer|Mar não carregado|Sea not loaded/i; // the app's note/warning, PT or EN
 async function waitWaterMask(page, re, what) {
   await page.waitForFunction(([src]) => {
     if (document.getElementById("status").querySelector('span[style*="ff6b6b"]')) return true;
@@ -1631,14 +1634,28 @@ async function exportedMask(page) {
   const dl = await downloadFrom(page, "export-mask");
   return Buffer.from(await readTif(dl.buf));
 }
+// The FlatGeobuf host is aborted by this harness: hand the FGB pull its
+// features through the library's own entry point instead. `seaFails` makes the
+// sea layer's stream throw after its first feature (a file that is missing or
+// cut off mid-read). Returns nothing; window.__fgbUrls records what was asked.
+async function stubFgb(page, feats, { seaFails = false } = {}) {
+  await page.evaluate(([feats, seaFails]) => {
+    window.__fgbUrls = [];
+    window.flatgeobuf.deserialize = async function* (url) {
+      const name = String(url).split("/").pop();
+      window.__fgbUrls.push(name);
+      if (/sea/.test(name)) {
+        if (seaFails) { yield feats.sea[0]; throw new Error("HTTP 404 (simulated)"); }
+        yield* feats.sea;
+      } else if (/water-areas/.test(name)) yield* feats.areas;
+      else if (/water-rivers/.test(name)) yield* feats.rivers;
+    };
+  }, [feats, seaFails]);
+}
+const fgbAsked = (page) => page.evaluate(() => window.__fgbUrls.slice().sort());
 async function groupWater(browser, port, F) {
   const queries = [];
-  let coastAvailable = true;
-  const overpass = (q) => {
-    queries.push(q);
-    if (q.includes('"natural"="water"')) return fx.overpassWaterResponse();
-    return coastAvailable ? fx.overpassCoastResponse() : fx.overpassTimeoutResponse();
-  };
+  const overpass = (q) => { queries.push(q); return fx.overpassWaterResponse(); };
   const { ctx, page } = await openGroup(browser, port, F, "t.water", { overpass, dem: F.coastDem });
   let osmMask = null;
   const checked = (mask, sea) => {
@@ -1654,51 +1671,46 @@ async function groupWater(browser, port, F) {
       return { ...ui, ...checked(osmMask, true), maskSha256: sha(osmMask), overpassQueries: queries.length };
     });
     await step("t.fgb-water-sea", async () => {
-      // The FlatGeobuf host is aborted by this harness: hand the pull its
-      // features through the library's own entry point instead.
-      await page.evaluate((feats) => {
-        window.__fgbUrls = [];
-        window.flatgeobuf.deserialize = async function* (url) {
-          window.__fgbUrls.push(String(url).split("/").pop());
-          yield* (/water-areas/.test(url) ? feats.areas : /water-rivers/.test(url) ? feats.rivers : []);
-        };
-      }, fx.fgbWaterFeatures());
+      await stubFgb(page, fx.fgbWaterFeatures());
       const q0 = queries.length;
       await clickId(page, "impassable-fgb");
       const ui = await waitWaterMask(page, /FGB água/, "FGB water");
       const mask = await exportedMask(page);
       const counts = checked(mask, true);
-      const asked = queries.slice(q0);
-      if (asked.length !== 1 || !/"natural"="coastline"/.test(asked[0]) || /"natural"="water"|waterway/.test(asked[0])) {
-        throw new Error(`FGB pull: expected ONE coastline-only Overpass query, got ${JSON.stringify(asked)}`);
-      }
-      if (NO_COAST_RE.test(ui["imp-meta"] + ui.status)) throw new Error("FGB pull with a coastline shows the no-coastline note: " + JSON.stringify(ui));
-      const same = osmMask ? Buffer.compare(mask, osmMask) === 0 : null;
-      if (same === false) throw new Error("FGB pull and OSM pull built different masks from the same features");
-      return { ...ui, ...counts, maskSha256: sha(mask), sameAsOsmPull: same,
-        fgbFiles: (await page.evaluate(() => window.__fgbUrls)).sort() };
+      if (queries.length !== q0) throw new Error(`the FGB pull asked Overpass ${queries.length - q0} time(s): ${JSON.stringify(queries.slice(q0))}`);
+      const asked = await fgbAsked(page);
+      if (asked.length !== 3 || !asked.some((n) => /sea/.test(n))) throw new Error("FGB pull: expected the areas, rivers and sea layers, asked " + JSON.stringify(asked));
+      if (NO_SEA_RE.test(ui["imp-meta"] + ui.status)) throw new Error("FGB pull with its sea layer shows the no-sea note: " + JSON.stringify(ui));
+      // Same sea as the OSM pull, except on the coastline's own cells (the
+      // sweep stamps them; the polygon fill goes by cell centre).
+      const diff = osmMask ? fx.coastMaskDiffOffShore(mask, osmMask) : null;
+      if (diff && diff.offShore) throw new Error(`FGB pull and OSM pull differ on ${diff.offShore} cell(s) away from the coastline`);
+      return { ...ui, ...counts, maskSha256: sha(mask), vsOsmPull: diff, fgbFiles: asked };
     });
-    await step("t.fgb-water-coast-unavailable", async () => {
-      coastAvailable = false;
+    await step("t.fgb-water-sea-unavailable", async () => {
+      await stubFgb(page, fx.fgbWaterFeatures(), { seaFails: true });
       await clickId(page, "impassable-fgb");
-      const ui = await waitWaterMask(page, /sem litoral|no coastline/, "FGB water (no coastline)");
-      if (!/Litoral não consultado|Coastline not fetched/.test(ui.status)) throw new Error("no warning in the status line: " + ui.status);
+      const ui = await waitWaterMask(page, /sem o mar|no sea layer/, "FGB water (no sea layer)");
+      if (!/Mar não carregado|Sea not loaded/.test(ui.status)) throw new Error("no warning in the status line: " + ui.status);
       const mask = await exportedMask(page);
+      // sea:false also proves the one polygon delivered before the failure was dropped
       return { ...ui, ...checked(mask, false), maskSha256: sha(mask) };
     });
-    await step("t.fgb-water-inland-no-overpass", async () => {
-      coastAvailable = true;
+    await step("t.fgb-water-inland-skips-sea", async () => {
       await loadDem(page, F.dem); // the ~760 m plateau: no cell near sea level
       const before = (await uiText(page, ["imp-meta"]))["imp-meta"];
       if (/FGB/.test(before)) throw new Error("the DEM swap kept the old mask: " + before);
+      await stubFgb(page, fx.fgbWaterFeatures());
       const q0 = queries.length;
       await clickId(page, "impassable-fgb");
       const ui = await waitWaterMask(page, /FGB água/, "FGB water (inland)");
+      const asked = await fgbAsked(page);
+      if (asked.some((n) => /sea/.test(n))) throw new Error("inland DEM: the FGB pull asked for the sea layer: " + JSON.stringify(asked));
       if (queries.length !== q0) throw new Error(`inland DEM: the FGB pull asked Overpass ${queries.length - q0} time(s)`);
-      if (NO_COAST_RE.test(ui["imp-meta"] + ui.status)) throw new Error("inland DEM shows a coastline note: " + JSON.stringify(ui));
+      if (NO_SEA_RE.test(ui["imp-meta"] + ui.status)) throw new Error("inland DEM shows a sea note: " + JSON.stringify(ui));
       const mask = await exportedMask(page);
       let n = 0; for (const v of mask) n += v ? 1 : 0;
-      return { ...ui, impassable: n, maskSha256: sha(mask), overpassQueries: queries.length - q0 };
+      return { ...ui, impassable: n, maskSha256: sha(mask), fgbFiles: asked };
     });
   } finally {
     await ctx.close();

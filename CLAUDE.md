@@ -39,9 +39,9 @@ hashes.
   `installNetworkFromLines` tail, flatgeobuf 3.36.0 already shipped for the
   census sampler). v66 extended the FGB family to 1C and 1D: `loadFgbWater`
   (water areas + rivers FGBs → the same `osmWaterGeom` cache and
-  `rebuildOsmWaterMask` tail; the FGBs have NO coastline layer, so since v84
-  the sea comes from a coastline-only Overpass query — see THE SEA below —
-  and there is no tunnel filter on rivers) and `loadFgbBridges` (deck ways from the
+  `rebuildOsmWaterMask` tail; since v85 the sea is a THIRD FlatGeobuf, ocean
+  polygons for the whole world — see THE SEA below — and there is no tunnel
+  filter on rivers) and `loadFgbBridges` (deck ways from the
   viário FGB → `installBridgesFromWays`; `eleA/eleB` null → DEM fallback,
   highway-only so railway decks are absent). All three share `fgbStream`.
 - `energy-worker.js` — the compute engine (Web Worker): Dijkstra with
@@ -431,15 +431,25 @@ hashes.
   nearest crossed lines around it, per cell, by majority, a tie going to sea.
   It is ONE generator: `fillSeaFromCoastlines` drains it synchronously, the
   app (`fillSeaFromCoastlinesChunked`) in time slices — never copy the sweep
-  back into `app/water.js`. Both pulls must yield the SAME mask from the same
-  features (e2e group t asserts byte equality): the OSM pull has the
-  coastline in its own query; the FGB pull (`loadFgbWater`) fetches it with
-  `fetchOsmCoastlines`, in parallel with the FGB streams, under two rules that
-  keep it independent of Overpass — the GATE (`demMayHoldSea`: no valid cell
-  ≤ 100 m → no shore → no query; São Paulo never asks) and the SOFT FAIL (a
-  failed or timed-out query installs the mask WITHOUT the sea and says so in
-  the status line and, persistently, in the mask's meta line via
-  `impassableMeta.noCoast`). Never let a missing coastline pass silently.
+  back into `app/water.js`. The sweep serves the OSM pull only. The FGB pull
+  (`loadFgbWater`, v85) does not sweep and does not use Overpass: its sea is a
+  third FlatGeobuf, `WATER_SEA_FGB_URL` (`world-sea.fgb` — the worldwide
+  "water polygons" of osmdata.openstreetmap.de, converted by amora's
+  `build-viario.py --sea` and published by its weekly job), whose polygons
+  are filled like any lake. Rules for it: (d) EACH FEATURE IS ITS OWN BODY —
+  the source cuts the ocean into tiles that overlap by 0.001°, and one
+  even-odd fill over two overlapping polygons cancels the overlap back to
+  land; (e) the GATE (`demMayHoldSea`: no valid cell ≤ 100 m → no shore → the
+  sea layer is not asked; São Paulo never pays for it); (f) the SOFT FAIL — a
+  sea layer that cannot be read installs the mask WITHOUT the sea and says so
+  in the status line and, persistently, in the mask's meta line via
+  `impassableMeta.noSea`, and a stream that died mid-way contributes nothing
+  (no half ocean). Never let a missing sea pass silently. The two pulls agree
+  OFF the coastline's own cells and differ ON them by construction (the sweep
+  stamps every cell the coastline touches; the polygon fill goes by cell
+  centre) — e2e group t asserts exactly that. v84 had the FGB pull fetch
+  `natural=coastline` from Overpass; it failed too often in the field — do
+  not bring Overpass back into an FGB pull.
 - `sw.js`: bump `VERSION` (with a `CHANGELOG.md` entry) on every deploy that
   changes app behaviour; keep `PRECACHE_URLS` in sync with what
   `index.html`/`deploy.sh` actually reference — `cache.addAll` is atomic,

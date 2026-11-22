@@ -8,8 +8,8 @@ import { escapeHtml, state } from "./state.js";
 import { cancelActiveCompute } from "./compute-source.js";
 import { progress, progressBar, status } from "./dom.js";
 import {
-  FGB_PULL_MAX_DEG2, OVERPASS_URL, WATER_AREAS_FGB_URL, WATER_RIVERS_FGB_URL, fgbStream,
-  readFileWithProgress,
+  FGB_PULL_MAX_DEG2, OVERPASS_URL, WATER_AREAS_FGB_URL, WATER_RIVERS_FGB_URL, WATER_SEA_FGB_URL,
+  fgbStream, readFileWithProgress,
 } from "./network.js";
 import { kpiInvalidate } from "./points.js";
 import { applyImpassableOverlay } from "./render.js";
@@ -180,12 +180,13 @@ export async function rebuildOsmWaterMask() {
   const fi = document.getElementById("impassable-file"); if (fi) fi.value = "";
   // Wrap as a DEM-grid raster so the uploaded-mask pipeline consumes it
   // unchanged (resample is identity; Invert/corridors/overlay/bundle reused).
-  // noCoast: the FGB pull could not get the coastline (see fetchOsmCoastlines)
-  // — carried on the raster so the mask's own meta line keeps saying that the
-  // sea, if any, is NOT in it (the status line is gone at the next action).
-  applyImpassableRaster({ width: W, height: H, data, dx, dy, originX, originY, epsg: 4326, noCoast: !!g.coastError }, g.label || "OSM water");
+  // noSea: the FGB pull could not read its sea layer (see "The sea, for the FGB
+  // pull") — carried on the raster so the mask's own meta line keeps saying
+  // that the sea, if any, is NOT in it (the status line is gone at the next
+  // action).
+  applyImpassableRaster({ width: W, height: H, data, dx, dy, originX, originY, epsg: 4326, noSea: !!g.seaError }, g.label || "OSM water");
   const done = cells ? t("status.water_done", cells.toLocaleString()) : t("status.water_none");
-  if (g.coastError) status.innerHTML = `${escapeHtml(done)} ${noCoastHtml(g.coastError)}`;
+  if (g.seaError) status.innerHTML = `${escapeHtml(done)} ${noSeaHtml(g.seaError)}`;
   else status.textContent = done;
   progress.classList.remove("active");
 }
@@ -270,27 +271,29 @@ export async function loadOsmWater() {
 }
 
 // ---- The sea, for the FGB pull --------------------------------------------
-// The water FlatGeobufs carry no coastline, and FABDEM stores the sea as VALID
-// terrain at exactly 0 m — so an FGB-only mask leaves the whole ocean a
-// passable plain (near Fortaleza: 45% of a city-sized grid). Since v84 the FGB
-// pull asks Overpass for the one layer the FGBs lack, natural=coastline over
-// the DEM extent — the lightest query there is (a city's coast is a few hundred
-// nodes) — in PARALLEL with the two FGB streams, and feeds it to the same sea
-// sweep as the OSM pull. Two rules keep the FGB pull's promise of not depending
-// on Overpass:
+// The two water FlatGeobufs carry no sea, and FABDEM stores the sea as VALID
+// terrain at exactly 0 m — so a mask of areas + rivers alone leaves the whole
+// ocean a passable plain (near Fortaleza: 45% of a city-sized grid). The sea is
+// a THIRD FlatGeobuf, WATER_SEA_FGB_URL: the ocean as POLYGONS (worldwide; see
+// the note at the constant). A sea polygon is just one more water body, filled
+// by the same even-odd pass as a lake — no coastline sweep, no Overpass.
+// (v84 fetched natural=coastline from Overpass here and swept it; the query
+// failed too often in the field, which is the very thing the FGB pulls exist
+// to avoid. The sweep is still what the OSM pull uses.)
+// Each FEATURE is its own body: the source cuts the ocean into tiles that
+// OVERLAP by a hair, and one even-odd fill over two overlapping polygons
+// would cancel the overlap back to land.
+// Two rules:
 //   - GATE: a DEM with no valid cell at or below SEA_POSSIBLE_MAX_ELEV_M holds
-//     no shore, so it is not asked at all (São Paulo's plateau never touches
-//     Overpass). 100 m is deliberately generous: it clears the geoid
-//     undulation of any South American coast (≤ ~45 m), so even a DEM in
-//     ELLIPSOIDAL heights that reaches the sea passes the gate.
-//   - SOFT FAIL: if the query fails or times out (short timeout — the answer
-//     is normally there in a second or two), the mask is installed anyway,
+//     no shore, so the sea layer is not asked at all (São Paulo's plateau never
+//     pays for it, and a problem with that file cannot touch an inland pull).
+//     100 m is deliberately generous: it clears the geoid undulation of any
+//     South American coast (≤ ~45 m), so even a DEM in ELLIPSOIDAL heights that
+//     reaches the sea passes the gate.
+//   - SOFT FAIL: if the sea layer cannot be read, the mask is installed anyway,
 //     without the sea, and says so: in the status line and, persistently, in
-//     the mask's meta line (state.impassableMeta.noCoast).
-// A coastline FlatGeobuf next to the water ones (amora's build-viario.py)
-// would replace fetchOsmCoastlines with a third fgbStream and drop both rules.
+//     the mask's meta line (state.impassableMeta.noSea). Never silently.
 const SEA_POSSIBLE_MAX_ELEV_M = 100;
-const COAST_QUERY_TIMEOUT_S = 15;
 
 function demMayHoldSea(dem) {
   const { height, mask } = dem;
@@ -298,50 +301,22 @@ function demMayHoldSea(dem) {
   return false;
 }
 
-// natural=coastline ways of the DEM extent, as grid polylines (sea on the
-// right of travel). Throws on any failure — the caller decides what a missing
-// coastline means.
-async function fetchOsmCoastlines(dem) {
-  const query = `[out:json][timeout:${COAST_QUERY_TIMEOUT_S}];way["natural"="coastline"](${demOverpassBbox(dem)});out geom;`;
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), (COAST_QUERY_TIMEOUT_S + 5) * 1000);
-  try {
-    const resp = await fetch(OVERPASS_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: "data=" + encodeURIComponent(query),
-      signal: ctl.signal,
-    });
-    if (!resp.ok) throw new Error(t("status.overpass_http", resp.status));
-    const json = await resp.json();
-    if (json.remark) throw new Error(json.remark); // timed out / OOM server-side: partial or empty, never trust it
-    const lines = [];
-    for (const el of json.elements || []) {
-      if (el.type === "way" && Array.isArray(el.geometry) && el.geometry.length >= 2) lines.push(el.geometry.map((g) => llToGridFrac(g.lat, g.lon)));
-    }
-    return lines;
-  } catch (err) {
-    if (err?.name === "AbortError") throw new Error("timeout");
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function noCoastHtml(reason) {
-  return `<span style="color:#ff9d3d">${t("status.water_no_coast", escapeHtml(reason))}</span>`;
+function noSeaHtml(reason) {
+  return `<span style="color:#ff9d3d">${t("status.water_no_sea", escapeHtml(reason))}</span>`;
 }
 
 // Pull the water mask from the project's water FlatGeobufs (amora's
-// build-viario.py --water on gs://telhas): areas (natural=water /
+// build-viario.py on gs://telhas, mirrored to R2): areas (natural=water /
 // landuse=reservoir / waterway=riverbank polygons) + waterway=river lines —
-// the same feature classes as the Overpass pull. The FGBs have no coastline:
-// the sea comes from a coastline-only Overpass query (see above), so a coastal
-// DEM gets the same sea as the OSM pull. One documented gap is left: no tunnel
-// tag on rivers (tunnelled rivers stay blocked, a tiny over-block the Overpass
-// pull filters out). Fills the SAME state.osmWaterGeom cache and reuses
-// rebuildOsmWaterMask(), so the #imp-rivers toggle re-applies without
-// re-querying, exactly like OSM.
+// the same feature classes as the Overpass pull — plus the sea polygons (see
+// above), so a coastal DEM gets its sea without Overpass. Off the coastline's
+// own cells the result equals the OSM pull's; ON them the two differ by
+// construction: the OSM pull's sweep stamps every cell the coastline touches,
+// this fill marks a cell when its CENTRE is in the sea (like any lake). One
+// documented gap is left: no tunnel tag on rivers (tunnelled rivers stay
+// blocked, a tiny over-block the Overpass pull filters out). Fills the SAME
+// state.osmWaterGeom cache and reuses rebuildOsmWaterMask(), so the
+// #imp-rivers toggle re-applies without re-querying, exactly like OSM.
 export async function loadFgbWater() {
   if (!state.dem) { status.innerHTML = `<span style="color:#ff6b6b">${t("status.load_dem_first")}</span>`; return; }
   if (!state.dem.isGeographic) { status.innerHTML = `<span style="color:#ff6b6b">${t("status.water_geographic")}</span>`; return; }
@@ -366,46 +341,49 @@ export async function loadFgbWater() {
     const toGrid = (c) => llToGridFrac(c[1], c[0]);          // [lng,lat] GeoJSON
     const bodies = [];
     const rivers = [];
-    let coastlines = [];
-    let coastError = null;  // why the coastline is missing (null = fetched, or not needed)
-    // Áreas: cada polígono (anéis externo+furos) é UM corpo — o preenchimento
-    // even-odd de rebuildOsmWaterMask corta os furos por paridade.
+    const sea = [];         // ocean polygons — adopted only if their stream completes
+    let seaError = null;    // why the sea is missing (null = read, or not needed)
+    const polyBodies = (g, into) => {
+      // Cada polígono (anel externo + furos) é UM corpo — o preenchimento
+      // even-odd de rebuildOsmWaterMask corta os furos por paridade.
+      if (g?.type === "Polygon") into.push({ rings: g.coordinates.map((r) => r.map(toGrid)) });
+      else if (g?.type === "MultiPolygon") for (const poly of g.coordinates) into.push({ rings: poly.map((r) => r.map(toGrid)) });
+    };
     // v73: áreas e rios são ARQUIVOS independentes — os dois streams rodam em
     // paralelo. (Paralelismo por sub-janelas dentro de UM arquivo foi medido
     // e descartado: cada fatia re-anda a R-tree e re-baixa lotes da fronteira,
     // saindo 2,5× MAIS LENTO que o stream único — o leitor já baixa os lotes
     // de features concorrentemente por conta própria.)
     await Promise.all([
-      fgbStream(WATER_AREAS_FGB_URL, rect, (f) => {
-        const g = f?.geometry;
-        if (g?.type === "Polygon") bodies.push({ rings: g.coordinates.map((r) => r.map(toGrid)) });
-        else if (g?.type === "MultiPolygon") for (const poly of g.coordinates) bodies.push({ rings: poly.map((r) => r.map(toGrid)) });
-      }),
+      fgbStream(WATER_AREAS_FGB_URL, rect, (f) => polyBodies(f?.geometry, bodies)),
       fgbStream(WATER_RIVERS_FGB_URL, rect, (f) => {
         const g = f?.geometry;
         if (g?.type === "LineString") rivers.push(g.coordinates.map(toGrid));
         else if (g?.type === "MultiLineString") for (const part of g.coordinates) rivers.push(part.map(toGrid));
       }),
-      // O litoral (o mar) vem do OSM — ver "The sea, for the FGB pull" acima.
-      // Falha aqui NÃO derruba o pull: a máscara entra sem o mar e avisa.
+      // O mar é um terceiro FGB — ver "The sea, for the FGB pull" acima. Falha
+      // aqui NÃO derruba o pull: a máscara entra sem o mar e avisa.
       demMayHoldSea(demRef)
-        ? fetchOsmCoastlines(demRef).then((lines) => { coastlines = lines; }, (err) => {
-          console.warn("[fgb-water] coastline", err);
-          coastError = err?.message || String(err);
+        ? fgbStream(WATER_SEA_FGB_URL, rect, (f) => polyBodies(f?.geometry, sea)).catch((err) => {
+          console.warn("[fgb-water] sea", err);
+          seaError = err?.message || String(err);
         })
         : null,
     ]);
+    // Só com o stream COMPLETO: depois de um timeout o gerador órfão ainda pode
+    // entregar feições, e meio oceano com aviso de "sem o mar" não serve.
+    if (!seaError) for (const b of sea) bodies.push(b);
     progressBar.style.width = "45%";
     if (state.dem !== demRef) {
       status.textContent = t("status.load_superseded");
       return;
     }
-    if (!bodies.length && !rivers.length && !coastlines.length) {
-      if (coastError) status.innerHTML = `${escapeHtml(t("status.water_none"))} ${noCoastHtml(coastError)}`;
+    if (!bodies.length && !rivers.length) {
+      if (seaError) status.innerHTML = `${escapeHtml(t("status.water_none"))} ${noSeaHtml(seaError)}`;
       else status.textContent = t("status.water_none");
       return;
     }
-    state.osmWaterGeom = { bodies, rivers, coastlines, coastError, label: "FGB água" };
+    state.osmWaterGeom = { bodies, rivers, coastlines: [], seaError, label: "FGB água" };
     await rebuildOsmWaterMask();
   } catch (err) {
     console.error("[fgb-water]", err);
@@ -448,7 +426,7 @@ export function applyImpassableRaster(raster, name) {
   state.impassableMeta = {
     name: name ?? state.impassableMeta?.name ?? "mask",
     width: raster.width, height: raster.height, srs: raster.epsg, cellsImpassable: cells,
-    noCoast: !!raster.noCoast, // FGB pull without its coastline — see fetchOsmCoastlines
+    noSea: !!raster.noSea, // FGB pull whose sea layer could not be read — see "The sea, for the FGB pull"
   };
   recomputeCorridors();
   updateImpassableMeta();
@@ -468,7 +446,7 @@ export function updateImpassableMeta() {
   let html = `${escapeHtml(m.name || "mask")} · ` +
     t("imp.meta.cells", (m.cellsImpassable || 0).toLocaleString(), pct);
   if (corr) html += `<br/>${t("imp.meta.corridor", corr.toLocaleString())}`;
-  if (m.noCoast) html += `<br/><span style="color:#ff9d3d">${t("imp.meta.no_coast")}</span>`;
+  if (m.noSea) html += `<br/><span style="color:#ff9d3d">${t("imp.meta.no_sea")}</span>`;
   meta.innerHTML = html;
   syncLoadedHighlights();
 }
